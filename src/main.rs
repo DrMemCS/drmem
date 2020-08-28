@@ -26,8 +26,10 @@ impl State {
 		None
 	    },
 	    State::On { off_time, on_time } => {
-		let duty = (on_time as f64) / ((stamp - off_time) as f64);
-		let in_flow = (2680.0 * (on_time as f64)) / (60.0 * (off_time as f64));
+		let on_time = ((stamp - on_time) as f64) / 1000.0;
+		let off_time = ((stamp - off_time) as f64) / 1000.0;
+		let duty = (on_time * 100.0 / off_time).round();
+		let in_flow = (2680.0 * duty / 60.0).round() / 100.0;
 
 		*self = State::Off { off_time: stamp };
 		Some((duty, in_flow))
@@ -95,7 +97,7 @@ async fn monitor() -> redis::RedisResult<()> {
 			},
 			Ok((stamp, false)) => {
 			    if let Some((duty, in_flow)) = state.to_off(stamp) {
-				info!("duty: {}%, in flow: {} gpm", duty * 100.0, in_flow);
+				info!("duty: {}%, in flow: {} gpm", duty, in_flow);
 
 				let _ : () = redis::pipe()
 				    .atomic()
