@@ -6,6 +6,9 @@ use tokio::time::delay_for;
 use tracing::{error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
+// The sump pump monitor uses a state machine to decide when to
+// calculate the duty cycle and in-flow.
+
 #[derive(Debug)]
 enum State {
     Unknown,
@@ -13,7 +16,18 @@ enum State {
     On { off_time: u64, on_time: u64 }
 }
 
+// This interface allows a State value to update itself when an event
+// occurs.
+
 impl State {
+
+    // This method is called when an off event occurs. The timestamp
+    // of the off event needs to be provided. If the state machine has
+    // enough information of the previous pump cycle, it will return
+    // the duty cycle and in-flow rate. If the state machine is still
+    // sync-ing with the state, the state will get updated, but `None`
+    // will be returned.
+
     pub fn to_off(&mut self, stamp: u64) -> Option<(f64, f64)> {
 	match *self {
 	    State::Unknown => {
@@ -21,10 +35,12 @@ impl State {
 		*self = State::Off { off_time: stamp };
 		None
 	    },
+
 	    State::Off { off_time: _ } => {
 		warn!("ignoring duplicate OFF event");
 		None
 	    },
+
 	    State::On { off_time, on_time } => {
 		let on_time = ((stamp - on_time) as f64) / 1000.0;
 		let off_time = ((stamp - off_time) as f64) / 1000.0;
@@ -37,13 +53,20 @@ impl State {
 	}
     }
 
+    // This method is called when updating the state with an on
+    // event. The timestamp of the on event needs to be provided. If
+    // the on event actually caused a state change, `true` is
+    // returned.
+
     pub fn to_on(&mut self, stamp: u64) -> bool {
 	match *self {
 	    State::Unknown => false,
+
 	    State::Off { off_time } => {
 		*self = State::On { off_time, on_time: stamp };
 		true
 	    },
+
 	    State::On { .. } => {
 		warn!("ignoring duplicate ON event");
 		false
@@ -52,6 +75,10 @@ impl State {
     }
 }
 
+// This function reads the next frame from the sump pump process. It
+// either returns `Ok()` with the two fields' values or `Err()` if a
+// socket error occurred.
+
 async fn get_reading(rx: &mut ReadHalf<'_>) -> io::Result<(u64, bool)> {
     let stamp = rx.read_u64().await?;
     let value = rx.read_u32().await?;
@@ -59,11 +86,15 @@ async fn get_reading(rx: &mut ReadHalf<'_>) -> io::Result<(u64, bool)> {
     return Ok((stamp, value != 0))
 }
 
+// Adds a value to "sump:service"'s history.
+
 async fn set_service_state(con: &mut redis::aio::Connection,
 			   value: &str) -> redis::RedisResult<()> {
-    redis::Cmd::xadd("sump.service", "*", &[("value", value)])
+    redis::Cmd::xadd("sump:service.hist", "*", &[("value", value)])
 	.query_async(con).await
 }
+
+// Returns a connection to the REDIS database.
 
 async fn mk_redis_conn() -> redis::RedisResult<redis::aio::Connection> {
     let addr = redis::ConnectionAddr::Tcp("127.0.0.1".to_string(), 6379);
@@ -72,6 +103,10 @@ async fn mk_redis_conn() -> redis::RedisResult<redis::aio::Connection> {
 
     redis::aio::connect_tokio(&info).await
 }
+
+// Returns an async function which monitors the sump pump, computes
+// interesting, related values, and writes these details to associated
+// devices' history.
 
 async fn monitor() -> redis::RedisResult<()> {
     let mut con = mk_redis_conn().await?;
@@ -89,7 +124,7 @@ async fn monitor() -> redis::RedisResult<()> {
 			Ok((stamp, true)) => {
 			    if state.to_on(stamp) {
 				let _ : () =
-				    redis::Cmd::xadd("sump.state",
+				    redis::Cmd::xadd("sump:state.hist",
 						     stamp,
 						     &[("value", "on")])
 				    .query_async(&mut con).await?;
@@ -101,14 +136,12 @@ async fn monitor() -> redis::RedisResult<()> {
 
 				let _ : () = redis::pipe()
 				    .atomic()
-				    .cmd("XADD").arg("sump.state").arg(stamp)
+				    .cmd("XADD").arg("sump:state.hist").arg(stamp)
 				    .arg("value").arg("off").ignore()
-				    .cmd("XADD").arg("sump.duty").arg(stamp)
-				    .arg("value").arg(duty)
-				    .arg("units").arg("%").ignore()
-				    .cmd("XADD").arg("sump.inflow").arg(stamp)
+				    .cmd("XADD").arg("sump:duty.hist").arg(stamp)
+				    .arg("value").arg(duty).ignore()
+				    .cmd("XADD").arg("sump:in-flow.hist").arg(stamp)
 				    .arg("value").arg(in_flow)
-				    .arg("units").arg("gpm")
 				    .query_async(&mut con).await?;
 			    }
 			},
