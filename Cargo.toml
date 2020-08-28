@@ -1,0 +1,24 @@
+[package]
+name = "engine"
+version = "0.1.0"
+authors = ["Rich Neswold <rich.neswold@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+#palette = "0.5"
+#hueclient = "0.3"
+redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
+tracing-subscriber = "^0.1"
+tracing-futures = "^0.2"
+tracing = { version = "^0.1", features = ["log", "max_level_debug", "release_max_level_info"] }
+tokio = { version = "0.2", features = ["rt-threaded", "macros", "time"] }
+log = { version = "0.4", features = ["max_level_debug", "release_max_level_info"]}
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = true
+debug-assertions = false
