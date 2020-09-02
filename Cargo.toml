@@ -8,8 +8,8 @@ edition = "2018"
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-#palette = "0.5"
-#hueclient = "0.3"
+palette = "0.5"
+huebridge = "0.3.0"
 redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
 tracing-subscriber = "^0.1"
 tracing-futures = "^0.2"

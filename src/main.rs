@@ -3,8 +3,13 @@ use std::time::Duration;
 use tokio::net::{TcpStream, tcp::ReadHalf};
 use tokio::io::{self, AsyncReadExt};
 use tokio::time::delay_for;
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use tracing_subscriber::FmtSubscriber;
+use palette::{Srgb, Yxy};
+use palette::named;
+
+mod hue;
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -98,19 +103,58 @@ async fn set_service_state(con: &mut redis::aio::Connection,
 
 async fn mk_redis_conn() -> redis::RedisResult<redis::aio::Connection> {
     let addr = redis::ConnectionAddr::Tcp("127.0.0.1".to_string(), 6379);
-    let info = redis::ConnectionInfo { addr: Box::new(addr), db: 0, username: None,
+    let info = redis::ConnectionInfo { addr: Box::new(addr),
+				       db: 0,
+				       username: None,
 				       passwd: None };
 
     redis::aio::connect_tokio(&info).await
+}
+
+async fn lamp_alert(tx: &mut mpsc::Sender<hue::Program>) -> () {
+    let b : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
+    let r : Yxy = Srgb::<f32>::from_format(named::RED).into_linear().into();
+    let prog =
+	vec![hue::HueCommands::On { light: 5, bri: 255, color: Some(b) },
+	     hue::HueCommands::On { light: 8, bri: 255, color: Some(b) },
+	     hue::HueCommands::Pause { len: Duration::from_millis(500) },
+	     hue::HueCommands::On { light: 5, bri: 255, color: Some(r) },
+	     hue::HueCommands::On { light: 8, bri: 255, color: Some(r) },
+	     hue::HueCommands::Pause { len: Duration::from_millis(5_000) },
+	     hue::HueCommands::Off { light: 5 },
+	     hue::HueCommands::Off { light: 8 }];
+
+    tx.send(prog).await;
+}
+
+async fn lamp_off(tx: &mut mpsc::Sender<hue::Program>, duty: f64) -> () {
+    let prog = if duty < 10.0 {
+	vec![hue::HueCommands::Off { light: 5 },
+	     hue::HueCommands::Off { light: 8 }]
+    } else {
+	let cc = if duty < 30.0 { named::YELLOW } else { named::RED };
+	let c : Yxy = Srgb::<f32>::from_format(cc).into_linear().into();
+
+	vec![hue::HueCommands::On { light: 5, bri: 255, color: Some(c) },
+	     hue::HueCommands::On { light: 8, bri: 255, color: Some(c) },
+	     hue::HueCommands::Pause { len: Duration::from_millis(5_000) },
+	     hue::HueCommands::Off { light: 5 },
+	     hue::HueCommands::Off { light: 8 }]
+    };
+
+    tx.send(prog).await;
 }
 
 // Returns an async function which monitors the sump pump, computes
 // interesting, related values, and writes these details to associated
 // devices' history.
 
-async fn monitor() -> redis::RedisResult<()> {
+async fn monitor(mut tx: mpsc::Sender<hue::Program>) -> redis::RedisResult<()> {
     let mut con = mk_redis_conn().await?;
     let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
+
+    let c1 : Yxy = Srgb::<f32>::from_format(named::BLUE)
+	.into_linear().into();
 
     loop {
 	let mut state = State::Unknown;
@@ -118,11 +162,20 @@ async fn monitor() -> redis::RedisResult<()> {
 	match TcpStream::connect(addr).await {
 	    Ok(mut s) => {
 		let (mut rx, _) = s.split();
+
 		set_service_state(&mut con, "up").await?;
 		loop {
 		    match get_reading(&mut rx).await {
 			Ok((stamp, true)) => {
 			    if state.to_on(stamp) {
+				let sump_on =
+				    vec![hue::HueCommands::On { light: 5,
+								bri: 255,
+								color: Some(c1) },
+					 hue::HueCommands::On { light: 8,
+								bri: 255,
+								color: Some(c1) }];
+				tx.send(sump_on).await;
 				let _ : () =
 				    redis::Cmd::xadd("sump:state.hist",
 						     stamp,
@@ -133,6 +186,8 @@ async fn monitor() -> redis::RedisResult<()> {
 			Ok((stamp, false)) => {
 			    if let Some((duty, in_flow)) = state.to_off(stamp) {
 				info!("duty: {}%, in flow: {} gpm", duty, in_flow);
+
+				lamp_off(&mut tx, duty).await;
 
 				let _ : () = redis::pipe()
 				    .atomic()
@@ -148,6 +203,7 @@ async fn monitor() -> redis::RedisResult<()> {
 			Err(e) => {
 			    error!("couldn't read sump state -- {:?}", e);
 			    set_service_state(&mut con, "crash").await?;
+			    lamp_alert(&mut tx).await;
 			    break;
 			}
 		    }
@@ -156,9 +212,12 @@ async fn monitor() -> redis::RedisResult<()> {
 	    },
 	    Err(e) => {
 		set_service_state(&mut con, "down").await?;
+		lamp_alert(&mut tx).await;
 		error!("couldn't connect to pump process -- {:?}", e)
 	    }
 	}
+
+	// Delay for 10 seconds before retrying.
 
 	delay_for(Duration::from_millis(10_000)).await;
     }
@@ -169,5 +228,29 @@ async fn main() -> redis::RedisResult<()> {
     tracing::subscriber::set_global_default(FmtSubscriber::new())
         .expect("Unable to set global default subscriber");
 
-    monitor().await
+    if let Ok((mut tx, _join)) = hue::manager() {
+	let c1 : Yxy = Srgb::<f32>::from_format(named::RED)
+	    .into_linear().into();
+	let c2 : Yxy = Srgb::<f32>::from_format(named::WHITE)
+	    .into_linear().into();
+	let c3 : Yxy = Srgb::<f32>::from_format(named::BLUE)
+	    .into_linear().into();
+
+	let prog =
+	    vec![hue::HueCommands::On{ light: 5, bri: 255, color: Some(c1) },
+		 hue::HueCommands::On{ light: 8, bri: 255, color: Some(c1) },
+		 hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
+		 hue::HueCommands::On{ light: 5, bri: 255, color: Some(c2) },
+		 hue::HueCommands::On{ light: 8, bri: 255, color: Some(c2) },
+		 hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
+		 hue::HueCommands::On{ light: 5, bri: 255, color: Some(c3) },
+		 hue::HueCommands::On{ light: 8, bri: 255, color: Some(c3) },
+		 hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
+		 hue::HueCommands::Off { light: 5 },
+		 hue::HueCommands::Off { light: 8 }];
+
+	tx.send(prog).await;
+	monitor(tx).await;
+    }
+    Ok(())
 }
