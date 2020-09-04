@@ -1,4 +1,3 @@
-use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::Duration;
 use tokio::net::{TcpStream, tcp::ReadHalf};
 use tokio::io::{self, AsyncReadExt};
@@ -150,6 +149,8 @@ async fn lamp_off(tx: &mut mpsc::Sender<hue::Program>, duty: f64) -> () {
 // devices' history.
 
 async fn monitor(mut tx: mpsc::Sender<hue::Program>) -> redis::RedisResult<()> {
+    use std::net::{Ipv4Addr, SocketAddrV4};
+
     let mut con = mk_redis_conn().await?;
     let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
 
