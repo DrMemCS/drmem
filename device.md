@@ -23,7 +23,9 @@ section.)
 
 ## Tools
 
-A command line tool should be developed to interact with the device database. It should allow devices to be added, modified and deleted. It could also scan the database to find problems (i.e. a database "linter".)
+A command line tool should be developed to interact with the device
+database. It should allow devices to be added, modified and deleted. It
+could also scan the database to find problems (i.e. a database "linter".)
 
 ## Implementation Details
 
@@ -42,3 +44,21 @@ value to be pulled from the `.hist` key.
 
 All other field names will get routed to a key with `.info` appended. This
 key returns a hash map of which the field names for the device are keys.
+
+## Future Ideas
+
+How to handle settings? Pub/sub? A device can be read-only or read-write.
+Reading the `.value` field pulls the latest value from the stream. For a
+read-write device, the driver will subscribe to the `NAME.value` channel.
+Whenever it sees a post, it sends it to the hardware and then writes the
+setting to the stream.
+
+Two fields, `.hi_alarm` and `.lo_alarm`, can be used to determine when a
+device goes into alarm. I'll have to figure out how to efficiently
+determine when a device goes into alarm.
+
+Create a "Rule Processor" which manages and executes "rules". A rule is
+where a writable device is the target of an expression of readable devices.
+The rule manager will monitor the channels of readable devices and, when a
+value changes, the expression is re-evaluated and the result written to the
+target device.
