@@ -3,12 +3,79 @@ use tokio::net::{TcpStream, tcp::ReadHalf};
 use tokio::io::{self, AsyncReadExt};
 use tokio::time::delay_for;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
-use tracing_subscriber::FmtSubscriber;
+use tracing::{Level, debug, error, info, warn};
+use tracing_subscriber;
 use palette::{Srgb, Yxy};
 use palette::named;
 
 mod hue;
+
+// Holds the configuration for the running system. Its global method,
+// determine, reads the config file and parses the command line to
+// determine the final configuration.
+
+struct Config {
+    redis_addr: String,
+    redis_port: u16
+}
+
+impl Config {
+    pub fn determine() -> Option<Config> {
+	use clap::{Arg, App};
+
+	// Define the command line arguments.
+
+	let matches = App::new("DrMemory Mini Control System")
+            .version("0.1")
+            .author("Rich Neswold <rich.neswold@gmail.com>")
+            .about("A small, yet capable, control system.")
+            .arg(Arg::with_name("config")
+		 .short("c")
+		 .long("config")
+		 .value_name("FILE")
+		 .help("Specifies the configuration file")
+		 .takes_value(true))
+            .arg(Arg::with_name("verbose")
+		 .short("v")
+		 .long("verbose")
+		 .multiple(true)
+		 .help("Sets verbosity of log; can be used more than once")
+		 .takes_value(false))
+            .arg(Arg::with_name("print_cfg")
+		 .long("print-config")
+		 .help("Displays the configuration and exits")
+		 .takes_value(false))
+            .get_matches();
+
+	// Return the number of '-v' options to determine the log
+	// level.
+
+	let level = match matches.occurrences_of("verbose") {
+            0 => Level::WARN,
+            1 => Level::INFO,
+            2 => Level::DEBUG,
+	    _ => Level::TRACE
+	};
+
+	// Initialize the log system. The max log level is determined
+	// by the user (either through the config file or the command
+	// line.)
+
+	let subscriber = tracing_subscriber::fmt()
+	    .with_max_level(level.clone())
+	    .finish();
+
+	tracing::subscriber::set_global_default(subscriber)
+	    .expect("Unable to set global default subscriber");
+
+	info!("logging level set to {}", level);
+
+	// Return the configuration.
+
+	Some(Config { redis_addr: "127.0.0.1".to_string(),
+		      redis_port: 6379 })
+    }
+}
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -98,15 +165,19 @@ async fn set_service_state(con: &mut redis::aio::Connection,
 	.query_async(con).await
 }
 
-// Returns a connection to the REDIS database.
+// Returns a connection to the REDIS database. The connection
+// infomation is obatined through the current configuration structure.
 
-async fn mk_redis_conn() -> redis::RedisResult<redis::aio::Connection> {
-    let addr = redis::ConnectionAddr::Tcp("127.0.0.1".to_string(), 6379);
+async fn mk_redis_conn(cfg: &Config)
+		       -> redis::RedisResult<redis::aio::Connection> {
+    let addr = redis::ConnectionAddr::Tcp(cfg.redis_addr.clone(),
+					  cfg.redis_port);
     let info = redis::ConnectionInfo { addr: Box::new(addr),
 				       db: 0,
 				       username: None,
 				       passwd: None };
 
+    debug!("connecting to redis at {}:{}", cfg.redis_addr, cfg.redis_port);
     redis::aio::connect_tokio(&info).await
 }
 
@@ -148,10 +219,11 @@ async fn lamp_off(tx: &mut mpsc::Sender<hue::Program>, duty: f64) -> () {
 // interesting, related values, and writes these details to associated
 // devices' history.
 
-async fn monitor(mut tx: mpsc::Sender<hue::Program>) -> redis::RedisResult<()> {
+async fn monitor(cfg: &Config,
+		 mut tx: mpsc::Sender<hue::Program>) -> redis::RedisResult<()> {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
-    let mut con = mk_redis_conn().await?;
+    let mut con = mk_redis_conn(cfg).await?;
     let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
 
     let c1 : Yxy = Srgb::<f32>::from_format(named::BLUE)
@@ -226,32 +298,31 @@ async fn monitor(mut tx: mpsc::Sender<hue::Program>) -> redis::RedisResult<()> {
 
 #[tokio::main]
 async fn main() -> redis::RedisResult<()> {
-    tracing::subscriber::set_global_default(FmtSubscriber::new())
-        .expect("Unable to set global default subscriber");
+    if let Some(cfg) = Config::determine() {
+	if let Ok((mut tx, _join)) = hue::manager() {
+	    let c1 : Yxy = Srgb::<f32>::from_format(named::RED)
+		.into_linear().into();
+	    let c2 : Yxy = Srgb::<f32>::from_format(named::WHITE)
+		.into_linear().into();
+	    let c3 : Yxy = Srgb::<f32>::from_format(named::BLUE)
+		.into_linear().into();
 
-    if let Ok((mut tx, _join)) = hue::manager() {
-	let c1 : Yxy = Srgb::<f32>::from_format(named::RED)
-	    .into_linear().into();
-	let c2 : Yxy = Srgb::<f32>::from_format(named::WHITE)
-	    .into_linear().into();
-	let c3 : Yxy = Srgb::<f32>::from_format(named::BLUE)
-	    .into_linear().into();
+	    let prog =
+		vec![hue::HueCommands::On{ light: 5, bri: 255, color: Some(c1) },
+		     hue::HueCommands::On{ light: 8, bri: 255, color: Some(c1) },
+		     hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
+		     hue::HueCommands::On{ light: 5, bri: 255, color: Some(c2) },
+		     hue::HueCommands::On{ light: 8, bri: 255, color: Some(c2) },
+		     hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
+		     hue::HueCommands::On{ light: 5, bri: 255, color: Some(c3) },
+		     hue::HueCommands::On{ light: 8, bri: 255, color: Some(c3) },
+		     hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
+		     hue::HueCommands::Off { light: 5 },
+		     hue::HueCommands::Off { light: 8 }];
 
-	let prog =
-	    vec![hue::HueCommands::On{ light: 5, bri: 255, color: Some(c1) },
-		 hue::HueCommands::On{ light: 8, bri: 255, color: Some(c1) },
-		 hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
-		 hue::HueCommands::On{ light: 5, bri: 255, color: Some(c2) },
-		 hue::HueCommands::On{ light: 8, bri: 255, color: Some(c2) },
-		 hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
-		 hue::HueCommands::On{ light: 5, bri: 255, color: Some(c3) },
-		 hue::HueCommands::On{ light: 8, bri: 255, color: Some(c3) },
-		 hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
-		 hue::HueCommands::Off { light: 5 },
-		 hue::HueCommands::Off { light: 8 }];
-
-	tx.send(prog).await;
-	monitor(tx).await;
+	    tx.send(prog).await;
+	    monitor(&cfg, tx).await;
+	}
     }
     Ok(())
 }
