@@ -46,13 +46,49 @@ impl State {
 	    },
 
 	    State::On { off_time, on_time } => {
-		let on_time = ((stamp - on_time) as f64) / 1000.0;
-		let off_time = ((stamp - off_time) as f64) / 1000.0;
-		let duty = (on_time * 100.0 / off_time).round();
-		let in_flow = (2680.0 * duty / 60.0).round() / 100.0;
+		// The time stamp of the OFF time should come after
+		// the ON time. If it isn't, the sump pump task has a
+		// problem (i.e. system time was adjusted.) We can't
+		// give a decent computation, so just go into the DOWN
+		// state.
 
-		*self = State::Off { off_time: stamp };
-		Some((duty, in_flow))
+		if on_time >= stamp {
+		    warn!("timestamp for OFF event is {} ms ahead of ON event",
+			  on_time - stamp);
+		    *self = State::Off { off_time: stamp };
+		    return None
+		}
+
+		let on_time = (stamp - on_time) as f64;
+
+		// After the first storm, there was one entry that
+		// glitched. The state of the motor registered "ON"
+		// for 50 ms, turned off, turned on 400ms later, and
+		// then stayed on for the rest of the normal,
+		// six-second cycle.
+		//
+		// I'm going under the assumption that the pump wasn't
+		// drawing enough current at the start of the cycle so
+		// the current switch's detection "faded" in and out.
+		// This could be due to not setting the sensitivity of
+		// the switch high enough or, possibly, the pump
+		// failing (once in a great while, we hear the pump go
+		// through a strange-sounding cycle.)
+		//
+		// If the ON cycle is less than a half second, we'll
+		// ignore it and stay in the ON state.
+
+		if on_time > 500.0 {
+		    let off_time = (stamp - off_time) as f64;
+		    let duty = on_time * 1000.0 / off_time;
+		    let in_flow = (2680.0 * duty / 60.0).round() / 1000.0;
+
+		    *self = State::Off { off_time: stamp };
+		    Some((duty.round() / 10.0, in_flow))
+		} else {
+		    warn!("ignoring short ON time -- {:.3} s", on_time);
+		    None
+		}
 	    }
 	}
     }
@@ -67,8 +103,18 @@ impl State {
 	    State::Unknown => false,
 
 	    State::Off { off_time } => {
-		*self = State::On { off_time, on_time: stamp };
-		true
+		// Make sure the ON time occurred *after* the OFF
+		// time. This is necessary for the computations to
+		// yield valid results.
+
+		if stamp > off_time {
+		    *self = State::On { off_time, on_time: stamp };
+		    true
+		} else {
+		    warn!("timestamp for ON event is {} ms ahead of OFF event",
+			  off_time - stamp);
+		    false
+		}
 	    },
 
 	    State::On { .. } => {
