@@ -185,12 +185,12 @@ async fn monitor(cfg: &config::Config,
 							   bri: 255,
 							   color: Some(c1) }];
 				tx.send(sump_on).await;
-				let _ : () =
-				    redis::Cmd::xadd("sump:state.hist",
-						     stamp,
-						     &[("value", "on")])
-				    .query_async(&mut con).await?;
 			    }
+			    let _ : () =
+				redis::Cmd::xadd("sump:state.hist",
+						 stamp,
+						 &[("value", "on")])
+				.query_async(&mut con).await?;
 			},
 			Ok((stamp, false)) => {
 			    if let Some((duty, in_flow)) = state.to_off(stamp) {
@@ -206,6 +206,12 @@ async fn monitor(cfg: &config::Config,
 				    .arg("value").arg(duty).ignore()
 				    .cmd("XADD").arg("sump:in-flow.hist").arg(stamp)
 				    .arg("value").arg(in_flow)
+				    .query_async(&mut con).await?;
+			    } else {
+				let _ : () =
+				    redis::Cmd::xadd("sump:state.hist",
+						     stamp,
+						     &[("value", "off")])
 				    .query_async(&mut con).await?;
 			    }
 			},
