@@ -40,7 +40,7 @@ impl State {
 		None
 	    },
 
-	    State::Off { off_time: _ } => {
+	    State::Off { .. } => {
 		warn!("ignoring duplicate OFF event");
 		None
 	    },
