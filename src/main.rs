@@ -175,13 +175,15 @@ async fn monitor(cfg: &config::Config,
 		    match get_reading(&mut rx).await {
 			Ok((stamp, true)) => {
 			    if state.to_on(stamp) {
+				use hue::HueCommands;
+
 				let sump_on =
-				    vec![hue::HueCommands::On { light: 5,
-								bri: 255,
-								color: Some(c1) },
-					 hue::HueCommands::On { light: 8,
-								bri: 255,
-								color: Some(c1) }];
+				    vec![HueCommands::On { light: 5,
+							   bri: 255,
+							   color: Some(c1) },
+					 HueCommands::On { light: 8,
+							   bri: 255,
+							   color: Some(c1) }];
 				tx.send(sump_on).await;
 				let _ : () =
 				    redis::Cmd::xadd("sump:state.hist",
@@ -234,6 +236,8 @@ async fn monitor(cfg: &config::Config,
 async fn main() -> redis::RedisResult<()> {
     if let Some(cfg) = config::Config::determine() {
 	if let Ok((mut tx, _join)) = hue::manager() {
+	    use hue::HueCommands;
+
 	    let c1 : Yxy = Srgb::<f32>::from_format(named::RED)
 		.into_linear().into();
 	    let c2 : Yxy = Srgb::<f32>::from_format(named::WHITE)
@@ -242,17 +246,17 @@ async fn main() -> redis::RedisResult<()> {
 		.into_linear().into();
 
 	    let prog =
-		vec![hue::HueCommands::On{ light: 5, bri: 255, color: Some(c1) },
-		     hue::HueCommands::On{ light: 8, bri: 255, color: Some(c1) },
-		     hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
-		     hue::HueCommands::On{ light: 5, bri: 255, color: Some(c2) },
-		     hue::HueCommands::On{ light: 8, bri: 255, color: Some(c2) },
-		     hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
-		     hue::HueCommands::On{ light: 5, bri: 255, color: Some(c3) },
-		     hue::HueCommands::On{ light: 8, bri: 255, color: Some(c3) },
-		     hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
-		     hue::HueCommands::Off { light: 5 },
-		     hue::HueCommands::Off { light: 8 }];
+		vec![HueCommands::On{ light: 5, bri: 255, color: Some(c1) },
+		     HueCommands::On{ light: 8, bri: 255, color: Some(c1) },
+		     HueCommands::Pause { len: Duration::from_millis(1_000) },
+		     HueCommands::On{ light: 5, bri: 255, color: Some(c2) },
+		     HueCommands::On{ light: 8, bri: 255, color: Some(c2) },
+		     HueCommands::Pause { len: Duration::from_millis(1_000) },
+		     HueCommands::On{ light: 5, bri: 255, color: Some(c3) },
+		     HueCommands::On{ light: 8, bri: 255, color: Some(c3) },
+		     HueCommands::Pause { len: Duration::from_millis(1_000) },
+		     HueCommands::Off { light: 5 },
+		     HueCommands::Off { light: 8 }];
 
 	    tx.send(prog).await;
 	    monitor(&cfg, tx).await;
