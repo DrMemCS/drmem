@@ -172,7 +172,9 @@ async fn lamp_alert(tx: &mut mpsc::Sender<hue::Program>) -> () {
 	     hue::HueCommands::Off { light: 5 },
 	     hue::HueCommands::Off { light: 8 }];
 
-    tx.send(prog).await;
+    if let Err(e) = tx.send(prog).await {
+	warn!("sump alert returned error: {:?}", e)
+    }
 }
 
 async fn lamp_off(tx: &mut mpsc::Sender<hue::Program>, duty: f64) -> () {
@@ -190,7 +192,9 @@ async fn lamp_off(tx: &mut mpsc::Sender<hue::Program>, duty: f64) -> () {
 	     hue::HueCommands::Off { light: 8 }]
     };
 
-    tx.send(prog).await;
+    if let Err(e) = tx.send(prog).await {
+	warn!("sump off returned error: {:?}", e)
+    }
 }
 
 // Returns an async function which monitors the sump pump, computes
@@ -228,7 +232,9 @@ async fn monitor(cfg: &config::Config,
 					 HueCommands::On { light: 8,
 							   bri: 255,
 							   color: Some(c1) }];
-				tx.send(sump_on).await;
+				if let Err(e) = tx.send(sump_on).await {
+				    warn!("sump ON indicator returned: {:?}", e)
+				}
 			    }
 			    let _ : () =
 				redis::Cmd::xadd("sump:state.hist",
@@ -320,8 +326,14 @@ async fn main() -> redis::RedisResult<()> {
 		     HueCommands::Off { light: 5 },
 		     HueCommands::Off { light: 8 }];
 
-	    tx.send(prog).await;
-	    monitor(&cfg, tx).await;
+	    if let Err(e) = tx.send(prog).await {
+		warn!("tx returned {:?}", e);
+	    }
+	    if let Err(e) = monitor(&cfg, tx).await {
+		warn!("monitor returned: {:?}", e);
+	    }
+	} else {
+	    warn!("no hue manager");
 	}
     }
     Ok(())

@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use tokio::time::delay_for;
 use palette::Yxy;
 
+#[derive(Debug)]
 pub enum HueCommands {
     Off { light: usize },
     On { light: usize, bri: u8, color: Option<Yxy> },
