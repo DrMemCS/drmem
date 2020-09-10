@@ -255,12 +255,6 @@ async fn monitor(cfg: &config::Config,
 				    .cmd("XADD").arg("sump:in-flow.hist").arg(stamp)
 				    .arg("value").arg(in_flow)
 				    .query_async(&mut con).await?;
-			    } else {
-				let _ : () =
-				    redis::Cmd::xadd("sump:state.hist",
-						     stamp,
-						     &[("value", "off")])
-				    .query_async(&mut con).await?;
 			    }
 			},
 			Err(e) => {
