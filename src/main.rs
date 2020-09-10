@@ -207,9 +207,7 @@ async fn monitor(cfg: &config::Config,
 
     let mut con = mk_redis_conn(cfg).await?;
     let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
-
-    let c1 : Yxy = Srgb::<f32>::from_format(named::BLUE)
-	.into_linear().into();
+    let c1 : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
 
     loop {
 	let mut state = State::Unknown;
