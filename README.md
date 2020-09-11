@@ -6,7 +6,7 @@ system -- a complete, easy-to-use control system for the home.
 ## Preparation
 
 The core service used in this control system is
-[Redis]:https://redis.io/ which is light-weight and fast and has the
+[Redis](https://redis.io/) which is light-weight and fast and has the
 data management features needed for a control system: device
 information, time-series storage of device readings, and routing
 setting requests.
@@ -21,7 +21,7 @@ a NAS over NFS.
 ## Building
 
 `drmem` is written in Rust using the excellent
-[`tokio`]:https://tokio.rs/ async scheduler module. To build it,
+[`tokio`](https://tokio.rs/) async scheduler module. To build it,
 you'll need a Rust installation.
 
 *NOTE: This project is in a very early state. Eventually I want users
