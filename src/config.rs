@@ -1,42 +1,65 @@
 use tracing::Level;
+use serde_derive::{Serialize,Deserialize};
 
-pub struct Config(toml::Value);
+#[derive(Serialize,Deserialize)]
+pub struct Config {
+    log_level: String,
+    pub redis: Redis,
+    pub hue_bridge: HueBridge
+}
 
 impl Config {
-    pub fn redis_addr(&self) -> String {
-	if let Some(tbl) = self.0.get("redis") {
-	    if let Some(val) = tbl.get("addr") {
-		if let toml::Value::String(addr) = val {
-		    return addr.clone();
-		}
-	    }
-	}
-	"127.0.0.1".to_string()
-    }
-
-    pub fn redis_port(&self) -> u16 {
-	if let Some(tbl) = self.0.get("redis") {
-	    if let Some(val) = tbl.get("port") {
-		if let toml::Value::Integer(port) = val {
-		    return *port as u16;
-		}
-	    }
-	}
-	6379u16
-    }
-
-    pub fn log_level(&self) -> Level {
-	match self.0["log_level"].as_str() {
-	    Some("trace") => Level::TRACE,
-	    Some("debug") => Level::DEBUG,
-	    Some("info") => Level::INFO,
-	    Some("error") => Level::ERROR,
+    pub fn get_log_level(&self) -> Level {
+	match self.log_level.as_str() {
+	    "info" => Level::INFO,
+	    "debug" => Level::DEBUG,
+	    "trace" => Level::TRACE,
 	    _ => Level::WARN
 	}
     }
 }
 
-pub fn from_cmdline() -> (bool, Config) {
+impl Default for Config {
+    fn default() -> Self {
+	Config {
+	    log_level: "warn".to_string(),
+	    redis: Redis::default(),
+	    hue_bridge: HueBridge::default()
+	}
+    }
+}
+
+#[derive(Serialize,Deserialize)]
+pub struct Redis {
+    pub addr: String,
+    pub port: u16
+}
+
+impl Default for Redis {
+    fn default() -> Self {
+	Redis {
+	    addr: "127.0.0.1".to_string(),
+	    port: 6379
+	}
+    }
+}
+
+#[derive(Serialize,Deserialize)]
+pub struct HueBridge {
+    pub addr: String,
+    pub key: Option<String>
+}
+
+impl Default for HueBridge {
+    fn default() -> Self {
+	HueBridge {
+	    addr: "10.0.0.1".to_string(),
+	    key: None
+	}
+    }
+}
+
+fn from_cmdline(mut cfg: Config) -> (bool, Config) {
     use clap::{Arg, App};
 
     // Define the command line arguments.
@@ -77,55 +100,78 @@ pub fn from_cmdline() -> (bool, Config) {
 
     // Generate the configuration based on the command line arguments.
 
-    use toml::Value;
-
-    let log_level_key = "log_level";
-    let addr_key = "addr";
-    let redis_key = "redis";
-    let port_key = "port";
-
-    let mut cfg = toml::toml! {
-	log_level = "warn"
-
-	[hue_bridge]
-	key = ""
-	addr = ""
-
-	[redis]
-	addr = "127.0.0.1"
-	port = 6379
-    };
-
     if let Some(addr) = matches.value_of("db_addr") {
-	cfg[redis_key][addr_key] = Value::String(addr.to_string());
+	cfg.redis.addr = addr.to_string()
     }
 
     if let Some(port) = matches.value_of("db_port") {
-	cfg[redis_key][port_key] =
-	    Value::Integer(port.parse::<u16>().expect("bad port value") as i64);
+	if let Ok(port) = port.parse::<u16>() {
+	    cfg.redis.port = port
+	}
     }
 
     // The number of '-v' options determines the log level.
 
-    cfg[log_level_key] = match matches.occurrences_of("verbose") {
-        0 => Value::String("warn".to_string()),
-        1 => Value::String("info".to_string()),
-        2 => Value::String("debug".to_string()),
-	_ => Value::String("trace".to_string())
+    match matches.occurrences_of("verbose") {
+        0 => (),
+        1 => cfg.log_level = "info".to_string(),
+        2 => cfg.log_level = "debug".to_string(),
+	_ => cfg.log_level = "trace".to_string()
     };
 
     // Return the config built from the command line and a flag
     // indicating the user wants the final configuration displayed.
 
-    (matches.is_present("print_cfg"), Config(cfg))
+    (matches.is_present("print_cfg"), cfg)
 }
 
-pub fn get() -> Option<Config> {
-    let (print_cfg, cfg) = from_cmdline();
+async fn from_file(path: &str) -> Option<Config> {
+    use tokio::fs;
+
+    if let Ok(contents) = fs::read(path).await {
+	let contents = String::from_utf8_lossy(&contents);
+
+	if let Ok(cfg) = toml::from_str(&contents) {
+	    return Some(cfg)
+	} else {
+	    println!("error parsing {}", path);
+	}
+    }
+    None
+}
+
+async fn find_cfg() -> Config {
+    if let Some(cfg) = from_file("./drmem.conf").await {
+	cfg
+    } else {
+	use std::env;
+
+	if let Ok(home) = env::var("HOME") {
+	    if let Some(cfg) = from_file(&(home + "/.drmem.conf")).await {
+		return cfg;
+	    }
+	}
+	if let Some(cfg) = from_file("/usr/local/etc/drmem.conf").await {
+	    cfg
+	} else if let Some(cfg) = from_file("/usr/pkg/etc/drmem.conf").await {
+	    cfg
+	} else if let Some(cfg) = from_file("/etc/drmem.conf").await {
+	    cfg
+	} else {
+	    Config::default()
+	}
+    }
+}
+
+pub async fn get() -> Option<Config> {
+    let cfg = find_cfg().await;
+    let (print_cfg, cfg) = from_cmdline(cfg);
 
     if print_cfg {
-	println!("redis address: {}:{}", cfg.redis_addr(), cfg.redis_port());
-	println!("Log level: {}", cfg.log_level());
+	match toml::to_string(&cfg) {
+	    Ok(s) => println!("Combined configuration:\n\n{}", s),
+	    Err(e) => println!("Configuration error: {:?}", e)
+	}
 	None
     } else {
 	Some(cfg)

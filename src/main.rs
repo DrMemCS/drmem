@@ -149,13 +149,14 @@ async fn set_service_state(con: &mut redis::aio::Connection,
 
 async fn mk_redis_conn(cfg: &config::Config)
 		       -> redis::RedisResult<redis::aio::Connection> {
-    let addr = redis::ConnectionAddr::Tcp(cfg.redis_addr(), cfg.redis_port());
+    let addr = redis::ConnectionAddr::Tcp(cfg.redis.addr.clone(),
+					  cfg.redis.port);
     let info = redis::ConnectionInfo { addr: Box::new(addr),
 				       db: 0,
 				       username: None,
 				       passwd: None };
 
-    debug!("connecting to redis at {}:{}", cfg.redis_addr(), cfg.redis_port());
+    debug!("connecting to redis at {}:{}", &cfg.redis.addr, &cfg.redis.port);
     redis::aio::connect_tokio(&info).await
 }
 
@@ -282,20 +283,20 @@ async fn monitor(cfg: &config::Config,
 
 #[tokio::main]
 async fn main() -> redis::RedisResult<()> {
-    if let Some(cfg) = config::get() {
+    if let Some(cfg) = config::get().await {
 
 	// Initialize the log system. The max log level is determined
 	// by the user (either through the config file or the command
 	// line.)
 
 	let subscriber = tracing_subscriber::fmt()
-	    .with_max_level(cfg.log_level())
+	    .with_max_level(cfg.get_log_level())
 	    .finish();
 
 	tracing::subscriber::set_global_default(subscriber)
 	    .expect("Unable to set global default subscriber");
 
-	if let Ok((mut tx, _join)) = hue::manager() {
+	if let Ok((mut tx, _join)) = hue::manager(&cfg) {
 	    use hue::HueCommands;
 
 	    let c1 : Yxy = Srgb::<f32>::from_format(named::RED)

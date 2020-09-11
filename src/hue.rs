@@ -1,10 +1,12 @@
 use std::time::Duration;
-use huebridge::{HueResult, bridge::Bridge, commandlight::CommandLight};
+use huebridge::{HueResult, HueError, HueErrorKind, bridge::Bridge, commandlight::CommandLight};
 use tracing::warn;
 use tokio::task::{self, JoinHandle};
 use tokio::sync::mpsc;
 use tokio::time::delay_for;
 use palette::Yxy;
+
+use crate::config;
 
 #[derive(Debug)]
 pub enum HueCommands {
@@ -48,13 +50,12 @@ async fn run(mut bridge: Bridge, program: Program) -> Bridge {
     bridge
 }
 
-async fn controller(mut rx: mpsc::Receiver<Program>) -> () {
+async fn controller(addr: String, key: String,
+		    mut rx: mpsc::Receiver<Program>) -> () {
     let mut bridge = task::spawn_blocking(|| {
-	let username = "????".to_string();
-
 	Bridge::default()
-	    .with_address("????".to_string())
-	    .with_username(username)
+	    .with_address(addr)
+	    .with_username(key)
     }).await.unwrap();
 
     while let Some(prog) = rx.recv().await {
@@ -62,8 +63,14 @@ async fn controller(mut rx: mpsc::Receiver<Program>) -> () {
     }
 }
 
-pub fn manager() -> HueResult<(mpsc::Sender<Program>, JoinHandle<()>)> {
-    let (tx, rx) = mpsc::channel(20);
+pub fn manager(cfg: &config::Config)
+	       -> HueResult<(mpsc::Sender<Program>, JoinHandle<()>)> {
+    if let Some(key) = &cfg.hue_bridge.key {
+	let (tx, rx) = mpsc::channel(20);
 
-    Ok((tx, task::spawn(controller(rx))))
+	Ok((tx, task::spawn(controller(cfg.hue_bridge.addr.clone(),
+				       key.to_string(), rx))))
+    } else {
+	Err(HueError::from_kind(HueErrorKind::Msg("no key defined".to_string())))
+    }
 }

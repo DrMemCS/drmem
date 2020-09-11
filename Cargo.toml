@@ -11,12 +11,14 @@ edition = "2018"
 clap = "^2"
 toml = "0.5.6"
 palette = "0.5"
+serde = "1.0.115"
+serde_derive = "1.0.115"
 huebridge = "0.3.0"
 redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["log"] }
-tokio = { version = "0.2", features = ["rt-threaded", "macros", "time"] }
+tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
 log = { version = "0.4", features = []}
 
 [profile.release]
