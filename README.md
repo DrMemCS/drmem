@@ -6,10 +6,15 @@ system -- a complete, easy-to-use control system for the home.
 ## Preparation
 
 The core service used in this control system is
-[Redis](https://redis.io/) which is light-weight and fast and has the
+[Redis](https://redis.io/) which is light-weight, *fast* and has the
 data management features needed for a control system: device
 information, time-series storage of device readings, and routing
 setting requests.
+
+`redis` servers support multiple databases. The default database is
+number 0 and is what `drmem` uses. For testing, other database numbers
+can be used which isolates possibly buggy code from the "operational"
+database.
 
 Before setting up `drmem`, you'll need to have a running instance of
 `redis`. I set up my instance on my RaspberryPi to only listen on
@@ -24,9 +29,9 @@ a NAS over NFS.
 [`tokio`](https://tokio.rs/) async scheduler module. To build it,
 you'll need a Rust installation.
 
-*NOTE: This project is in a very early state. Eventually I want users
-to specify which drivers to use in the `drmem.conf` file. Right now
-everything is getting built and run.*
+**NOTE: This project is in a very, very early state. Eventually I want
+users to specify which drivers to use in `drmem.conf`. Right now every
+driver gets built and run.**
 
 ## Colophon
 
