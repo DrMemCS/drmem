@@ -1,4 +1,4 @@
-### Device Names
+# Device Names
 
 The control points in the system are called devices. Devices provide
 values obtained by sensors or from data obtained over the network.
@@ -14,12 +14,12 @@ name of the device. A final segment, following a period, is a field
 name.
 
     alphanum = ('a' .. 'z') | ('A' .. 'Z') | ('0' .. '9')
-
+    
     segment = alphanum ('-' | alphanum)*
-
+    
     device = segment (':' segment)* ('.' segment)?
 
-# Questions
+### Questions
 
 * Do we want to support aliases? Can a given instance of a driver have
   more than one name?
@@ -68,7 +68,7 @@ to interact with the device's underlying driver so it is special
 Writing to a read-only device has no effect. The only way to tell is
 that the history won't include the setting.
 
-# Questions
+## Questions
 
 * What is the data type of a device? Floating point and integer values
   are obvious data types that you might get from a sensor. However, it
@@ -76,14 +76,14 @@ that the history won't include the setting.
   values. Color LED bulbs should be able to take and return RGB or XY
   values (or maybe just an array of floats.)
 
-### Tools
+# Tools
 
 A command line tool should be developed to interact with the device
 database. It should allow devices to be added, modified and deleted.
 It could also scan the database to find problems (i.e. a database
 "linter".)
 
-### Drivers
+# Drivers
 
 Drivers should, eventually, be dynamically loaded. A site will declare
 which drivers should be loaded from a config file. Each device driver
@@ -106,12 +106,12 @@ specify the base names as `weather:kord` for one station and
 same, final portions of the device names so there would be some
 consistency.
 
-# Questions
+### Questions
 
 * Should a driver be responsible for creating missing devices in the
   database?
 
-### Implementation Details
+# Implementation Details
 
 This control system is using REDIS for its backing store. Information
 for devices will span keys since we can use different features of
@@ -147,7 +147,7 @@ For a read-write device, the driver will subscribe to the `NAME.value`
 pub/sub channel. Whenever it sees a post, it sends it to the hardware
 and then writes the setting to the corresponding stream.
 
-# Questions
+### Questions
 
 * How can we return errors to clients for bad settings?
 
