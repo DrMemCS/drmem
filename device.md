@@ -92,13 +92,13 @@ but all drivers will take a string which specifies the base name of
 the device it controls.
 
 For instance, a person living near Chicago may use a weather driver
-that gets conditions from METAR data for the KORD station. The config
-file would require the weather driver. The base name of the device
-would probably be `weather` and the one parameter would be `"KORD"`.
-The driver would periodically get the weather and save the results to
-several devices: `weather:temperature`, `weather:humidity`,
-`weather:precipitation`, `weather.dewpoint`, etc. possibly among
-others.
+that gets conditions from METAR data for the KORD (O'Hare
+International Airport) station. The config file would require the
+weather driver. The base name of the device would probably be
+`weather` and the one parameter would be `"KORD"`.  The driver would
+periodically get the weather and save the results to several devices:
+`weather:temperature`, `weather:humidity`, `weather:precipitation`,
+`weather.dewpoint`, etc.  possibly among others.
 
 If a location wanted to track several weather stations, they could
 specify the base names as `weather:kord` for one station and
