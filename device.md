@@ -21,12 +21,24 @@ name.
 
 ### Questions
 
-* Do we want to support aliases? Can a given instance of a driver have
-  more than one name?
+* Should we support renaming devices?
 
-* Should we support renaming devices? (Aside from deleting the old
-  name, specifying a new name in the driver, and restarting the whole
-  system.)
+*Yes*
+
+The `RENAMEX` command allows us to rename keys in `redis`. If we can
+communicate with a running driver to change its devices' names, it
+could use this command to rename while keeping historical data. But
+the config file needs to be updated, too, otherwise the old key(s)
+will be recreated at the next restart. It would be nice if both
+details could be handled simultaneously.
+
+* Should we support device name aliases?
+
+*No*
+
+With `redis`, aliasing would add extra round-trips to retrieve actual
+data. Plus, this is supposed to be a simple control system. Just name
+your devices correctly the first time.
 
 ## Fields
 
@@ -70,11 +82,11 @@ that the history won't include the setting.
 
 ## Questions
 
-* What is the data type of a device? Floating point and integer values
-  are obvious data types that you might get from a sensor. However, it
-  would be useful for some devices to return strings, or arrays of
-  values. Color LED bulbs should be able to take and return RGB or XY
-  values (or maybe just an array of floats.)
+* What is the data type of a device?
+
+The code uses a Rust enumerated type to represent the various data
+types. This type defines methods that encode to / decode from
+strings so they can be stored in `redis`.
 
 # Tools
 
@@ -111,6 +123,12 @@ consistency.
 * Should a driver be responsible for creating missing devices in the
   database?
 
+*Yes*
+
+The driver framework will make sure the proper entries are made in
+`redis`. If a key already exists, the framework will assume it's
+already been properly created and won't change anything.
+
 # Implementation Details
 
 This control system is using REDIS for its backing store. Information
@@ -143,13 +161,24 @@ built, the system will start by only supporting the following types:
 
 ## Setting
 
-For a read-write device, the driver will subscribe to the `NAME.value`
-pub/sub channel. Whenever it sees a post, it sends it to the hardware
-and then writes the setting to the corresponding stream.
+Settings are handled by `redis` lists. If a driver indicates a
+particular device accepts settings, the framework does the following:
+
+- Creates an empty list with the key `NAME#setting`
+- Creates an event generator that uses `BLPOP` to return values pushed
+  to the list.
+- The client interface uses `RPUSHX` to append a value to the setting
+  list. This command fails if the list doesn't exist so the client
+  will get immedaite feedback that the device doesn't accept settings.
 
 ### Questions
 
 * How can we return errors to clients for bad settings?
+
+The client interface could look at the `#info` key to get meta
+information: is the setting value the same type as the device? Is the
+value in range (provided we have standardized fields indicating valid
+ranges)?
 
 ## Alarms
 
