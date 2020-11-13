@@ -30,24 +30,24 @@ represent the data used when reading or writing to hardware.
 
 ### Primitive Types
 
-    bool				true, false
-    int		64-bit, signed		1, 1_000, -32_000_000
-    float	64-bit, IEEE		1.0, 1.5e30
-    string	utf-8 encoded		"can contain text"
-    color	32-bit, unsigned	#ffffffff,
+    bool                                true, false
+    int         64-bit, signed          1, 1_000, -32_000_000
+    float       64-bit, IEEE            1.0, 1.5e30
+    string      utf-8 encoded           "can contain text"
+    color       32-bit, unsigned        #ffffffff,
                                         #red,             // named colors
                                         #(1.0, 1.0, 1.0)       // RGB
                                         #(1.0, 1.0, 1.0, 1.0)  // RGBA
                                         #(1.0, 1.0)            // XY
-    stamp	64-bit, unsigned,
+    stamp       64-bit, unsigned,
                 milliseconds since
                 1970
 
 ### Container Types
 
     (T1, T2, ..., Tn)   tuple with n values
-    [T]			array of T
-    {T}			stream of stamp/T pairs
+    [T]                 array of T
+    {T}                 stream of stamp/T pairs
                         when obtaining values from a stream, the
                         timestamp is guaranteed to always increase
 
@@ -95,14 +95,14 @@ These are a handful of functions that come to mind.
       Filters a stream by removing elements that haven't changed
       greater than the filter parameter.
 
-        int	{int}	{int}
-	2	0	0
-	2	1	no ouput
-	2	2	2
-	2	1	no ouput
-	2	3	no ouput
-	2	4	4
-	2	1	1
+        int     {int}   {int}
+        2       0       0
+        2       1       no ouput
+        2       2       2
+        2       1       no ouput
+        2       3       no ouput
+        2       4       4
+        2       1       1
 
 
     not : {bool} -> {bool}
@@ -131,13 +131,13 @@ These are a handful of functions that come to mind.
       timestamp of the source stream and the predicate stream. For
       instance:
 
-        {bool}	{int}	{int}	{result}
-        true	1	10	1
-            	2	  	2
-            	 	11	no ouput
-        false	 	  	11
-             	 	12	12
-        true	 	  	2
+        {bool}  {int}   {int}   {result}
+        true    1       10      1
+                2               2
+                        11      no ouput
+        false                   11
+                        12      12
+        true                    2
 
 
     timer : integer -> {bool} -> {bool}
@@ -267,9 +267,9 @@ To satisfy this requirement, these steps will be followed:
   command using timestamps from the previous iteration.
     - The results are sorted into ascending timestamp order.
     - For each unique timestamp:
-	- the state of all devices associated with the timestamp are
-	  updated
-	- all EFFECT nodes are evaluated
+        - the state of all devices associated with the timestamp are
+          updated
+        - all EFFECT nodes are evaluated
 
 ### Timers
 
