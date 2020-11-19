@@ -297,7 +297,7 @@ reported before remote data, so there may be out of order stamps.
   useful for the timestamp to be that of the calculated value. So,
   even though it takes a small amount of time to re-evaluate the state
   changes, the database will show perfectly correlated data.
-- Yes. We could create a function `delta : {T} -> {int}` that
+- Yes. We could create a function `delta : {_} -> {int}` that
   computes milliseconds between elements. If this function seems
   useful, then we need timestamps. 
 
