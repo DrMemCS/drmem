@@ -211,10 +211,9 @@ async fn monitor(cfg: &config::Config,
     let c1 : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
 
     loop {
-	let mut state = State::Unknown;
-
 	match TcpStream::connect(addr).await {
 	    Ok(mut s) => {
+		let mut state = State::Unknown;
 		let (mut rx, _) = s.split();
 
 		set_service_state(&mut con, "up").await?;
