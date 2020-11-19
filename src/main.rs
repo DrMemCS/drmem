@@ -152,7 +152,7 @@ async fn mk_redis_conn(cfg: &config::Config)
     let addr = redis::ConnectionAddr::Tcp(cfg.redis.addr.clone(),
 					  cfg.redis.port);
     let info = redis::ConnectionInfo { addr: Box::new(addr),
-				       db: 0,
+				       db: cfg.redis.dbn,
 				       username: None,
 				       passwd: None };
 

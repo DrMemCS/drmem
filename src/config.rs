@@ -32,14 +32,16 @@ impl Default for Config {
 #[derive(Serialize,Deserialize)]
 pub struct Redis {
     pub addr: String,
-    pub port: u16
+    pub port: u16,
+    pub dbn: i64
 }
 
 impl Default for Redis {
     fn default() -> Self {
 	Redis {
 	    addr: "127.0.0.1".to_string(),
-	    port: 6379
+	    port: 6379,
+	    dbn: 0
 	}
     }
 }
@@ -86,6 +88,12 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 	     .value_name("PORT")
 	     .help("IP port address of redis database; defaults to 6379")
 	     .takes_value(true))
+        .arg(Arg::with_name("db_num")
+	     .short("n")
+	     .long("db_num")
+	     .value_name("DB_NUM")
+	     .help("selects which redis database to use; defaults to 0")
+	     .takes_value(true))
         .arg(Arg::with_name("verbose")
 	     .short("v")
 	     .long("verbose")
@@ -107,6 +115,14 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
     if let Some(port) = matches.value_of("db_port") {
 	if let Ok(port) = port.parse::<u16>() {
 	    cfg.redis.port = port
+	}
+    }
+
+    if let Some(dbn) = matches.value_of("db_num") {
+	if let Ok(dbn) = dbn.parse::<i64>() {
+	    if dbn < 16 {
+		cfg.redis.dbn = dbn
+	    }
 	}
     }
 
