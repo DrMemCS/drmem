@@ -8,6 +8,7 @@ use palette::{Srgb, Yxy};
 use palette::named;
 
 mod config;
+mod data;
 mod hue;
 
 // The sump pump monitor uses a state machine to decide when to
