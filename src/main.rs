@@ -9,6 +9,7 @@ use palette::named;
 
 mod config;
 mod data;
+mod driver_api;
 mod hue;
 
 // The sump pump monitor uses a state machine to decide when to
