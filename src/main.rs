@@ -12,6 +12,8 @@ mod data;
 mod driver_api;
 mod hue;
 
+use data::Type;
+
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
 
@@ -141,8 +143,8 @@ async fn get_reading(rx: &mut ReadHalf<'_>) -> io::Result<(u64, bool)> {
 // Adds a value to "sump:service"'s history.
 
 async fn set_service_state(con: &mut redis::aio::Connection,
-			   value: &str) -> redis::RedisResult<()> {
-    redis::Cmd::xadd("sump:service.hist", "*", &[("value", value)])
+			   value: bool) -> redis::RedisResult<()> {
+    redis::Cmd::xadd("sump:service#hist", "*", &[("value", Type::Bool(value))])
 	.query_async(con).await
 }
 
@@ -218,7 +220,7 @@ async fn monitor(cfg: &config::Config,
 		let mut state = State::Unknown;
 		let (mut rx, _) = s.split();
 
-		set_service_state(&mut con, "up").await?;
+		set_service_state(&mut con, true).await?;
 		loop {
 		    match get_reading(&mut rx).await {
 			Ok((stamp, true)) => {
@@ -237,9 +239,9 @@ async fn monitor(cfg: &config::Config,
 				}
 			    }
 			    let _ : () =
-				redis::Cmd::xadd("sump:state.hist",
+				redis::Cmd::xadd("sump:state#hist",
 						 stamp,
-						 &[("value", "on")])
+						 &[("value", Type::Bool(true))])
 				.query_async(&mut con).await?;
 			},
 			Ok((stamp, false)) => {
@@ -250,18 +252,18 @@ async fn monitor(cfg: &config::Config,
 
 				let _ : () = redis::pipe()
 				    .atomic()
-				    .cmd("XADD").arg("sump:state.hist").arg(stamp)
-				    .arg("value").arg("off").ignore()
-				    .cmd("XADD").arg("sump:duty.hist").arg(stamp)
-				    .arg("value").arg(duty).ignore()
-				    .cmd("XADD").arg("sump:in-flow.hist").arg(stamp)
-				    .arg("value").arg(in_flow)
+				    .cmd("XADD").arg("sump:state#hist").arg(stamp)
+				    .arg("value").arg(Type::Bool(false)).ignore()
+				    .cmd("XADD").arg("sump:duty#hist").arg(stamp)
+				    .arg("value").arg(Type::Flt(duty)).ignore()
+				    .cmd("XADD").arg("sump:in-flow#hist").arg(stamp)
+				    .arg("value").arg(Type::Flt(in_flow))
 				    .query_async(&mut con).await?;
 			    }
 			},
 			Err(e) => {
 			    error!("couldn't read sump state -- {:?}", e);
-			    set_service_state(&mut con, "crash").await?;
+			    set_service_state(&mut con, false).await?;
 			    lamp_alert(&mut tx).await;
 			    break;
 			}
@@ -270,7 +272,7 @@ async fn monitor(cfg: &config::Config,
 		}
 	    },
 	    Err(e) => {
-		set_service_state(&mut con, "down").await?;
+		set_service_state(&mut con, false).await?;
 		lamp_alert(&mut tx).await;
 		error!("couldn't connect to pump process -- {:?}", e)
 	    }
@@ -297,37 +299,39 @@ async fn main() -> redis::RedisResult<()> {
 	tracing::subscriber::set_global_default(subscriber)
 	    .expect("Unable to set global default subscriber");
 
-	if let Ok((mut tx, _join)) = hue::manager(&cfg) {
-	    use hue::HueCommands;
+	match hue::manager(&cfg) {
+	    Ok((mut tx, _join)) => {
+		use hue::HueCommands;
 
-	    let c1 : Yxy = Srgb::<f32>::from_format(named::RED)
-		.into_linear().into();
-	    let c2 : Yxy = Srgb::<f32>::from_format(named::WHITE)
-		.into_linear().into();
-	    let c3 : Yxy = Srgb::<f32>::from_format(named::BLUE)
-		.into_linear().into();
+		let c1 : Yxy = Srgb::<f32>::from_format(named::RED)
+		    .into_linear().into();
+		let c2 : Yxy = Srgb::<f32>::from_format(named::WHITE)
+		    .into_linear().into();
+		let c3 : Yxy = Srgb::<f32>::from_format(named::BLUE)
+		    .into_linear().into();
 
-	    let prog =
-		vec![HueCommands::On{ light: 5, bri: 255, color: Some(c1) },
-		     HueCommands::On{ light: 8, bri: 255, color: Some(c1) },
-		     HueCommands::Pause { len: Duration::from_millis(1_000) },
-		     HueCommands::On{ light: 5, bri: 255, color: Some(c2) },
-		     HueCommands::On{ light: 8, bri: 255, color: Some(c2) },
-		     HueCommands::Pause { len: Duration::from_millis(1_000) },
-		     HueCommands::On{ light: 5, bri: 255, color: Some(c3) },
-		     HueCommands::On{ light: 8, bri: 255, color: Some(c3) },
-		     HueCommands::Pause { len: Duration::from_millis(1_000) },
-		     HueCommands::Off { light: 5 },
-		     HueCommands::Off { light: 8 }];
+		let prog =
+		    vec![HueCommands::On { light: 5, bri: 255, color: Some(c1) },
+			 HueCommands::On { light: 8, bri: 255, color: Some(c1) },
+			 HueCommands::Pause { len: Duration::from_millis(1_000) },
+			 HueCommands::On { light: 5, bri: 255, color: Some(c2) },
+			 HueCommands::On { light: 8, bri: 255, color: Some(c2) },
+			 HueCommands::Pause { len: Duration::from_millis(1_000) },
+			 HueCommands::On { light: 5, bri: 255, color: Some(c3) },
+			 HueCommands::On { light: 8, bri: 255, color: Some(c3) },
+			 HueCommands::Pause { len: Duration::from_millis(1_000) },
+			 HueCommands::Off { light: 5 },
+			 HueCommands::Off { light: 8 }];
 
-	    if let Err(e) = tx.send(prog).await {
-		warn!("tx returned {:?}", e);
+		if let Err(e) = tx.send(prog).await {
+		    warn!("tx returned {:?}", e);
+		}
+		if let Err(e) = monitor(&cfg, tx).await {
+		    warn!("monitor returned: {:?}", e);
+		}
 	    }
-	    if let Err(e) = monitor(&cfg, tx).await {
-		warn!("monitor returned: {:?}", e);
-	    }
-	} else {
-	    warn!("no hue manager");
+	    Err(e) =>
+		warn!("no hue manager: {:?}", e)
 	}
     }
     Ok(())
