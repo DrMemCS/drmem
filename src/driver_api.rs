@@ -73,19 +73,20 @@ impl Context {
     }
 
     fn get_keys(&self, name: &str) -> (String, String) {
-	(format!("{}:{}#info", &self.base, &name),
-	 format!("{}:{}#hist", &self.base, &name))
+	(format!("{}#info", &name), format!("{}#hist", &name))
     }
 
     pub async fn def_device(&mut self,
 			    name: &str,
 			    summary: String,
 			    units: Option<String>) -> redis::RedisResult<()> {
-	// Create the names of the keys assocaited with this device.
+	// Create the device name and the names of the keys associated
+	// with this device.
 
-	let (info_key, hist_key) = self.get_keys(name);
+	let dev_name = format!("{}:{}", &self.base, &name);
+	let (info_key, hist_key) = self.get_keys(&dev_name);
 
-	debug!("defining '{}:{}'", &self.base, &name);
+	debug!("defining '{}'", &dev_name);
 
 	let data_type: String = redis::cmd("TYPE")
 	    .arg(&info_key)
@@ -96,7 +97,10 @@ impl Context {
 	// type, we need to correct it.
 
 	if "hash" != data_type {
-	    info!("'{}:{}' isn't defined ... initializing", &self.base, &name);
+	    info!("'{}' isn't defined ... initializing", &dev_name);
+
+	    // 'defaults' holds an array of default field values for
+	    // the newly created device.
 
 	    let mut defaults = vec![("summary", data::Type::Str(summary))];
 
