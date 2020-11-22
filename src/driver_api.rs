@@ -121,10 +121,15 @@ impl Context {
 		.query_async(&mut self.db_con).await?;
 	}
 
+	// If we reached this point, either the device entries have
+	// been created or we found the '#info" key and we're assuming
+	// the device exists.
+
 	let result: HashMap<String, data::Type> =
 	    redis::Cmd::hgetall(&info_key)
 	    .query_async(&mut self.db_con).await?;
 
+	let _ = self.devices.insert(dev_name, Device(result));
 	Ok(())
     }
 }
