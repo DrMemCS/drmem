@@ -158,4 +158,46 @@ impl Context {
 	let _ = self.devices.insert(dev_name, Device(result));
 	Ok(())
     }
+
+    /// Allows a driver to write values, associated with devices, to
+    /// the database. `stamp` is the timestamp associated with every
+    /// entry in the `values` array. With each call to this method,
+    /// the timestamp must be always increasing. Trying to insert
+    /// values with a timestamp earlier than the last timestamp of the
+    /// device in the database will result in an error. The `values`
+    /// array indicate which devices should be updated.
+    ///
+    /// If multiple devices change simultaneously (e.g. a device's
+    /// value is computed from other devices), a driver is strongly
+    /// recommended to make a single call with all the affected
+    /// devices. Each call to this function makes an atomic change to
+    /// the database so if all devices are changed in a single call,
+    /// clients will see a consistent change.
+    pub async fn write_values(&mut self,
+			      stamp: Option<u64>,
+			      values: &[(&str, data::Type)])
+			      -> redis::RedisResult<()> {
+	let stamp = if let Some(ts) = stamp {
+	    format!("{}", ts)
+	} else {
+	    "*".to_string()
+	};
+
+	let mut pipe = redis::pipe();
+	let mut cmd = pipe.atomic();
+
+	for (dev, val) in values {
+	    let dev = format!("{}:{}", &self.base, &dev);
+	    let (_, key) = self.get_keys(&dev);
+
+	    cmd = cmd.xadd(key, &stamp, &[("value", val.to_redis_args())]);
+
+	    // TODO: need to check alarm limits -- and add the command
+	    // to announce it -- as the command is built-up.
+	}
+
+	let _: () = cmd.query_async(&mut self.db_con).await?;
+
+	Ok(())
+    }
 }
