@@ -132,6 +132,29 @@ impl Context {
 	    redis::Cmd::hgetall(&info_key)
 	    .query_async(&mut self.db_con).await?;
 
+	// Verify 'summary' field exists and is a string.
+
+	match result.get("summary") {
+	    Some(data::Type::Str(_)) => (),
+	    Some(_) =>
+		return Err(RedisError::from((ErrorKind::TypeError,
+					     "'summary' field isn't a string"))),
+	    None =>
+		return Err(RedisError::from((ErrorKind::TypeError,
+					     "'summary' is missing")))
+	}
+
+	// Verify there is no "units" field or, if it exists, it's a
+	// string value.
+
+	match result.get("units") {
+	    Some(data::Type::Str(_)) => (),
+	    Some(_) =>
+		return Err(RedisError::from((ErrorKind::TypeError,
+					     "'units' field isn't a string"))),
+	    None => ()
+	}
+
 	let _ = self.devices.insert(dev_name, Device(result));
 	Ok(())
     }
