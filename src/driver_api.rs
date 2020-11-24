@@ -74,6 +74,12 @@ impl Context {
 	(format!("{}#info", &name), format!("{}#hist", &name))
     }
 
+    /// Used by a driver to define a readable device. `name` specifies
+    /// the final segment of the device name (the prefix is determined
+    /// by the driver's name.) `summary` should be a one-line
+    /// description of the device. `units` is an optional units
+    /// field. Some devices (like boolean or string devices) don't
+    /// require engineering units.
     pub async fn def_device(&mut self,
 			    name: &str,
 			    summary: String,
@@ -86,8 +92,7 @@ impl Context {
 
 	debug!("defining '{}'", &dev_name);
 
-	let data_type: String = redis::cmd("TYPE")
-	    .arg(&info_key)
+	let data_type: String = redis::cmd("TYPE").arg(&info_key)
 	    .query_async(&mut self.db_con).await?;
 
 	// If the info key is a "hash" type, we assume the device has
