@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use tracing::{debug, info};
+use redis::*;
 use crate::data;
 use crate::config::Config;
 
@@ -23,12 +24,12 @@ pub struct Context {
     /// This connection is used for interacting with the database.
     db_con: redis::aio::Connection,
 
-    /// This connection is used for pubsub notifications to monitor
-    /// key changes. If a key associated with this driver is modified,
-    /// it'll get reported on this Connection.
-    pubsub_con: redis::aio::Connection,
-
-    /// A map which maps keys to devices.
+    /// A map which maps keys to devices. The key to the map becomes
+    /// the last segment of the device name. It recommended that the
+    /// key only contains alphanumeric characters and dashes
+    /// (specifically, adding a colon will be confusing since the
+    /// final segment should refer to a specific device in a driver
+    /// and the path refers to an instance of a driver.)
     devices: DevMap
 }
 
@@ -64,12 +65,9 @@ impl Context {
 			cfg: &Config,
 			name: Option<String>,
 			pword: Option<String>) -> redis::RedisResult<Self> {
-
 	let db_con = Context::make_connection(cfg, name, pword).await?;
-	let pubsub_con = Context::make_connection(cfg, None, None).await?;
 
-	Ok(Context { base: base_name, db_con, pubsub_con,
-		     devices: DevMap::new() })
+	Ok(Context { base: base_name, db_con, devices: DevMap::new() })
     }
 
     fn get_keys(&self, name: &str) -> (String, String) {
