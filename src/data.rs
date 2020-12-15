@@ -83,7 +83,7 @@ impl ToRedisArgs for Type {
 		let s = s.as_bytes();
 		let mut buf: Vec<u8> = Vec::with_capacity(5 + s.len());
 
-		buf[0] = 'S' as u8;
+		buf.push('S' as u8);
 		buf[1..].copy_from_slice(&(s.len() as u32).to_be_bytes());
 		buf[5..].copy_from_slice(&s);
 		out.write_arg(&buf)
