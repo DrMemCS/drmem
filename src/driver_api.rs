@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use redis::*;
 use crate::data;
 use crate::config::Config;
@@ -17,6 +17,7 @@ type DevMap = HashMap<String, Device>;
 /// Defines a driver "context" which is used to communicate with the
 /// `redis` database.
 pub struct Context {
+
     /// The base name used by the instance of the driver. Defining
     /// `Device` instances will add the last segment to the name.
     base: String,
@@ -35,8 +36,7 @@ pub struct Context {
 
 impl Context {
 
-    // This is a utility function to make a connection to redis. It is
-    // not part of the public API.
+    // Creates a connection to redis.
 
     async fn make_connection(cfg: &Config,
 			     name: Option<String>,
@@ -70,8 +70,57 @@ impl Context {
 	Ok(Context { base: base_name, db_con, devices: DevMap::new() })
     }
 
+    // Generates the keys used to access meta info and historical data.
+
     fn get_keys(&self, name: &str) -> (String, String) {
 	(format!("{}#info", &name), format!("{}#hist", &name))
+    }
+
+    // Does some sanity checks on a device to see if it appears to be
+    // valid.
+
+    async fn get_device(&mut self, info_key: &str)
+			-> redis::RedisResult<Option<HashMap<String, data::Type>>> {
+	let data_type: String = redis::cmd("TYPE").arg(info_key)
+	    .query_async(&mut self.db_con).await?;
+
+	// If the info key is a "hash" type, we assume the device has
+	// been created and maintained properly.
+
+	if "hash" == data_type {
+	    let result: HashMap<String, data::Type> =
+		redis::Cmd::hgetall(info_key)
+		.query_async(&mut self.db_con).await?;
+
+	    // Verify 'summary' field exists and is a string.
+
+	    match result.get("summary") {
+		Some(data::Type::Str(_)) => (),
+		Some(_) => {
+		    warn!("'summary' field isn't a string");
+		    return Ok(None)
+		}
+		None => {
+		    warn!("'summary' field is missing");
+		    return Ok(None)
+		}
+	    }
+
+	    // Verify there is no "units" field or, if it exists, it's
+	    // a string value.
+
+	    match result.get("units") {
+		Some(data::Type::Str(_)) => (),
+		Some(_) => {
+		    warn!("'units' field isn't a string");
+		    return Ok(None)
+		}
+		None => ()
+	    }
+	    Ok(Some(result))
+	} else {
+	    Ok(None)
+	}
     }
 
     /// Used by a driver to define a readable device. `name` specifies
@@ -92,70 +141,45 @@ impl Context {
 
 	debug!("defining '{}'", &dev_name);
 
-	let data_type: String = redis::cmd("TYPE").arg(&info_key)
-	    .query_async(&mut self.db_con).await?;
+	let result = match self.get_device(&info_key).await? {
+	    Some(v) => v,
+	    None => {
+		info!("'{}' isn't defined properly ... initializing",
+		      &dev_name);
 
-	// If the info key is a "hash" type, we assume the device has
-	// been created and maintained properly. If it isn't a "hash"
-	// type, we need to correct it.
+		// 'defaults' holds an array of default field values
+		// for the newly created device.
 
-	if "hash" != data_type {
-	    info!("'{}' isn't defined ... initializing", &dev_name);
+		let mut defaults = vec![("summary", data::Type::Str(summary))];
 
-	    // 'defaults' holds an array of default field values for
-	    // the newly created device.
+		if let Some(u) = units {
+		    defaults.push(("units", data::Type::Str(u)))
+		}
 
-	    let mut defaults = vec![("summary", data::Type::Str(summary))];
+		// Create a command pipeline that deletes the two keys
+		// and then creates them properly with default values.
 
-	    if let Some(u) = units {
-		defaults.push(("units", data::Type::Str(u)))
+		let _: () = redis::pipe()
+		    .atomic()
+		    .del(&hist_key)
+		    .xadd(&hist_key, 1, &[("value", 0)])
+		    .xdel(&hist_key, &[1])
+		    .del(&info_key)
+		    .hset_multiple(&info_key, &defaults)
+		    .query_async(&mut self.db_con).await?;
+
+		let mut map = HashMap::new();
+
+		for (k, v) in defaults {
+		    let _ = map.insert(k.to_string(), v);
+		}
+
+		map
 	    }
-
-	    // Create a command pipeline that deletes the two keys and
-	    // then creates them properly with default values.
-
-	    let _: () = redis::pipe()
-		.atomic()
-		.del(&hist_key)
-		.xadd(&hist_key, 1, &[("value", 0)])
-		.xdel(&hist_key, &[1])
-		.del(&info_key)
-		.hset_multiple(&info_key, &defaults)
-		.query_async(&mut self.db_con).await?;
-	}
-
-	// If we reached this point, either the device entries have
-	// been created or we found the '#info" key and we're assuming
-	// the device exists.
-
-	let result: HashMap<String, data::Type> =
-	    redis::Cmd::hgetall(&info_key)
-	    .query_async(&mut self.db_con).await?;
-
-	// Verify 'summary' field exists and is a string.
-
-	match result.get("summary") {
-	    Some(data::Type::Str(_)) => (),
-	    Some(_) =>
-		return Err(RedisError::from((ErrorKind::TypeError,
-					     "'summary' field isn't a string"))),
-	    None =>
-		return Err(RedisError::from((ErrorKind::TypeError,
-					     "'summary' is missing")))
-	}
-
-	// Verify there is no "units" field or, if it exists, it's a
-	// string value.
-
-	match result.get("units") {
-	    Some(data::Type::Str(_)) => (),
-	    Some(_) =>
-		return Err(RedisError::from((ErrorKind::TypeError,
-					     "'units' field isn't a string"))),
-	    None => ()
-	}
+	};
 
 	let _ = self.devices.insert(dev_name, Device(result));
+
 	Ok(())
     }
 
