@@ -240,7 +240,7 @@ async fn monitor(cfg: &config::Config,
 			    }
 			    let _ : () =
 				redis::Cmd::xadd("sump:state#hist",
-						 stamp,
+						 "*",
 						 &[("value", Type::Bool(true))])
 				.query_async(&mut con).await?;
 			},
@@ -252,11 +252,11 @@ async fn monitor(cfg: &config::Config,
 
 				let _ : () = redis::pipe()
 				    .atomic()
-				    .cmd("XADD").arg("sump:state#hist").arg(stamp)
+				    .cmd("XADD").arg("sump:state#hist").arg("*")
 				    .arg("value").arg(Type::Bool(false)).ignore()
-				    .cmd("XADD").arg("sump:duty#hist").arg(stamp)
+				    .cmd("XADD").arg("sump:duty#hist").arg("*")
 				    .arg("value").arg(Type::Flt(duty)).ignore()
-				    .cmd("XADD").arg("sump:in-flow#hist").arg(stamp)
+				    .cmd("XADD").arg("sump:in-flow#hist").arg("*")
 				    .arg("value").arg(Type::Flt(in_flow))
 				    .query_async(&mut con).await?;
 			    }
