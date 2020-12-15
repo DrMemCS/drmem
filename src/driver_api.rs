@@ -53,7 +53,8 @@ impl Context {
 
 	// Connect to redis and return the Connection.
 
-	debug!("connecting to redis using {:?}", &info);
+	debug!("connecting to redis -- addr: {:?}, db#: {}, and account: {:?}",
+	       &info.addr, &info.db, &info.username);
 	redis::aio::connect_tokio(&info).await
     }
 
