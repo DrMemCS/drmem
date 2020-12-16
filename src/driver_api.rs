@@ -9,6 +9,9 @@ use crate::config::Config;
 pub struct Device (HashMap<String, data::Type>);
 
 impl Device {
+    /// Creates a new instance of a `Device`. `summary` is a one-line
+    /// summary of the device. If the value returned by the device is
+    /// in engineering units, then they can be specified with `units`.
 
 }
 
@@ -71,7 +74,10 @@ impl Context {
 	Ok(Context { base: base_name, db_con, devices: DevMap::new() })
     }
 
-    // Generates the keys used to access meta info and historical data.
+    // Generates the keys used to access meta info and historical
+    // data. Given a device "foo.bar", the convention is its meta
+    // information is stored using the key "foo.bar#info" and its
+    // historical data uses "foo.bar#hist".
 
     fn get_keys(&self, name: &str) -> (String, String) {
 	(format!("{}#info", &name), format!("{}#hist", &name))
