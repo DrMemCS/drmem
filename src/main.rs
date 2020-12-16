@@ -140,30 +140,6 @@ async fn get_reading(rx: &mut ReadHalf<'_>) -> io::Result<(u64, bool)> {
     return Ok((stamp, value != 0))
 }
 
-// Adds a value to "sump:service"'s history.
-
-async fn set_service_state(con: &mut redis::aio::Connection,
-			   value: bool) -> redis::RedisResult<()> {
-    redis::Cmd::xadd("sump:service#hist", "*", &[("value", Type::Bool(value))])
-	.query_async(con).await
-}
-
-// Returns a connection to the REDIS database. The connection
-// infomation is obatined through the current configuration structure.
-
-async fn mk_redis_conn(cfg: &config::Config)
-		       -> redis::RedisResult<redis::aio::Connection> {
-    let addr = redis::ConnectionAddr::Tcp(cfg.redis.addr.clone(),
-					  cfg.redis.port);
-    let info = redis::ConnectionInfo { addr: Box::new(addr),
-				       db: cfg.redis.dbn,
-				       username: None,
-				       passwd: None };
-
-    debug!("connecting to redis at {}:{}", &cfg.redis.addr, &cfg.redis.port);
-    redis::aio::connect_tokio(&info).await
-}
-
 async fn lamp_alert(tx: &mut mpsc::Sender<hue::Program>) -> () {
     let b : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
     let r : Yxy = Srgb::<f32>::from_format(named::RED).into_linear().into();
@@ -210,7 +186,24 @@ async fn monitor(cfg: &config::Config,
 		 mut tx: mpsc::Sender<hue::Program>) -> redis::RedisResult<()> {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
-    let mut con = mk_redis_conn(cfg).await?;
+    let mut ctxt = driver_api::Context::create("sump", cfg, None, None).await?;
+
+    ctxt.def_device("service",
+		    "status of connection to sump pump module",
+		    None).await?;
+
+    ctxt.def_device("state",
+		    "active state of sump pump",
+		    None).await?;
+
+    ctxt.def_device("duty",
+		    "sump pump on-time percentage during last cycle",
+		    Some("%".to_string())).await?;
+
+    ctxt.def_device("in-flow",
+		    "sump pit fill rate during last cycle",
+		    Some("gpm".to_string())).await?;
+
     let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
     let c1 : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
 
@@ -220,7 +213,9 @@ async fn monitor(cfg: &config::Config,
 		let mut state = State::Unknown;
 		let (mut rx, _) = s.split();
 
-		set_service_state(&mut con, true).await?;
+		ctxt.write_values(None, &[("service",
+					   data::Type::Bool(true))]).await?;
+
 		loop {
 		    match get_reading(&mut rx).await {
 			Ok((stamp, true)) => {
@@ -238,11 +233,12 @@ async fn monitor(cfg: &config::Config,
 				    warn!("sump ON indicator returned: {:?}", e)
 				}
 			    }
-			    let _ : () =
-				redis::Cmd::xadd("sump:state#hist",
-						 "*",
-						 &[("value", Type::Bool(true))])
-				.query_async(&mut con).await?;
+
+			    ctxt
+				.write_values(None,
+					      &[("state",
+						 data::Type::Bool(true))])
+				.await?;
 			},
 			Ok((stamp, false)) => {
 			    if let Some((duty, in_flow)) = state.to_off(stamp) {
@@ -250,20 +246,24 @@ async fn monitor(cfg: &config::Config,
 
 				lamp_off(&mut tx, duty).await;
 
-				let _ : () = redis::pipe()
-				    .atomic()
-				    .cmd("XADD").arg("sump:state#hist").arg("*")
-				    .arg("value").arg(Type::Bool(false)).ignore()
-				    .cmd("XADD").arg("sump:duty#hist").arg("*")
-				    .arg("value").arg(Type::Flt(duty)).ignore()
-				    .cmd("XADD").arg("sump:in-flow#hist").arg("*")
-				    .arg("value").arg(Type::Flt(in_flow))
-				    .query_async(&mut con).await?;
+				ctxt
+				    .write_values(None,
+						  &[("state",
+						     Type::Bool(false)),
+						    ("duty",
+						     Type::Flt(duty)),
+						    ("in-flow",
+						     Type::Flt(in_flow))])
+				    .await?;
 			    }
 			},
 			Err(e) => {
 			    error!("couldn't read sump state -- {:?}", e);
-			    set_service_state(&mut con, false).await?;
+			    ctxt
+				.write_values(None,
+					      &[("service",
+						 data::Type::Bool(false))])
+				.await?;
 			    lamp_alert(&mut tx).await;
 			    break;
 			}
@@ -272,7 +272,8 @@ async fn monitor(cfg: &config::Config,
 		}
 	    },
 	    Err(e) => {
-		set_service_state(&mut con, false).await?;
+		ctxt.write_values(None, &[("service",
+					   data::Type::Bool(false))]).await?;
 		lamp_alert(&mut tx).await;
 		error!("couldn't connect to pump process -- {:?}", e)
 	    }
