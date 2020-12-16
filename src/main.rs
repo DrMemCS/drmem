@@ -9,7 +9,7 @@ use palette::named;
 
 mod config;
 mod data;
-mod driver_api;
+mod driver;
 mod hue;
 
 use data::Type;
@@ -186,7 +186,7 @@ async fn monitor(cfg: &config::Config,
 		 mut tx: mpsc::Sender<hue::Program>) -> redis::RedisResult<()> {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
-    let mut ctxt = driver_api::Context::create("sump", cfg, None, None).await?;
+    let mut ctxt = driver::Context::create("sump", cfg, None, None).await?;
 
     ctxt.def_device("service",
 		    "status of connection to sump pump module",
