@@ -154,7 +154,8 @@ impl Context {
     // historical data uses "foo.bar#hist".
 
     fn get_keys(&self, name: &str) -> (String, String) {
-	(format!("{}#info", &name), format!("{}#hist", &name))
+	(format!("{}:{}#info", &self.base, &name),
+	 format!("{}:{}#hist", &self.base, &name))
     }
 
     // Does some sanity checks on a device to see if it appears to be
@@ -200,7 +201,7 @@ impl Context {
 	// with this device.
 
 	let dev_name = format!("{}:{}", &self.base, &name);
-	let (info_key, hist_key) = self.get_keys(&dev_name);
+	let (info_key, hist_key) = self.get_keys(&name);
 
 	debug!("defining '{}'", &dev_name);
 
@@ -263,7 +264,6 @@ impl Context {
 	let mut cmd = pipe.atomic();
 
 	for (dev, val) in values {
-	    let dev = format!("{}:{}", &self.base, &dev);
 	    let (_, key) = self.get_keys(&dev);
 
 	    cmd = cmd.xadd(key, &stamp, &[("value", val.to_redis_args())]);
