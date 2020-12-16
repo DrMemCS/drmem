@@ -109,7 +109,7 @@ pub struct Context {
     devices: DevMap
 }
 
-impl Context {
+impl<'a> Context {
 
     // Creates a connection to redis.
 
@@ -193,13 +193,11 @@ impl Context {
     /// description of the device. `units` is an optional units
     /// field. Some devices (like boolean or string devices) don't
     /// require engineering units.
-    pub async fn def_device(&mut self,
+    pub async fn def_device(&'a mut self,
 			    name: &str,
 			    summary: &str,
-			    units: Option<String>) -> redis::RedisResult<()> {
-	// Create the device name and the names of the keys associated
-	// with this device.
-
+			    units: Option<String>)
+			    -> redis::RedisResult<&'a Device> {
 	let dev_name = format!("{}:{}", &self.base, &name);
 	let (info_key, hist_key) = self.get_keys(&name);
 
@@ -229,9 +227,13 @@ impl Context {
 	    }
 	};
 
-	let _ = self.devices.insert(dev_name, result);
+	let _ = self.devices.insert(dev_name.clone(), result);
 
-	Ok(())
+	if let Some(v) = self.devices.get(&dev_name) {
+	    Ok(v)
+	} else {
+	    unreachable!()
+	}
     }
 
     fn to_stamp(val: Option<u64>) -> String {
