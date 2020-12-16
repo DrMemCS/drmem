@@ -184,6 +184,13 @@ impl Context {
 	Ok(())
     }
 
+    fn to_stamp(val: Option<u64>) -> String {
+	match val {
+	    Some(v) => format!("{}", v),
+	    None => "*".to_string()
+	}
+    }
+
     /// Allows a driver to write values, associated with devices, to
     /// the database. `stamp` is the timestamp associated with every
     /// entry in the `values` array. With each call to this method,
@@ -202,12 +209,7 @@ impl Context {
 			      stamp: Option<u64>,
 			      values: &[(&str, data::Type)])
 			      -> redis::RedisResult<()> {
-	let stamp = if let Some(ts) = stamp {
-	    format!("{}", ts)
-	} else {
-	    "*".to_string()
-	};
-
+	let stamp = Context::to_stamp(stamp);
 	let mut pipe = redis::pipe();
 	let mut cmd = pipe.atomic();
 
