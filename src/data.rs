@@ -4,6 +4,7 @@ use redis::*;
 // `Type` defines the primitive types available to devices. Each
 // enumeration value wraps a unique, native Rust type.
 
+#[derive(Clone)]
 pub enum Type {
     Bool(bool),
     Int(i64),
