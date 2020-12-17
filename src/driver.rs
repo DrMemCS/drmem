@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use redis::*;
-use crate::data;
+use crate::data::Type;
 use crate::config::Config;
 
 // Define constant string slices that will be (hopefully) shared by
@@ -14,7 +14,11 @@ const KEY_UNITS: &'static str = "units";
 /// device. It caches meta information and standardizes fields for
 /// devices, as well.
 
-pub struct Device (HashMap<&'static str, data::Type>);
+type DeviceInfo = HashMap<String, Type>;
+
+pub struct UpdateContext<'a>((&'a str, Type));
+
+pub struct Device(DeviceInfo);
 
 impl Device {
     /// Creates a new instance of a `Device`. `summary` is a one-line
@@ -24,10 +28,10 @@ impl Device {
     pub fn create(summary: String, units: Option<String>) -> Device {
 	let mut map = HashMap::new();
 
-	map.insert(KEY_SUMMARY, data::Type::Str(summary));
+	map.insert(String::from(KEY_SUMMARY), Type::Str(summary));
 
 	if let Some(u) = units {
-	    map.insert(KEY_UNITS, data::Type::Str(u));
+	    map.insert(String::from(KEY_UNITS), Type::Str(u));
 	}
 	Device(map)
     }
@@ -36,18 +40,19 @@ impl Device {
     /// (presumably obtained from redis.) The fields are checked for
     /// proper structure.
 
-    pub fn create_from_map(map: HashMap<String, data::Type>)
+    pub fn create_from_map(map: HashMap<String, Type>)
 			   -> redis::RedisResult<Device> {
-	let mut result = HashMap::<&'static str, data::Type>::new();
+	let mut result = DeviceInfo::new();
 
 	// Verify a 'summary' field exists and is a string. The
 	// summary field is recommended to be a single line of text,
 	// but this code doesn't enforce it.
 
 	match map.get(KEY_SUMMARY) {
-	    Some(data::Type::Str(val)) => {
+	    Some(Type::Str(val)) => {
 		let _ =
-		    result.insert(KEY_SUMMARY, data::Type::Str(val.clone()));
+		    result.insert(String::from(KEY_SUMMARY),
+				  Type::Str(val.clone()));
 	    }
 	    Some(_) =>
 		return Err(RedisError::from((ErrorKind::TypeError,
@@ -61,9 +66,10 @@ impl Device {
 	// string value.
 
 	match map.get(KEY_UNITS) {
-	    Some(data::Type::Str(val)) => {
+	    Some(Type::Str(val)) => {
 		let _ =
-		    result.insert(KEY_UNITS, data::Type::Str(val.clone()));
+		    result.insert(String::from(KEY_UNITS),
+				  Type::Str(val.clone()));
 	    }
 	    Some(_) =>
 		return Err(RedisError::from((ErrorKind::TypeError,
@@ -77,11 +83,11 @@ impl Device {
     /// Returns a vector of pairs where each pair consists of a key
     /// and its associated value in the map.
 
-    pub fn to_vec(&self) -> Vec<(String, data::Type)> {
-	let mut result: Vec<(String, data::Type)> = vec![];
+    pub fn to_vec(&self) -> Vec<(String, Type)> {
+	let mut result: Vec<(String, Type)> = vec![];
 
 	for (k, v) in self.0.iter() {
-	    result.push((k.to_string(), v.clone()))
+	    result.push((String::from(k), v.clone()))
 	}
 	result
     }
@@ -143,7 +149,7 @@ impl<'a> Context {
 			pword: Option<String>) -> redis::RedisResult<Self> {
 	let db_con = Context::make_connection(cfg, name, pword).await?;
 
-	Ok(Context { base: base_name.to_string(),
+	Ok(Context { base: String::from(base_name),
 		     db_con,
 		     devices: DevMap::new() })
     }
@@ -171,7 +177,7 @@ impl<'a> Context {
 
 	match &data_type[..] {
 	    "hash" => {
-		let result: HashMap<String, data::Type> =
+		let result: HashMap<String, Type> =
 		    redis::Cmd::hgetall(info_key)
 		    .query_async(&mut self.db_con)
 		    .await?;
@@ -208,7 +214,7 @@ impl<'a> Context {
 	    Err(e) => {
 		warn!("'{}' isn't defined properly -- {:?}", &dev_name, e);
 
-		let dev = Device::create(summary.to_string(), units);
+		let dev = Device::create(String::from(summary), units);
 
 		// Create a command pipeline that deletes the two keys
 		// and then creates them properly with default values.
@@ -239,7 +245,7 @@ impl<'a> Context {
     fn to_stamp(val: Option<u64>) -> String {
 	match val {
 	    Some(v) => format!("{}", v),
-	    None => "*".to_string()
+	    None => String::from("*")
 	}
     }
 
@@ -259,7 +265,7 @@ impl<'a> Context {
     /// clients will see a consistent change.
     pub async fn write_values(&mut self,
 			      stamp: Option<u64>,
-			      values: &[(&str, data::Type)])
+			      values: &[(&str, Type)])
 			      -> redis::RedisResult<()> {
 	let stamp = Context::to_stamp(stamp);
 	let mut pipe = redis::pipe();
