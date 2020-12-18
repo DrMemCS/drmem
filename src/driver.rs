@@ -16,8 +16,6 @@ const KEY_UNITS: &'static str = "units";
 
 type DeviceInfo = HashMap<String, Type>;
 
-pub struct UpdateContext<'a>((&'a str, Type));
-
 pub struct Device(DeviceInfo);
 
 impl Device {
@@ -91,6 +89,17 @@ impl Device {
 	}
 	result
     }
+
+}
+
+pub struct DeviceContext(String);
+
+impl DeviceContext {
+
+    pub fn set(&self, v: Type) -> (String, Type) {
+	(self.0.clone(), v)
+    }
+
 }
 
 type DevMap = HashMap<String, Device>;
@@ -199,11 +208,11 @@ impl<'a> Context {
     /// description of the device. `units` is an optional units
     /// field. Some devices (like boolean or string devices) don't
     /// require engineering units.
-    pub async fn def_device(&'a mut self,
-			    name: &str,
-			    summary: &str,
-			    units: Option<String>)
-			    -> redis::RedisResult<&'a Device> {
+    pub async fn define_device(&'a mut self,
+			       name: &'a str,
+			       summary: &str,
+			       units: Option<String>)
+			       -> redis::RedisResult<DeviceContext> {
 	let dev_name = format!("{}:{}", &self.base, &name);
 	let (info_key, hist_key) = self.get_keys(&name);
 
@@ -235,11 +244,7 @@ impl<'a> Context {
 
 	let _ = self.devices.insert(dev_name.clone(), result);
 
-	if let Some(v) = self.devices.get(&dev_name) {
-	    Ok(v)
-	} else {
-	    unreachable!()
-	}
+	Ok(DeviceContext(String::from(name)))
     }
 
     fn to_stamp(val: Option<u64>) -> String {
@@ -265,7 +270,7 @@ impl<'a> Context {
     /// clients will see a consistent change.
     pub async fn write_values(&mut self,
 			      stamp: Option<u64>,
-			      values: &[(&str, Type)])
+			      values: &[(String, Type)])
 			      -> redis::RedisResult<()> {
 	let stamp = Context::to_stamp(stamp);
 	let mut pipe = redis::pipe();

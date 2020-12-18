@@ -3,7 +3,7 @@ use tokio::net::{TcpStream, tcp::ReadHalf};
 use tokio::io::{self, AsyncReadExt};
 use tokio::time::delay_for;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use palette::{Srgb, Yxy};
 use palette::named;
 
@@ -188,21 +188,25 @@ async fn monitor(cfg: &config::Config,
 
     let mut ctxt = driver::Context::create("sump", cfg, None, None).await?;
 
-    ctxt.def_device("service",
-		    "status of connection to sump pump module",
-		    None).await?;
+    let d_service =
+	ctxt.define_device("service",
+			   "status of connection to sump pump module",
+			   None).await?;
 
-    ctxt.def_device("state",
-		    "active state of sump pump",
-		    None).await?;
+    let d_state =
+	ctxt.define_device("state",
+			   "active state of sump pump",
+			   None).await?;
 
-    ctxt.def_device("duty",
-		    "sump pump on-time percentage during last cycle",
-		    Some("%".to_string())).await?;
+    let d_duty =
+	ctxt.define_device("duty",
+			   "sump pump on-time percentage during last cycle",
+			   Some(String::from("%"))).await?;
 
-    ctxt.def_device("in-flow",
-		    "sump pit fill rate during last cycle",
-		    Some("gpm".to_string())).await?;
+    let d_inflow =
+	ctxt.define_device("in-flow",
+			   "sump pit fill rate during last cycle",
+			   Some(String::from("gpm"))).await?;
 
     let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
     let c1 : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
@@ -213,8 +217,8 @@ async fn monitor(cfg: &config::Config,
 		let mut state = State::Unknown;
 		let (mut rx, _) = s.split();
 
-		ctxt.write_values(None, &[("service",
-					   data::Type::Bool(true))]).await?;
+		ctxt.write_values(None, &[d_service.set(Type::Bool(true))])
+		    .await?;
 
 		loop {
 		    match get_reading(&mut rx).await {
@@ -230,30 +234,28 @@ async fn monitor(cfg: &config::Config,
 							   bri: 255,
 							   color: Some(c1) }];
 				if let Err(e) = tx.send(sump_on).await {
-				    warn!("sump ON indicator returned: {:?}", e)
+				    warn!("sump ON indicator returned: {:?}",
+					  e)
 				}
 			    }
 
 			    ctxt
 				.write_values(None,
-					      &[("state",
-						 data::Type::Bool(true))])
+					      &[d_state.set(Type::Bool(true))])
 				.await?;
 			},
 			Ok((stamp, false)) => {
 			    if let Some((duty, in_flow)) = state.to_off(stamp) {
-				info!("duty: {}%, in flow: {} gpm", duty, in_flow);
+				info!("duty: {}%, in flow: {} gpm", duty,
+				      in_flow);
 
 				lamp_off(&mut tx, duty).await;
 
 				ctxt
 				    .write_values(None,
-						  &[("state",
-						     Type::Bool(false)),
-						    ("duty",
-						     Type::Flt(duty)),
-						    ("in-flow",
-						     Type::Flt(in_flow))])
+						  &[d_state.set(Type::Bool(false)),
+						    d_duty.set(Type::Flt(duty)),
+						    d_inflow.set(Type::Flt(in_flow))])
 				    .await?;
 			    }
 			},
@@ -261,8 +263,7 @@ async fn monitor(cfg: &config::Config,
 			    error!("couldn't read sump state -- {:?}", e);
 			    ctxt
 				.write_values(None,
-					      &[("service",
-						 data::Type::Bool(false))])
+					      &[d_service.set(Type::Bool(false))])
 				.await?;
 			    lamp_alert(&mut tx).await;
 			    break;
@@ -272,8 +273,8 @@ async fn monitor(cfg: &config::Config,
 		}
 	    },
 	    Err(e) => {
-		ctxt.write_values(None, &[("service",
-					   data::Type::Bool(false))]).await?;
+		ctxt.write_values(None, &[d_service.set(Type::Bool(false))])
+		    .await?;
 		lamp_alert(&mut tx).await;
 		error!("couldn't connect to pump process -- {:?}", e)
 	    }
