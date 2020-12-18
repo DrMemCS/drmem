@@ -6,6 +6,7 @@ use redis::*;
 
 #[derive(Clone)]
 pub enum Type {
+    Nil,
     Bool(bool),
     Int(i64),
     Flt(f64),
@@ -63,6 +64,7 @@ impl ToRedisArgs for Type {
     where W: ?Sized + RedisWrite,
     {
 	match self {
+	    Type::Nil => out.write_arg(b""),
 	    Type::Bool(false) => out.write_arg(b"F"),
 	    Type::Bool(true) => out.write_arg(b"T"),
 
@@ -121,7 +123,7 @@ impl FromRedisValue for Type {
 		    Err(RedisError::from((ErrorKind::TypeError, "unknown tag")))
 	    }
 	} else {
-	    Err(RedisError::from((ErrorKind::TypeError, "empty value")))
+	    Ok(Type::Nil)
 	}
     }
 }
