@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::TryInto;
 use redis::*;
 
 // `Type` defines the primitive types available to devices. Each
@@ -16,20 +16,20 @@ pub enum Type {
 impl Type {
     #[doc(hidden)]
     fn decode_integer(buf: &[u8]) -> RedisResult<Self> {
-	if buf.len() > 8 {
-	    if let Ok(&buf) = <&[u8; 8]>::try_from(&buf[1..]) {
-		return Ok(Type::Int(i64::from_be_bytes(buf)))
-	    }
+	if buf.len() >= 8 {
+	    let buf = buf[..8].try_into().unwrap();
+
+	    return Ok(Type::Int(i64::from_be_bytes(buf)))
 	}
 	Err(RedisError::from((ErrorKind::TypeError, "integer data too short")))
     }
 
     #[doc(hidden)]
     fn decode_float(buf: &[u8]) -> RedisResult<Self> {
-	if buf.len() > 8 {
-	    if let Ok(&buf) = <&[u8; 8]>::try_from(&buf[1..]) {
-		return Ok(Type::Flt(f64::from_be_bytes(buf)))
-	    }
+	if buf.len() >= 8 {
+	    let buf = buf[..8].try_into().unwrap();
+
+	    return Ok(Type::Flt(f64::from_be_bytes(buf)))
 	}
 	Err(RedisError::from((ErrorKind::TypeError,
 			      "floating point data too short")))
@@ -37,22 +37,21 @@ impl Type {
 
     #[doc(hidden)]
     fn decode_string(buf: &[u8]) -> RedisResult<Self> {
-	if buf.len() > 4 {
-	    if let Ok(&len_buf) = <&[u8; 4]>::try_from(&buf[1..]) {
-		let len = u32::from_be_bytes(len_buf);
+	if buf.len() >= 4 {
+	    let len_buf = buf[..4].try_into().unwrap();
+	    let len = u32::from_be_bytes(len_buf) as usize;
 
-		if buf.len() >= (5 + len) as usize {
-		    if let Ok(s) = String::from_utf8(buf.to_vec()) {
-			return Ok(Type::Str(s))
-		    } else {
-			return Err(RedisError::from((ErrorKind::TypeError,
-						     "string not UTF-8")))
-		    }
+	    if buf.len() >= (4 + len) as usize {
+		let str_vec = buf[4..4 + len].to_vec();
+
+		return match String::from_utf8(str_vec) {
+		    Ok(s) => Ok(Type::Str(s)),
+		    Err(_) => Err(RedisError::from((ErrorKind::TypeError,
+						    "string not UTF-8")))
 		}
 	    }
 	}
-	Err(RedisError::from((ErrorKind::TypeError,
-			      "string data too short")))
+	Err(RedisError::from((ErrorKind::TypeError, "string data too short")))
     }
 }
 
