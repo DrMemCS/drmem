@@ -22,7 +22,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
 	Config {
-	    log_level: "warn".to_string(),
+	    log_level: String::from("warn"),
 	    redis: Redis::default(),
 	    hue_bridge: HueBridge::default()
 	}
@@ -39,7 +39,7 @@ pub struct Redis {
 impl Default for Redis {
     fn default() -> Self {
 	Redis {
-	    addr: "127.0.0.1".to_string(),
+	    addr: String::from("127.0.0.1"),
 	    port: 6379,
 	    dbn: 0
 	}
@@ -55,7 +55,7 @@ pub struct HueBridge {
 impl Default for HueBridge {
     fn default() -> Self {
 	HueBridge {
-	    addr: "10.0.0.1".to_string(),
+	    addr: String::from("10.0.0.1"),
 	    key: None
 	}
     }
@@ -109,7 +109,7 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
     // Generate the configuration based on the command line arguments.
 
     if let Some(addr) = matches.value_of("db_addr") {
-	cfg.redis.addr = addr.to_string()
+	cfg.redis.addr = String::from(addr)
     }
 
     if let Some(port) = matches.value_of("db_port") {
@@ -130,9 +130,9 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 
     match matches.occurrences_of("verbose") {
         0 => (),
-        1 => cfg.log_level = "info".to_string(),
-        2 => cfg.log_level = "debug".to_string(),
-	_ => cfg.log_level = "trace".to_string()
+        1 => cfg.log_level = String::from("info"),
+        2 => cfg.log_level = String::from("debug"),
+	_ => cfg.log_level = String::from("trace")
     };
 
     // Return the config built from the command line and a flag

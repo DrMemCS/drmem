@@ -69,8 +69,8 @@ pub fn manager(cfg: &config::Config)
 	let (tx, rx) = mpsc::channel(20);
 
 	Ok((tx, task::spawn(controller(cfg.hue_bridge.addr.clone(),
-				       key.to_string(), rx))))
+				       String::from(key), rx))))
     } else {
-	Err(HueError::from_kind(HueErrorKind::Msg("no key defined".to_string())))
+	Err(HueError::from_kind(HueErrorKind::Msg(String::from("no key defined"))))
     }
 }
