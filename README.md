@@ -1,7 +1,40 @@
 # `drmem`
 
-The Doctor Memory Project is an attempt to build a home automation
-system -- a complete, easy-to-use control system for the home.
+The Doctor Memory Project strives to be a complete, easy-to-use
+control system for home automation. Like the Arduino and RaspberryPi
+communities, this project is aimed at the hobbyist that likes to
+tinker and build systems. Although commercial products will be
+supported, nothing prevents you from incorporating and controlling
+your own custom hardware.
+
+`drmem` has been developed with the following design goals:
+
+* *Reliability*. Excepting hardware failures, this control system
+should provide 24/7 service in controlling and monitoring its devices.
+Like any project of this type, careful design and extensive testing
+will help prevent issues. However, `drmem` will also be written in the
+Rust programming language which provides strong compile-time checks
+which eliminate whole classes of bugs that occur in other languages.
+
+* *Efficiency*. In this case, "efficient" means a responsible use of
+resources. Because we're using Rust, we have a systems programming
+language which generates optimal code and reduces CPU usage. Less CPU
+means reduced power consumption and less latency in responding to
+hardware inputs. In this project, we're also using the `tokio` async
+scheduler which means tasks will get distributed across all cores of
+the system, further reducing latencies (or providing more
+scalability.)
+
+NOTE: This project provides a general purpose control system. Meeting
+timing constraints depends on how fast your system is and how many
+devices are being acessed/controlled. It is *your* responsibility to
+determine whether you need another node to handle the extra load. If
+you write your own driver, *you* need to verify it works and meets
+your requirements.
+
+*THIS SOFTWARE IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.*
 
 ## Preparation
 
@@ -38,7 +71,7 @@ takes nearly an hour to build on my RPi 3+. On server boxes, it'll
 build much faster.
 
 Developers can run `cargo build` to create the debug version (found in
-`target/debug/drmemd`). 
+`target/debug/drmemd`).
 
 ## Colophon
 
