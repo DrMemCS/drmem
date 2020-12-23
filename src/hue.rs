@@ -29,11 +29,12 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::time::Duration;
-use huebridge::{HueResult, HueError, HueErrorKind, bridge::Bridge, commandlight::CommandLight};
+use huebridge::{ HueResult, HueError, HueErrorKind, bridge::Bridge,
+		 commandlight::CommandLight };
 use tracing::warn;
-use tokio::task::{self, JoinHandle};
-use tokio::sync::mpsc;
-use tokio::time::delay_for;
+use tokio::{ task::{ self, JoinHandle },
+	     sync::mpsc,
+	     time::delay_for };
 use palette::Yxy;
 
 use crate::config;

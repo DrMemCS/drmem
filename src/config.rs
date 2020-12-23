@@ -29,7 +29,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tracing::Level;
-use serde_derive::{Serialize,Deserialize};
+use serde_derive::{ Serialize, Deserialize };
 
 #[derive(Serialize,Deserialize)]
 pub struct Config {

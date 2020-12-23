@@ -29,13 +29,12 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::time::Duration;
-use tokio::io::{self, AsyncReadExt};
-use tokio::net::{TcpStream, tcp::ReadHalf};
-use tokio::time::delay_for;
-use tokio::sync::mpsc;
-use palette::{Srgb, Yxy};
-use palette::named;
-use tracing::{error, info, warn};
+use tokio::{ io::{ self, AsyncReadExt },
+	     net::{ TcpStream, tcp::ReadHalf },
+	     time::delay_for,
+	     sync::mpsc };
+use palette::{ named, Srgb, Yxy };
+use tracing::{ error, info, warn };
 
 use crate::config;
 use crate::hue;

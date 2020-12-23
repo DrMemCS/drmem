@@ -29,7 +29,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::{ debug, info, warn };
 use redis::*;
 use crate::data::Type;
 use crate::config::Config;

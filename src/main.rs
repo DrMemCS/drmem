@@ -30,8 +30,7 @@
 
 use std::time::Duration;
 use tracing::{warn};
-use palette::{Srgb, Yxy};
-use palette::named;
+use palette::{named, Srgb, Yxy};
 
 mod config;
 mod data;
