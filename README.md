@@ -9,14 +9,14 @@ your own custom hardware.
 
 `drmem` has been developed with the following design goals:
 
-* *Reliability*. Excepting hardware failures, this control system
+* **Reliability**. Excepting hardware failures, this control system
 should provide 24/7 service in controlling and monitoring its devices.
 Like any project of this type, careful design and extensive testing
 will help prevent issues. However, `drmem` will also be written in the
 Rust programming language which provides strong compile-time checks
 which eliminate whole classes of bugs that occur in other languages.
 
-* *Efficiency*. In this case, "efficient" means a responsible use of
+* **Efficiency**. In this case, "efficient" means a responsible use of
 resources. Because we're using Rust, we have a systems programming
 language which generates optimal code and reduces CPU usage. Less CPU
 means reduced power consumption and less latency in responding to
@@ -25,9 +25,23 @@ scheduler which means tasks will get distributed across all cores of
 the system, further reducing latencies (or providing more
 scalability.)
 
+* **Simplicity**. `drmem` is targeted for small installations so we
+want to minimize the number services that need to be managed. It turns
+out that the types available in `redis` can support most of the
+use-cases in a control system, so that's the core of `drmem`. Add in
+the process that interacts with hardware and an optional task that can
+tie devices together with functional rules and you get a small, yet
+powerful, control system.
+
+* **Accessibility**. Although `drmem` is capable running in the
+background with no user interaction, it is useful to have an interface
+that applications can use to provide dashboards, etc. for viewing and
+controlling `drmem` devices. This is provided by a built-in HTTP
+server hosting a GraphQL interface.
+
 NOTE: This project provides a general purpose control system. Meeting
 timing constraints depends on how fast your system is and how many
-devices are being acessed/controlled. It is *your* responsibility to
+devices are being accessed/controlled. It is *your* responsibility to
 determine whether you need another node to handle the extra load. If
 you write your own driver, *you* need to verify it works and meets
 your requirements.
