@@ -214,7 +214,7 @@ impl<'a> Context {
 	// If the info key is a "hash" type, we assume the device has
 	// been created and maintained properly.
 
-	match &data_type[..] {
+	match data_type.as_str() {
 	    "hash" => {
 		let result: HashMap<String, Type> =
 		    redis::Cmd::hgetall(info_key)
