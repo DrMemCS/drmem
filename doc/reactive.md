@@ -106,10 +106,10 @@ These are a handful of functions that come to mind.
 
         int     {int}   {int}
         2       0       0
-        2       1       no ouput
+        2       1       0
         2       2       2
-        2       1       no ouput
-        2       3       no ouput
+        2       1       2
+        2       3       2
         2       4       4
         2       1       1
 
@@ -143,7 +143,7 @@ These are a handful of functions that come to mind.
         {bool}  {int}   {int}   {result}
         true    1       10      1
                 2               2
-                        11      no ouput
+                        11      2
         false                   11
                         12      12
         true                    2
