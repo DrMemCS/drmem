@@ -193,14 +193,24 @@ impl<'a> Context {
 		     devices: DevMap::new() })
     }
 
-    // Generates the keys used to access meta info and historical
-    // data. Given a device "foo.bar", the convention is its meta
-    // information is stored using the key "foo.bar#info" and its
-    // historical data uses "foo.bar#hist".
+    // Returns the key that returns meta information for the device.
 
-    fn get_keys(&self, name: &str) -> (String, String) {
-	(format!("{}:{}#info", &self.base, &name),
-	 format!("{}:{}#hist", &self.base, &name))
+    fn info_key(&self, name: &str) -> String {
+	format!("{}:{}#info", &self.base, &name)
+    }
+
+    // Returns the key that returns time-series information for the
+    // device.
+
+    fn history_key(&self, name: &str) -> String {
+	format!("{}:{}#hist", &self.base, &name)
+    }
+
+    // Returns the key that is used to communicate settings to a
+    // device.
+
+    fn setting_key(&self, name: &str) -> String {
+	format!("{}:{}#set", &self.base, &name)
     }
 
     // Does some sanity checks on a device to see if it appears to be
@@ -244,7 +254,8 @@ impl<'a> Context {
 			       units: Option<String>)
 			       -> redis::RedisResult<DeviceContext> {
 	let dev_name = format!("{}:{}", &self.base, &name);
-	let (info_key, hist_key) = self.get_keys(&name);
+	let info_key = self.info_key(&name);
+	let hist_key = self.history_key(&name);
 
 	debug!("defining '{}'", &dev_name);
 
@@ -307,7 +318,7 @@ impl<'a> Context {
 	let mut cmd = pipe.atomic();
 
 	for (dev, val) in values {
-	    let (_, key) = self.get_keys(&dev);
+	    let key = self.history_key(&dev);
 
 	    cmd = cmd.xadd(key, &stamp, &[("value", val.to_redis_args())]);
 
