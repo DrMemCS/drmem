@@ -14,6 +14,7 @@ palette = "0.5"
 serde = "1.0.115"
 serde_derive = "1.0.115"
 huebridge = "0.3.0"
+hyper = "0.13.0"
 redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"

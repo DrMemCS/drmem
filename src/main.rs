@@ -31,11 +31,13 @@
 use std::time::Duration;
 use tracing::{warn};
 use palette::{named, Srgb, Yxy};
+use tokio::{ select, pin };
 
 mod config;
 mod data;
 mod driver;
 mod hue;
+mod httpd;
 mod drv_sump;
 
 #[tokio::main]
@@ -80,8 +82,20 @@ async fn main() -> redis::RedisResult<()> {
 		if let Err(e) = tx.send(prog).await {
 		    warn!("tx returned {:?}", e);
 		}
-		if let Err(e) = drv_sump::monitor(&cfg, tx).await {
-		    warn!("monitor returned: {:?}", e);
+
+		let svr_httpd = httpd::server();
+		pin!(svr_httpd);
+
+		let drv_pump = drv_sump::monitor(&cfg, tx);
+		pin!(drv_pump);
+
+		select! {
+		    Err(e) = drv_pump => {
+			warn!("monitor returned: {:?}", e);
+		    }
+		    Err(e) = svr_httpd => {
+			warn!("httpd returned: {:?}", e);
+		    }
 		}
 	    }
 	    Err(e) =>
