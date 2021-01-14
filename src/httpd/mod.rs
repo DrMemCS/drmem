@@ -1,24 +1,25 @@
-use std::convert::Infallible;
-use std::net::SocketAddr;
-use hyper::{Body, Request, Response, Server};
+use hyper::{Body, Method, Response, Server, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
 
-async fn hello_world(_req: Request<Body>)
-		     -> Result<Response<Body>, Infallible> {
-    Ok(Response::new("Hello, World, from Dr Memory!".into()))
-}
-
 pub async fn server() -> Result<(), hyper::Error> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let addr = ([0, 0, 0, 0], 3000).into();
 
     // A `Service` is needed for every connection, so this creates one
     // from our `hello_world` function.
 
-    let make_svc = make_service_fn(|_conn| async {
+    let make_svc = make_service_fn(|_| async {
+	Ok::<_, hyper::Error>(service_fn(|req| async move {
+	    match (req.method(), req.uri().path()) {
+		(&Method::GET, "/") =>
+		    juniper_hyper::graphiql("/graphql", None).await,
+		_ => {
+		    let mut response = Response::new(Body::empty());
 
-        // service_fn converts our function into a `Service`
-
-	Ok::<_, Infallible>(service_fn(hello_world))
+		    *response.status_mut() = StatusCode::NOT_FOUND;
+		    Ok(response)
+		}
+	    }
+	}))
     });
 
     Server::bind(&addr).serve(make_svc).await

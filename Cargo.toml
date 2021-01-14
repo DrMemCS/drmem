@@ -21,6 +21,8 @@ tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["log"] }
 tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
 log = { version = "0.4", features = []}
+juniper = "0.15"
+juniper_hyper = "0.6"
 
 [profile.release]
 opt-level = 3
