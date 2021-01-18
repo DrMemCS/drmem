@@ -168,17 +168,10 @@ async fn get_reading(rx: &mut ReadHalf<'_>) -> io::Result<(u64, bool)> {
 }
 
 async fn lamp_alert(tx: &mut mpsc::Sender<hue::Program>) -> () {
-    let b : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
     let r : Yxy = Srgb::<f32>::from_format(named::RED).into_linear().into();
     let prog =
-	vec![hue::HueCommands::On { light: 5, bri: 255, color: Some(b) },
-	     hue::HueCommands::On { light: 8, bri: 255, color: Some(b) },
-	     hue::HueCommands::Pause { len: Duration::from_millis(500) },
-	     hue::HueCommands::On { light: 5, bri: 255, color: Some(r) },
-	     hue::HueCommands::On { light: 8, bri: 255, color: Some(r) },
-	     hue::HueCommands::Pause { len: Duration::from_millis(5_000) },
-	     hue::HueCommands::Off { light: 5 },
-	     hue::HueCommands::Off { light: 8 }];
+	vec![hue::HueCommands::On { light: 5, bri: 255, color: Some(r) },
+	     hue::HueCommands::On { light: 8, bri: 255, color: Some(r) }];
 
     if let Err(e) = tx.send(prog).await {
 	warn!("sump alert returned error: {:?}", e)
@@ -186,22 +179,25 @@ async fn lamp_alert(tx: &mut mpsc::Sender<hue::Program>) -> () {
 }
 
 async fn lamp_off(tx: &mut mpsc::Sender<hue::Program>, duty: f64) -> () {
-    let prog = if duty < 10.0 {
-	vec![hue::HueCommands::Off { light: 5 },
-	     hue::HueCommands::Off { light: 8 }]
-    } else {
+    if duty >= 10.0 {
+	let b : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
 	let cc = if duty < 30.0 { named::YELLOW } else { named::RED };
 	let c : Yxy = Srgb::<f32>::from_format(cc).into_linear().into();
+	let prog =
+	    vec![hue::HueCommands::Off { light: 5 },
+		 hue::HueCommands::Off { light: 8 },
+		 hue::HueCommands::On { light: 5, bri: 255, color: Some(b) },
+		 hue::HueCommands::On { light: 8, bri: 255, color: Some(b) },
+		 hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
+		 hue::HueCommands::On { light: 5, bri: 255, color: Some(c) },
+		 hue::HueCommands::On { light: 8, bri: 255, color: Some(c) },
+		 hue::HueCommands::Pause { len: Duration::from_millis(4_000) },
+		 hue::HueCommands::Off { light: 5 },
+		 hue::HueCommands::Off { light: 8 }];
 
-	vec![hue::HueCommands::On { light: 5, bri: 255, color: Some(c) },
-	     hue::HueCommands::On { light: 8, bri: 255, color: Some(c) },
-	     hue::HueCommands::Pause { len: Duration::from_millis(5_000) },
-	     hue::HueCommands::Off { light: 5 },
-	     hue::HueCommands::Off { light: 8 }]
-    };
-
-    if let Err(e) = tx.send(prog).await {
-	warn!("sump off returned error: {:?}", e)
+	if let Err(e) = tx.send(prog).await {
+	    warn!("sump off returned error: {:?}", e)
+	}
     }
 }
 
@@ -237,7 +233,6 @@ pub async fn monitor(cfg: &config::Config,
 			   Some(String::from("gpm"))).await?;
 
     let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
-    let c1 : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
 
     loop {
 	match TcpStream::connect(addr).await {
@@ -250,34 +245,17 @@ pub async fn monitor(cfg: &config::Config,
 
 		loop {
 		    match get_reading(&mut rx).await {
-			Ok((stamp, true)) => {
+			Ok((stamp, true)) =>
 			    if state.to_on(stamp) {
-				use hue::HueCommands;
-
-				let sump_on =
-				    vec![HueCommands::On { light: 5,
-							   bri: 255,
-							   color: Some(c1) },
-					 HueCommands::On { light: 8,
-							   bri: 255,
-							   color: Some(c1) }];
-				if let Err(e) = tx.send(sump_on).await {
-				    warn!("sump ON indicator returned: {:?}",
-					  e)
-				}
-			    }
-
-			    ctxt
-				.write_values(None,
-					      &[d_state.set(Type::Bool(true))])
-				.await?;
-			},
+				ctxt
+				    .write_values(None,
+						  &[d_state.set(Type::Bool(true))])
+				    .await?;
+			    },
 			Ok((stamp, false)) => {
 			    if let Some((duty, in_flow)) = state.to_off(stamp) {
 				info!("duty: {}%, in flow: {} gpm", duty,
 				      in_flow);
-
-				lamp_off(&mut tx, duty).await;
 
 				ctxt
 				    .write_values(None,
@@ -285,6 +263,7 @@ pub async fn monitor(cfg: &config::Config,
 						    d_duty.set(Type::Flt(duty)),
 						    d_inflow.set(Type::Flt(in_flow))])
 				    .await?;
+				lamp_off(&mut tx, duty).await
 			    }
 			},
 			Err(e) => {
