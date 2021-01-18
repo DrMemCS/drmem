@@ -29,6 +29,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::collections::HashMap;
+use async_trait::async_trait;
 use tracing::{ debug, info, warn };
 use redis::*;
 use crate::data::Type;
@@ -330,4 +331,15 @@ impl<'a> Context {
 
 	Ok(())
     }
+}
+
+#[async_trait]
+pub trait API {
+    type Addr;
+
+    async fn new(ctxt: Context, addr: Self::Addr) -> Self;
+
+    fn name() -> String;
+    fn description() -> String;
+    fn summary(&self) -> String;
 }
