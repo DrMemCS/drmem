@@ -38,7 +38,7 @@ use tracing::{ error, info, warn };
 
 use crate::config;
 use crate::hue;
-use crate::data::Type;
+use crate::device::data::Type;
 use crate::driver;
 
 // The sump pump monitor uses a state machine to decide when to

@@ -32,106 +32,9 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use tracing::{ debug, info, warn };
 use redis::*;
-use crate::data::Type;
+
+use super::device::{Device, DeviceContext, data::Type};
 use crate::config::Config;
-
-// Define constant string slices that will be (hopefully) shared by
-// every device HashMap.
-
-const KEY_SUMMARY: &'static str = "summary";
-const KEY_UNITS: &'static str = "units";
-
-/// A `Device` type provides a view into the database for a single
-/// device. It caches meta information and standardizes fields for
-/// devices, as well.
-
-type DeviceInfo = HashMap<String, Type>;
-
-pub struct Device(DeviceInfo);
-
-impl Device {
-    /// Creates a new instance of a `Device`. `summary` is a one-line
-    /// summary of the device. If the value returned by the device is
-    /// in engineering units, then they can be specified with `units`.
-
-    pub fn create(summary: String, units: Option<String>) -> Device {
-	let mut map = HashMap::new();
-
-	map.insert(String::from(KEY_SUMMARY), Type::Str(summary));
-
-	if let Some(u) = units {
-	    map.insert(String::from(KEY_UNITS), Type::Str(u));
-	}
-	Device(map)
-    }
-
-    /// Creates a `Device` type from a hash map of key/values
-    /// (presumably obtained from redis.) The fields are checked for
-    /// proper structure.
-
-    pub fn create_from_map(map: HashMap<String, Type>)
-			   -> redis::RedisResult<Device> {
-	let mut result = DeviceInfo::new();
-
-	// Verify a 'summary' field exists and is a string. The
-	// summary field is recommended to be a single line of text,
-	// but this code doesn't enforce it.
-
-	match map.get(KEY_SUMMARY) {
-	    Some(Type::Str(val)) => {
-		let _ =
-		    result.insert(String::from(KEY_SUMMARY),
-				  Type::Str(val.clone()));
-	    }
-	    Some(_) =>
-		return Err(RedisError::from((ErrorKind::TypeError,
-					     "'summary' field isn't a string"))),
-	    None =>
-		return Err(RedisError::from((ErrorKind::TypeError,
-					     "'summary' is missing")))
-	}
-
-	// Verify there is no "units" field or, if it exists, it's a
-	// string value.
-
-	match map.get(KEY_UNITS) {
-	    Some(Type::Str(val)) => {
-		let _ =
-		    result.insert(String::from(KEY_UNITS),
-				  Type::Str(val.clone()));
-	    }
-	    Some(_) =>
-		return Err(RedisError::from((ErrorKind::TypeError,
-					     "'units' field isn't a string"))),
-	    None => ()
-	}
-
-	Ok(Device(result))
-    }
-
-    /// Returns a vector of pairs where each pair consists of a key
-    /// and its associated value in the map.
-
-    pub fn to_vec(&self) -> Vec<(String, Type)> {
-	let mut result: Vec<(String, Type)> = vec![];
-
-	for (k, v) in self.0.iter() {
-	    result.push((String::from(k), v.clone()))
-	}
-	result
-    }
-
-}
-
-pub struct DeviceContext(String);
-
-impl DeviceContext {
-
-    pub fn set(&self, v: Type) -> (String, Type) {
-	(self.0.clone(), v)
-    }
-
-}
 
 type DevMap = HashMap<String, Device>;
 
@@ -286,7 +189,7 @@ impl<'a> Context {
 
 	let _ = self.devices.insert(dev_name.clone(), result);
 
-	Ok(DeviceContext(String::from(name)))
+	Ok(DeviceContext::new(String::from(name)))
     }
 
     fn to_stamp(val: Option<u64>) -> String {

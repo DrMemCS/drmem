@@ -34,7 +34,7 @@ use palette::{named, Srgb, Yxy};
 use tokio::{ select, pin };
 
 mod config;
-mod data;
+mod device;
 mod driver;
 mod hue;
 mod httpd;
