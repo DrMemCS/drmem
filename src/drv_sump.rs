@@ -38,8 +38,7 @@ use tracing::{ error, info, warn };
 
 use crate::config;
 use crate::hue;
-use crate::device::data::Type;
-use crate::driver;
+use crate::device::{ db::Context, data::Type };
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -210,7 +209,7 @@ pub async fn monitor(cfg: &config::Config,
 		     -> redis::RedisResult<()> {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
-    let mut ctxt = driver::Context::create("sump", cfg, None, None).await?;
+    let mut ctxt = Context::create("sump", cfg, None, None).await?;
 
     let d_service =
 	ctxt.define_device("service",

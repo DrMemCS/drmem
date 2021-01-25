@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use redis::*;
 
 pub mod data;
+pub mod db;
 
 use data::Type;
 
