@@ -38,7 +38,7 @@ use tracing::{ error, info, warn };
 
 use crate::config;
 use crate::hue;
-use crate::device::{ db::Context, data::Type };
+use crate::device::db::Context;
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -212,24 +212,24 @@ pub async fn monitor(cfg: &config::Config,
     let mut ctxt = Context::create("sump", cfg, None, None).await?;
 
     let d_service =
-	ctxt.define_device("service",
-			   "status of connection to sump pump module",
-			   None).await?;
+	ctxt.define_device::<bool>("service",
+				   "status of connection to sump pump module",
+				   None).await?;
 
     let d_state =
-	ctxt.define_device("state",
-			   "active state of sump pump",
-			   None).await?;
+	ctxt.define_device::<bool>("state",
+				   "active state of sump pump",
+				   None).await?;
 
     let d_duty =
-	ctxt.define_device("duty",
-			   "sump pump on-time percentage during last cycle",
-			   Some(String::from("%"))).await?;
+	ctxt.define_device::<f64>("duty",
+				  "sump pump on-time percentage during last cycle",
+				  Some(String::from("%"))).await?;
 
     let d_inflow =
-	ctxt.define_device("in-flow",
-			   "sump pit fill rate during last cycle",
-			   Some(String::from("gpm"))).await?;
+	ctxt.define_device::<f64>("in-flow",
+				  "sump pit fill rate during last cycle",
+				  Some(String::from("gpm"))).await?;
 
     let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
 
@@ -239,16 +239,13 @@ pub async fn monitor(cfg: &config::Config,
 		let mut state = State::Unknown;
 		let (mut rx, _) = s.split();
 
-		ctxt.write_values(None, &[d_service.set(Type::Bool(true))])
-		    .await?;
+		ctxt.write_values(None, &[d_service.set(true)]).await?;
 
 		loop {
 		    match get_reading(&mut rx).await {
 			Ok((stamp, true)) =>
 			    if state.to_on(stamp) {
-				ctxt
-				    .write_values(None,
-						  &[d_state.set(Type::Bool(true))])
+				ctxt.write_values(None, &[d_state.set(true)])
 				    .await?;
 			    },
 			Ok((stamp, false)) => {
@@ -256,20 +253,17 @@ pub async fn monitor(cfg: &config::Config,
 				info!("duty: {}%, in flow: {} gpm", duty,
 				      in_flow);
 
-				ctxt
-				    .write_values(None,
-						  &[d_state.set(Type::Bool(false)),
-						    d_duty.set(Type::Flt(duty)),
-						    d_inflow.set(Type::Flt(in_flow))])
+				ctxt.write_values(None,
+						  &[d_state.set(false),
+						    d_duty.set(duty),
+						    d_inflow.set(in_flow)])
 				    .await?;
 				lamp_off(&mut tx, duty).await
 			    }
 			},
 			Err(e) => {
 			    error!("couldn't read sump state -- {:?}", e);
-			    ctxt
-				.write_values(None,
-					      &[d_service.set(Type::Bool(false))])
+			    ctxt.write_values(None, &[d_service.set(false)])
 				.await?;
 			    lamp_alert(&mut tx).await;
 			    break;
@@ -279,8 +273,7 @@ pub async fn monitor(cfg: &config::Config,
 		}
 	    },
 	    Err(e) => {
-		ctxt.write_values(None, &[d_service.set(Type::Bool(false))])
-		    .await?;
+		ctxt.write_values(None, &[d_service.set(false)]).await?;
 		lamp_alert(&mut tx).await;
 		error!("couldn't connect to pump process -- {:?}", e)
 	    }

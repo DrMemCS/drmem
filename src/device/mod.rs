@@ -28,13 +28,13 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::collections::HashMap;
+use std::{ collections::HashMap, marker::PhantomData };
 use redis::*;
 
 pub mod data;
 pub mod db;
 
-use data::Type;
+use data::{Compat, Type};
 
 // Define constant string slices that will be (hopefully) shared by
 // every device's HashMap.
@@ -48,14 +48,16 @@ const KEY_UNITS: &'static str = "units";
 
 type DeviceInfo = HashMap<String, Type>;
 
-pub struct Device(DeviceInfo);
+pub struct Device<T>(String, DeviceInfo, PhantomData<T>);
 
-impl Device {
+impl<T: Compat> Device<T> {
+
     /// Creates a new instance of a `Device`. `summary` is a one-line
     /// summary of the device. If the value returned by the device is
     /// in engineering units, then they can be specified with `units`.
 
-    pub fn create(summary: String, units: Option<String>) -> Device {
+    pub fn create(name: &str, summary: String, units: Option<String>)
+		  -> Self {
 	let mut map = HashMap::new();
 
 	map.insert(String::from(KEY_SUMMARY), Type::Str(summary));
@@ -63,15 +65,15 @@ impl Device {
 	if let Some(u) = units {
 	    map.insert(String::from(KEY_UNITS), Type::Str(u));
 	}
-	Device(map)
+	Device(String::from(name), map, PhantomData)
     }
 
     /// Creates a `Device` type from a hash map of key/values
     /// (presumably obtained from redis.) The fields are checked for
     /// proper structure.
 
-    pub fn create_from_map(map: HashMap<String, Type>)
-			   -> redis::RedisResult<Device> {
+    pub fn create_from_map(name: &str, map: HashMap<String, Type>)
+			   -> redis::RedisResult<Self> {
 	let mut result = DeviceInfo::new();
 
 	// Verify a 'summary' field exists and is a string. The
@@ -107,7 +109,7 @@ impl Device {
 	    None => ()
 	}
 
-	Ok(Device(result))
+	Ok(Device(String::from(name), result, PhantomData))
     }
 
     /// Returns a vector of pairs where each pair consists of a key
@@ -116,24 +118,14 @@ impl Device {
     pub fn to_vec(&self) -> Vec<(String, Type)> {
 	let mut result: Vec<(String, Type)> = vec![];
 
-	for (k, v) in self.0.iter() {
+	for (k, v) in self.1.iter() {
 	    result.push((String::from(k), v.clone()))
 	}
 	result
     }
 
-}
-
-pub struct DeviceContext(String);
-
-impl DeviceContext {
-
-    pub fn new(name: String) -> DeviceContext {
-	DeviceContext(name)
-    }
-
-    pub fn set(&self, v: Type) -> (String, Type) {
-	(self.0.clone(), v)
+    pub fn set(&self, v: T) -> (String, Type) {
+	(self.0.clone(), v.to_type())
     }
 
 }

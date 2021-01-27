@@ -32,10 +32,9 @@ use std::collections::HashMap;
 use tracing::{ debug, info, warn };
 use redis::*;
 
-use super::{ Device, DeviceContext, Type };
+use super::{ Device, Type };
+use super::data;
 use crate::config::Config;
-
-type DevMap = HashMap<String, Device>;
 
 /// Defines a driver "context" which is used to communicate with the
 /// `redis` database.
@@ -47,14 +46,6 @@ pub struct Context {
 
     /// This connection is used for interacting with the database.
     db_con: redis::aio::Connection,
-
-    /// A map which maps keys to devices. The key to the map becomes
-    /// the last segment of the device name. It recommended that the
-    /// key only contains alphanumeric characters and dashes
-    /// (specifically, adding a colon will be confusing since the
-    /// final segment should refer to a specific device in a driver
-    /// and the path refers to an instance of a driver.)
-    devices: DevMap
 }
 
 impl<'a> Context {
@@ -92,9 +83,7 @@ impl<'a> Context {
 			pword: Option<String>) -> redis::RedisResult<Self> {
 	let db_con = Context::make_connection(cfg, name, pword).await?;
 
-	Ok(Context { base: String::from(base_name),
-		     db_con,
-		     devices: DevMap::new() })
+	Ok(Context { base: String::from(base_name), db_con })
     }
 
     // Returns the key that returns meta information for the device.
@@ -120,9 +109,10 @@ impl<'a> Context {
     // Does some sanity checks on a device to see if it appears to be
     // valid.
 
-    async fn get_device(&mut self, info_key: &str)
-			-> redis::RedisResult<Device> {
-	let data_type: String = redis::cmd("TYPE").arg(info_key)
+    async fn get_device<T: data::Compat>(&mut self, name: &str)
+			-> redis::RedisResult<Device<T>> {
+	let info_key = self.info_key(name);
+	let data_type: String = redis::cmd("TYPE").arg(&info_key)
 	    .query_async(&mut self.db_con).await?;
 
 	// If the info key is a "hash" type, we assume the device has
@@ -131,11 +121,11 @@ impl<'a> Context {
 	match data_type.as_str() {
 	    "hash" => {
 		let result: HashMap<String, Type> =
-		    redis::Cmd::hgetall(info_key)
+		    redis::Cmd::hgetall(&info_key)
 		    .query_async(&mut self.db_con)
 		    .await?;
 
-		Device::create_from_map(result)
+		Device::create_from_map(name, result)
 	    },
 	    "none" =>
 		Err(RedisError::from((ErrorKind::TypeError,
@@ -152,23 +142,26 @@ impl<'a> Context {
     /// description of the device. `units` is an optional units
     /// field. Some devices (like boolean or string devices) don't
     /// require engineering units.
-    pub async fn define_device(&'a mut self,
-			       name: &'a str,
-			       summary: &str,
-			       units: Option<String>)
-			       -> redis::RedisResult<DeviceContext> {
+
+    pub async fn define_device<T: data::Compat>(&'a mut self,
+						name: &'a str,
+						summary: &str,
+						units: Option<String>) ->
+	redis::RedisResult<Device<T>>
+    {
 	let dev_name = format!("{}:{}", &self.base, &name);
 	let info_key = self.info_key(&name);
 	let hist_key = self.history_key(&name);
 
 	debug!("defining '{}'", &dev_name);
 
-	let result = match self.get_device(&info_key).await {
-	    Ok(v) => v,
+	match self.get_device::<T>(&info_key).await {
+	    Ok(v) =>
+		Ok(v),
 	    Err(e) => {
 		warn!("'{}' isn't defined properly -- {:?}", &dev_name, e);
 
-		let dev = Device::create(String::from(summary), units);
+		let dev = Device::create(name, String::from(summary), units);
 
 		// Create a command pipeline that deletes the two keys
 		// and then creates them properly with default values.
@@ -183,13 +176,9 @@ impl<'a> Context {
 		    .query_async(&mut self.db_con).await?;
 
 		info!("'{}' has been successfully created", &dev_name);
-		dev
+		Ok(dev)
 	    }
-	};
-
-	let _ = self.devices.insert(dev_name.clone(), result);
-
-	Ok(DeviceContext::new(String::from(name)))
+	}
     }
 
     fn to_stamp(val: Option<u64>) -> String {
