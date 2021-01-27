@@ -156,3 +156,31 @@ impl FromRedisValue for Type {
 	}
     }
 }
+
+pub trait Compat {
+    fn to_type(self) -> Type;
+}
+
+impl Compat for bool {
+    fn to_type(self) -> Type {
+	Type::Bool(self)
+    }
+}
+
+impl Compat for i64 {
+    fn to_type(self) -> Type {
+	Type::Int(self)
+    }
+}
+
+impl Compat for f64 {
+    fn to_type(self) -> Type {
+	Type::Flt(self)
+    }
+}
+
+impl Compat for String {
+    fn to_type(self) -> Type {
+	Type::Str(self)
+    }
+}
