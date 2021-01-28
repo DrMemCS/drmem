@@ -29,13 +29,15 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tracing::Level;
+use toml::value;
 use serde_derive::{ Serialize, Deserialize };
 
 #[derive(Serialize,Deserialize)]
 pub struct Config {
     log_level: String,
     pub redis: Redis,
-    pub hue_bridge: HueBridge
+    pub hue_bridge: HueBridge,
+    pub drivers: Vec<Driver>
 }
 
 impl Config {
@@ -54,7 +56,8 @@ impl Default for Config {
 	Config {
 	    log_level: String::from("warn"),
 	    redis: Redis::default(),
-	    hue_bridge: HueBridge::default()
+	    hue_bridge: HueBridge::default(),
+	    drivers: vec![]
 	}
     }
 }
@@ -89,6 +92,13 @@ impl Default for HueBridge {
 	    key: None
 	}
     }
+}
+
+#[derive(Serialize,Deserialize)]
+pub struct Driver {
+    pub driver: String,
+    pub prefix: String,		// XXX: needs to be validated
+    pub addr: value::Table
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
