@@ -1,0 +1,53 @@
+# Sets the default log level. Can be 'warn', 'info', 'debug', or
+# 'trace'.
+
+log_level = "warn"
+
+# This table configures the connection to the Redis service. All
+# drivers will use this information to make their connection. Client
+# accounts and passwords (if any) are specified in each driver's
+# config.
+
+[redis]
+
+addr = "127.0.0.1"
+port = 6379
+dbn = 0
+
+# This section is temporary. Philips Hue devices will eventually have
+# their own general purpose driver so this information will be
+# specified in the driver's config.
+
+[hue_bridge]
+
+addr = "192.168.1.1"
+key = "client_key_from_philips_hue"
+
+# This section starts the driver configuration. Since this section is
+# an array of tables, these drivers will be initialized in order of
+# definition. If there are dependencies between drivers, make sure
+# they're properly ordered.
+
+[[drivers]]
+
+driver = "driver-1-name"
+prefix = "driver-1-name-space"
+
+    [[drivers.addr]]
+
+    # Not sure how to express this in Rust's TOML library. Each driver
+    # has its own set of addressing parameters so it needs to be
+    # flexible enough to handle that.
+
+[[drivers]]
+
+driver = "driver-2-name"
+prefix = "driver-2-name-space"
+
+    [[drivers.addr]]
+
+# Emacs mode settings.
+#
+# Local Variables
+# mode:toml
+# End:
