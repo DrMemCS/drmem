@@ -38,7 +38,7 @@ use tracing::{ error, info, warn, debug };
 
 use crate::config;
 use crate::hue;
-use crate::device::db::Context;
+use crate::device::{ Device, db::Context };
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -211,25 +211,25 @@ pub async fn monitor(cfg: &config::Config,
 
     let mut ctxt = Context::create("sump", cfg, None, None).await?;
 
-    let d_service =
-	ctxt.define_device::<bool>("service",
-				   "status of connection to sump pump module",
-				   None).await?;
+    let d_service: Device<bool> =
+	ctxt.define_device("service",
+			   "status of connection to sump pump module",
+			   None).await?;
 
-    let d_state =
-	ctxt.define_device::<bool>("state",
-				   "active state of sump pump",
-				   None).await?;
+    let d_state: Device<bool> =
+	ctxt.define_device("state",
+			   "active state of sump pump",
+			   None).await?;
 
-    let d_duty =
-	ctxt.define_device::<f64>("duty",
-				  "sump pump on-time percentage during last cycle",
-				  Some(String::from("%"))).await?;
+    let d_duty: Device<f64> =
+	ctxt.define_device("duty",
+			   "sump pump on-time percentage during last cycle",
+			   Some(String::from("%"))).await?;
 
-    let d_inflow =
-	ctxt.define_device::<f64>("in-flow",
-				  "sump pit fill rate during last cycle",
-				  Some(String::from("gpm"))).await?;
+    let d_inflow: Device<f64> =
+	ctxt.define_device("in-flow",
+			   "sump pit fill rate during last cycle",
+			   Some(String::from("gpm"))).await?;
 
     let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
 
