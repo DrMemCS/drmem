@@ -34,7 +34,7 @@ use tokio::{ io::{ self, AsyncReadExt },
 	     time::delay_for,
 	     sync::mpsc };
 use palette::{ named, Srgb, Yxy };
-use tracing::{ error, info, warn };
+use tracing::{ error, info, warn, debug };
 
 use crate::config;
 use crate::hue;
@@ -269,7 +269,7 @@ pub async fn monitor(cfg: &config::Config,
 			    break;
 			}
 		    }
-		    info!("state: {:?}", state);
+		    debug!("state: {:?}", state);
 		}
 	    },
 	    Err(e) => {
