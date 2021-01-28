@@ -239,13 +239,13 @@ pub async fn monitor(cfg: &config::Config,
 		let mut state = State::Unknown;
 		let (mut rx, _) = s.split();
 
-		ctxt.write_values(None, &[d_service.set(true)]).await?;
+		ctxt.write_values(&[d_service.set(true)]).await?;
 
 		loop {
 		    match get_reading(&mut rx).await {
 			Ok((stamp, true)) =>
 			    if state.to_on(stamp) {
-				ctxt.write_values(None, &[d_state.set(true)])
+				ctxt.write_values(&[d_state.set(true)])
 				    .await?;
 			    },
 			Ok((stamp, false)) => {
@@ -253,8 +253,7 @@ pub async fn monitor(cfg: &config::Config,
 				info!("duty: {}%, in flow: {} gpm", duty,
 				      in_flow);
 
-				ctxt.write_values(None,
-						  &[d_state.set(false),
+				ctxt.write_values(&[d_state.set(false),
 						    d_duty.set(duty),
 						    d_inflow.set(in_flow)])
 				    .await?;
@@ -263,7 +262,8 @@ pub async fn monitor(cfg: &config::Config,
 			},
 			Err(e) => {
 			    error!("couldn't read sump state -- {:?}", e);
-			    ctxt.write_values(None, &[d_service.set(false)])
+			    ctxt.write_values(&[d_service.set(false),
+						d_state.set(false)])
 				.await?;
 			    lamp_alert(&mut tx).await;
 			    break;
@@ -273,7 +273,8 @@ pub async fn monitor(cfg: &config::Config,
 		}
 	    },
 	    Err(e) => {
-		ctxt.write_values(None, &[d_service.set(false)]).await?;
+		ctxt.write_values(&[d_service.set(false),
+				    d_state.set(false)]).await?;
 		lamp_alert(&mut tx).await;
 		error!("couldn't connect to pump process -- {:?}", e)
 	    }

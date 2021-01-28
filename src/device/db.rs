@@ -181,13 +181,6 @@ impl<'a> Context {
 	}
     }
 
-    fn to_stamp(val: Option<u64>) -> String {
-	match val {
-	    Some(v) => format!("{}", v),
-	    None => String::from("*")
-	}
-    }
-
     /// Allows a driver to write values, associated with devices, to
     /// the database. `stamp` is the timestamp associated with every
     /// entry in the `values` array. With each call to this method,
@@ -202,18 +195,16 @@ impl<'a> Context {
     /// devices. Each call to this function makes an atomic change to
     /// the database so if all devices are changed in a single call,
     /// clients will see a consistent change.
-    pub async fn write_values(&mut self,
-			      stamp: Option<u64>,
-			      values: &[(String, Type)])
+
+    pub async fn write_values(&mut self, values: &[(String, Type)])
 			      -> redis::RedisResult<()> {
-	let stamp = Context::to_stamp(stamp);
 	let mut pipe = redis::pipe();
 	let mut cmd = pipe.atomic();
 
 	for (dev, val) in values {
 	    let key = self.history_key(&dev);
 
-	    cmd = cmd.xadd(key, &stamp, &[("value", val.to_redis_args())]);
+	    cmd = cmd.xadd(key, "*", &[("value", val.to_redis_args())]);
 
 	    // TODO: need to check alarm limits -- and add the command
 	    // to announce it -- as the command is built-up.
