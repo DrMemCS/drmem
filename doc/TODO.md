@@ -1,21 +1,37 @@
-# Framework
+# `drmemd` core
 
-The framework is what's provided by `drmemd`. It loads drivers
+## Runtime Framework
+
+The runtime framework is what's provided by `drmemd`. It loads drivers
 specified by the configuration and gives them the environment in which
-to run.
+to run. It also routes device settings to the appropriate drivers.
 
 - [ ] Monitors tasks and restarts them if they fail.
 - [ ] Provides driver registration and factory methods to create
       instances.
-- [ ] Drivers are in shared libraries and loaded via configuration.
-      (this is related to the later item where each driver should
-      be in its own crate.)
+- [ ] Rather than have every driver linked into `drmemd`, they should
+      be shared libraries that are dynamically loaded, based on
+      whether the configuration says they'll be needed (this is
+      related to the later item where each driver should be in its own
+      crate.)
+
+## Client Interface
+
+`drmemd` contains a web server which provides a GraphQL interface for
+clients to use. This interface gives clients these abilities:
+
+- [ ] Get latest value of a device.
+- [ ] Get time range of data for a device.
+- [ ] Receive stream of updates from a device.
+- [ ] Send settings to devices.
+- [ ] Get device info.
+- [ ] Set device info.
 
 # Driver API
 
-The driver API defines the functions and data types drivers should use
-to interact with `redis`. It hides the details of how we map the
-driver's worldview into `redis` data types.
+The driver API defines the functions and data types drivers need to
+use to interact with `redis`. It hides the details of how we map the
+driver's worldview onto `redis` data types and capabilities.
 
 - [X] Writes hardware state to redis.
 - [ ] Receives settings (applies setting to hardware and writes to
@@ -27,22 +43,6 @@ driver's worldview into `redis` data types.
 - [X] Address information can be specified in config file.
 - [ ] Support register/unregister events
 - [ ] Needs to be in its own crate.
-
-# Client API
-
-The client API, like the driver API, defines functions and data types
-used to interface with `drmemd`. The purpose of this API, however, is
-for reading device data and sending settings to drivers. This is a
-lower-level interface than the proposed GraphQL interface.
-
-- [ ] Get device info.
-- [ ] Get latest value.
-- [ ] Get time range of data.
-- [ ] Receive stream of updates.
-- [ ] Set device info.
-- [ ] Send settings.
-- [ ] Needs to be in its own crate.
-- [ ] Should this only be GraphQL? No lower-level interface?
 
 # Drivers
 
