@@ -3,6 +3,13 @@ name = "drmem"
 version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2018"
+license = "BSD-3-Clause"
+publish = false
+categories = ["embedded", "command-line-utilities"]
+keywords = ["control-system", "automation"]
+
+[badges]
+maintenance { status = "actively-developed" }
 
 # See more keys and their definitions at
 # https://doc.rust-lang.org/cargo/reference/manifest.html
