@@ -132,27 +132,31 @@ impl ToRedisArgs for Type {
 impl FromRedisValue for Type {
     fn from_redis_value(v: &Value) -> RedisResult<Self>
     {
-	let buf: Vec<u8> = from_redis_value(v)?;
+	if let Value::Data(buf) = v {
 
-	// The buffer has to have at least one character in order to
-	// be decoded.
+	    // The buffer has to have at least one character in order
+	    // to be decoded.
 
-	if buf.len() > 0 {
-	    match buf[0] as char {
-		'F' => Ok(Type::Bool(false)),
-		'T' => Ok(Type::Bool(true)),
-		'I' => Self::decode_integer(&buf[1..]),
-		'D' => Self::decode_float(&buf[1..]),
-		'S' => Self::decode_string(&buf[1..]),
+	    if buf.len() > 0 {
+		match buf[0] as char {
+		    'F' => Ok(Type::Bool(false)),
+		    'T' => Ok(Type::Bool(true)),
+		    'I' => Self::decode_integer(&buf[1..]),
+		    'D' => Self::decode_float(&buf[1..]),
+		    'S' => Self::decode_string(&buf[1..]),
 
-		// Any other character in the tag field is unknown and
-		// can't be decoded as a `Type`.
+		    // Any other character in the tag field is unknown
+		    // and can't be decoded as a `Type`.
 
-		_ =>
-		    Err(RedisError::from((ErrorKind::TypeError, "unknown tag")))
+		    _ =>
+			Err(RedisError::from((ErrorKind::TypeError,
+					      "unknown tag")))
+		}
+	    } else {
+		Ok(Type::Nil)
 	    }
 	} else {
-	    Ok(Type::Nil)
+	    Err(RedisError::from((ErrorKind::TypeError, "bad redis::Value")))
 	}
     }
 }
