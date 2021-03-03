@@ -34,7 +34,7 @@ use redis::*;
 // `Type` defines the primitive types available to devices. Each
 // enumeration value wraps a unique, native Rust type.
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     Nil,
     Bool(bool),
@@ -183,4 +183,26 @@ impl Compat for String {
     fn to_type(self) -> Type {
 	Type::Str(self)
     }
+}
+
+// This section holds code used for testing the module. The
+// "#[cfg(test)]" attribute means the module will only be compiled and
+// included in the test executable; debug and release versions won't
+// have the code.
+
+#[cfg(test)]
+mod tests {
+    use redis::from_redis_value;
+    use super::*;
+
+    #[tokio::test]
+    async fn test_decoders() {
+	assert_ne!(Ok(Type::Nil), from_redis_value(&redis::Value::Nil));
+    }
+
+    #[tokio::test]
+    async fn test_encoders() {
+	assert!(true);
+    }
+
 }
