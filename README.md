@@ -15,14 +15,15 @@ Like any project of this type, careful design and extensive testing
 will help prevent issues. However, `drmem` will also be written in the
 Rust programming language which provides strong compile-time checks
 which eliminate whole classes of bugs that occur in other languages.
+This project is an experiment in writing mission-critical code in
+Rust.
 
-* **Efficiency**. In this case, "efficient" means a responsible use of
-resources. Because we're using Rust, we have a systems programming
-language which generates optimal code and reduces CPU usage. Less CPU
-means reduced power consumption and less latency in responding to
-hardware inputs. In this project, we're also using the `tokio` async
-scheduler which means tasks will get distributed across all cores of
-the system, further reducing latencies (or providing more
+* **Efficiency**. Because we're using Rust, we have a systems
+programming language which generates optimal code and reduces CPU
+usage. Less CPU means reduced power consumption and less latency in
+responding to hardware inputs. In this project, we're also using the
+`tokio` async scheduler which means tasks will get distributed across
+all cores of the system, further reducing latencies (or providing more
 scalability.)
 
 * **Simplicity**. `drmem` is targeted for small installations so we
@@ -55,20 +56,19 @@ MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.*
 The core service used in this control system is
 [Redis](https://redis.io/) which is light-weight, *fast* and has the
 data management features needed for a control system: device
-information, time-series storage of device readings, and routing
-setting requests.
+information and time-series storage of device readings.
 
 `redis` servers support multiple databases. The default database is
 number 0 and is what `drmem` uses. For testing, other database numbers
-can be used which isolates possibly buggy code from the "operational"
-database.
+can be used which isolates possibly buggy, development code from the
+"operational" database.
 
 Before setting up `drmem`, you'll need to have a running instance of
-`redis`. I set up an instance on my RaspberryPi to only listen on
-127.0.0.1. If my control system grows to other RPis, `redis` can be
-configured to listen on the local network. `redis` is an in-memory
-database, so I've configured mine to periodically dump the database on
-a NAS over NFS.
+`redis`. The author configured an instance on a RaspberryPi to only
+listen on 127.0.0.1. If the control system grows beyond one node,
+`redis` can be configured to listen on the local network. `redis` is
+an in-memory database, so the author configured it to periodically
+dump the database on a NAS over NFS.
 
 ## Building
 
@@ -81,8 +81,8 @@ users to specify which drivers to use in `drmem.conf`. Right now every
 driver gets built and run.**
 
 Check out the source, run `cargo build --release`, and relax; this
-takes nearly an hour to build on my RPi 3+. On server boxes, it'll
-build much faster.
+takes  a half hour to build on my RPi 3+. On server boxes, it'll build
+much faster.
 
 Developers can run `cargo build` to create the debug version (found in
 `target/debug/drmemd`).
