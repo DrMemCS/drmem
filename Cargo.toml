@@ -16,13 +16,13 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 async-trait = "0.1"
-clap = "^2"
+clap = { version = "2", default-features = false }
 toml = "0.5.6"
 palette = "0.5"
 serde = "1.0.115"
 serde_derive = "1.0.115"
 huebridge = "0.3.0"
-hyper = "0.13.0"
+hyper = { version = "0.13.0", default-features = false, features = ["runtime"] }
 redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
