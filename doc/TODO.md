@@ -33,6 +33,12 @@ The driver API defines the functions and data types drivers need to
 use to interact with `redis`. It hides the details of how we map the
 driver's worldview onto `redis` data types and capabilities.
 
+- [ ] When starting up, a driver instance does the following for each
+      device it manages:
+  - [ ] If the device exists, it verifies the entry is valid
+        (required fields present, proper types, etc.)
+  - [ ] If it doesn't exist, it creates the device entry and
+        inserts a default value into its history.
 - [X] Writes hardware state to redis.
 - [ ] Receives settings (applies setting to hardware and writes to
       redis.)
