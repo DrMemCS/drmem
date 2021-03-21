@@ -28,18 +28,37 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+/// This module defines the fundamental types that can be associated
+/// with a device. Drivers set the type for each device they manage
+/// and, for devices that can be set, only accept values of the
+/// correct type.
+///
+/// This is the module to expand, if devices need to return new,
+/// exotic types.
+
 use std::convert::TryInto;
 use redis::*;
 
-// `Type` defines the primitive types available to devices. Each
-// enumeration value wraps a unique, native Rust type.
-
+/// Primitive types available to devices.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
+    /// Devices shouldn't use this type as it may go away. It was
+    /// created to solve a limitation in an early version of `drmem`.
     Nil,
+
+    /// For devices that return/accept a simply true/false, on/off,
+    /// etc. state.
     Bool(bool),
+
+    /// For devices that return/accept an integer value. It is stored
+    /// as a signed, 64-bit value so a device returning an unsinged,
+    /// 32-bit integer will have enough space to represent it.
     Int(i64),
+
+    /// For devices that return/accept floating point numbers.
     Flt(f64),
+
+    ///For devices that return/accept text.
     Str(String)
 }
 
@@ -161,6 +180,8 @@ impl FromRedisValue for Type {
     }
 }
 
+/// This trait is defined for types that can trivially be converted to
+/// `data::Type`.
 pub trait Compat {
     fn to_type(self) -> Type;
 }
