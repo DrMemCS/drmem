@@ -28,7 +28,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tracing::Level;
+use tracing::{ warn, info, trace, Level };
 use toml::value;
 use serde_derive::{ Serialize, Deserialize };
 
@@ -36,8 +36,7 @@ use serde_derive::{ Serialize, Deserialize };
 pub struct Config {
     log_level: String,
     pub redis: Redis,
-    pub hue_bridge: HueBridge,
-    pub drivers: Vec<Driver>
+    pub driver: Vec<Driver>
 }
 
 impl Config {
@@ -56,8 +55,7 @@ impl Default for Config {
 	Config {
 	    log_level: String::from("warn"),
 	    redis: Redis::default(),
-	    hue_bridge: HueBridge::default(),
-	    drivers: vec![]
+	    driver: vec![]
 	}
     }
 }
@@ -80,25 +78,10 @@ impl Default for Redis {
 }
 
 #[derive(Serialize,Deserialize)]
-pub struct HueBridge {
-    pub addr: String,
-    pub key: Option<String>
-}
-
-impl Default for HueBridge {
-    fn default() -> Self {
-	HueBridge {
-	    addr: String::from("10.0.0.1"),
-	    key: None
-	}
-    }
-}
-
-#[derive(Serialize,Deserialize)]
 pub struct Driver {
-    pub driver: String,
+    pub name: String,
     pub prefix: String,		// XXX: needs to be validated
-    pub addr: value::Table
+    pub cfg: value::Table
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
@@ -184,14 +167,21 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 async fn from_file(path: &str) -> Option<Config> {
     use tokio::fs;
 
+    trace!("looking for file `{}`", path);
     if let Ok(contents) = fs::read(path).await {
 	let contents = String::from_utf8_lossy(&contents);
 
-	if let Ok(cfg) = toml::from_str(&contents) {
-	    return Some(cfg)
-	} else {
-	    println!("error parsing {}", path);
+	match toml::from_str(&contents) {
+	    Ok(cfg) => {
+		info!("reading config from `{}`", path);
+		return Some(cfg)
+	    }
+	    Err(e) => {
+		warn!("error parsing `{}` : '{:?}' ... ignoring", path, e);
+	    }
 	}
+    } else {
+	trace!("unable to read `{}`", path)
     }
     None
 }
@@ -219,6 +209,7 @@ async fn find_cfg() -> Config {
     }
 }
 
+#[tracing::instrument(name = "loading config")]
 pub async fn get() -> Option<Config> {
     let cfg = find_cfg().await;
     let (print_cfg, cfg) = from_cmdline(cfg);
@@ -231,5 +222,33 @@ pub async fn get() -> Option<Config> {
 	None
     } else {
 	Some(cfg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_config() {
+	let cfg = r#"
+log_level = "info"
+
+[redis]
+addr = '127.0.0.1'
+port = 100
+dbn = 0
+
+# This section defines the drivers that get loaded.
+
+[[driver]]
+name = 'hue'
+prefix = 'hue'
+cfg = { ip = '127.0.0.1', key = 'blah' }
+"#;
+
+	if let Err(e) = toml::from_str::<Config>(cfg) {
+	    panic!("couldn't parse: {}", e)
+	}
     }
 }

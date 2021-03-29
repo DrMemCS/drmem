@@ -94,12 +94,12 @@ async fn controller(addr: String, key: String,
     }
 }
 
-pub fn manager(cfg: &config::Config)
+pub fn manager(_cfg: &config::Config)
 	       -> HueResult<(mpsc::Sender<Program>, JoinHandle<()>)> {
-    if let Some(key) = &cfg.hue_bridge.key {
+    if let Some(key) = Some("abc") {
 	let (tx, rx) = mpsc::channel(20);
 
-	Ok((tx, task::spawn(controller(cfg.hue_bridge.addr.clone(),
+	Ok((tx, task::spawn(controller(String::from("192.168.1.4"),
 				       String::from(key), rx))))
     } else {
 	Err(HueError::from_kind(HueErrorKind::Msg(String::from("no key defined"))))
