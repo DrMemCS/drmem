@@ -1,36 +1,7 @@
-[package]
-name = "drmem"
-version = "0.1.0"
-authors = ["Rich Neswold <rich.neswold@gmail.com>"]
-edition = "2018"
-license = "BSD-3-Clause"
-publish = false
-categories = ["embedded", "command-line-utilities"]
-keywords = ["control-system", "automation"]
+[workspace]
+members = ["drmem-driver-api", "drmem-config", "backends/*", "drmemd"]
 
-[badges]
-maintenance = { status = "actively-developed" }
-
-# See more keys and their definitions at
-# https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-async-trait = "0.1"
-clap = { version = "2", default-features = false }
-toml = "0.5.6"
-palette = "0.5"
-serde = "1.0.115"
-serde_derive = "1.0.115"
-huebridge = "0.3.0"
-hyper = { version = "0.13.0", default-features = false, features = ["runtime"] }
-redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
-tracing-subscriber = "^0.2"
-tracing-futures = "^0.2"
-tracing = { version = "^0.1", features = ["log"] }
-tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
-log = { version = "0.4", features = []}
-juniper = "0.15"
-juniper_hyper = "0.6"
+# Profiles used by all binaries and packages.
 
 [profile.release]
 opt-level = 3

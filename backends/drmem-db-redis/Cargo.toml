@@ -1,0 +1,27 @@
+[package]
+name = "drmem-db-redis"
+version = "0.1.0"
+authors = ["Rich Neswold <rich.neswold@gmail.com>"]
+edition = "2018"
+license = "BSD-3-Clause"
+publish = false
+categories = ["embedded"]
+keywords = ["control-system", "automation"]
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[dependencies]
+async-trait = "0.1"
+redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
+tracing-subscriber = "^0.2"
+tracing-futures = "^0.2"
+tracing = { version = "^0.1", features = ["log"] }
+tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
+
+drmem-driver-api = { path = "../../drmem-driver-api", version = "0.1" }
+
+[dependencies.drmem-config]
+path = "../../drmem-config"
+version = "0.1"
+features = ["redis-backend"]

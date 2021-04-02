@@ -1,0 +1,40 @@
+[package]
+name = "drmem"
+version = "0.1.0"
+authors = ["Rich Neswold <rich.neswold@gmail.com>"]
+edition = "2018"
+license = "BSD-3-Clause"
+publish = false
+categories = ["embedded", "command-line-utilities"]
+keywords = ["control-system", "automation"]
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+# See more keys and their definitions at
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1"
+palette = "0.5"
+huebridge = "0.3.0"
+hyper = { version = "0.13.0", default-features = false, features = ["runtime"] }
+redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
+tracing-subscriber = "^0.2"
+tracing-futures = "^0.2"
+tracing = { version = "^0.1", features = ["log"] }
+tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
+juniper = "0.15"
+juniper_hyper = "0.6"
+
+drmem-driver-api = { path = "../drmem-driver-api", version = "0.1" }
+drmem-config = { path = "../drmem-config", version = "0.1" }
+
+[dependencies.drmem-db-redis]
+path = "../backends/drmem-db-redis"
+version = "0.1"
+optional = true
+
+[features]
+default = ["redis-backend"]
+redis-backend = ["drmem-db-redis"]

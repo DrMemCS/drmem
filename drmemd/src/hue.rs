@@ -36,8 +36,7 @@ use tokio::{ task::{ self, JoinHandle },
 	     sync::mpsc,
 	     time::delay_for };
 use palette::Yxy;
-
-use crate::config;
+use drmem_config;
 
 #[derive(Debug)]
 pub enum HueCommands {
@@ -94,7 +93,7 @@ async fn controller(addr: String, key: String,
     }
 }
 
-pub fn manager(_cfg: &config::Config)
+pub fn manager(_cfg: &drmem_config::Config)
 	       -> HueResult<(mpsc::Sender<Program>, JoinHandle<()>)> {
     if let Some(key) = Some("abc") {
 	let (tx, rx) = mpsc::channel(20);

@@ -29,12 +29,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{ collections::HashMap, marker::PhantomData };
-use redis::*;
-
-pub mod data;
-pub mod db;
-
-use data::{Compat, Type};
+use crate::{ Result, types::{ Compat, DeviceValue, Error, ErrorKind } };
 
 // Define constant string slices that will be (hopefully) shared by
 // every device's HashMap.
@@ -46,11 +41,11 @@ const KEY_UNITS: &'static str = "units";
 /// device. It caches meta information and standardizes fields for
 /// devices, as well.
 
-type DeviceInfo = HashMap<String, Type>;
+type DeviceInfo = HashMap<String, DeviceValue>;
 
 pub struct Device<T>(String, DeviceInfo, PhantomData<T>);
 
-impl<T: Compat> Device<T> {
+impl<T: Compat + Send> Device<T> {
 
     /// Creates a new instance of a `Device`. `summary` is a one-line
     /// summary of the device. If the value returned by the device is
@@ -60,10 +55,10 @@ impl<T: Compat> Device<T> {
 		  -> Self {
 	let mut map = HashMap::new();
 
-	map.insert(String::from(KEY_SUMMARY), Type::Str(summary));
+	map.insert(String::from(KEY_SUMMARY), DeviceValue::Str(summary));
 
 	if let Some(u) = units {
-	    map.insert(String::from(KEY_UNITS), Type::Str(u));
+	    map.insert(String::from(KEY_UNITS), DeviceValue::Str(u));
 	}
 	Device(String::from(name), map, PhantomData)
     }
@@ -72,8 +67,8 @@ impl<T: Compat> Device<T> {
     /// (presumably obtained from redis.) The fields are checked for
     /// proper structure.
 
-    pub fn create_from_map(name: &str, map: HashMap<String, Type>)
-			   -> redis::RedisResult<Self> {
+    pub fn create_from_map(name: &str, map: HashMap<String, DeviceValue>)
+			   -> Result<Self> {
 	let mut result = DeviceInfo::new();
 
 	// Verify a 'summary' field exists and is a string. The
@@ -81,31 +76,31 @@ impl<T: Compat> Device<T> {
 	// but this code doesn't enforce it.
 
 	match map.get(KEY_SUMMARY) {
-	    Some(Type::Str(val)) => {
+	    Some(DeviceValue::Str(val)) => {
 		let _ =
 		    result.insert(String::from(KEY_SUMMARY),
-				  Type::Str(val.clone()));
+				  DeviceValue::Str(val.clone()));
 	    }
 	    Some(_) =>
-		return Err(RedisError::from((ErrorKind::TypeError,
-					     "'summary' field isn't a string"))),
+		return Err(Error(ErrorKind::TypeError,
+				 String::from("'summary' field isn't a string"))),
 	    None =>
-		return Err(RedisError::from((ErrorKind::TypeError,
-					     "'summary' is missing")))
+		return Err(Error(ErrorKind::NotFound,
+				 String::from("'summary' is missing")))
 	}
 
 	// Verify there is no "units" field or, if it exists, it's a
 	// string value.
 
 	match map.get(KEY_UNITS) {
-	    Some(Type::Str(val)) => {
+	    Some(DeviceValue::Str(val)) => {
 		let _ =
 		    result.insert(String::from(KEY_UNITS),
-				  Type::Str(val.clone()));
+				  DeviceValue::Str(val.clone()));
 	    }
 	    Some(_) =>
-		return Err(RedisError::from((ErrorKind::TypeError,
-					     "'units' field isn't a string"))),
+		return Err(Error(ErrorKind::TypeError,
+				 String::from("'units' field isn't a string"))),
 	    None => ()
 	}
 
@@ -115,16 +110,14 @@ impl<T: Compat> Device<T> {
     /// Returns a vector of pairs where each pair consists of a key
     /// and its associated value in the map.
 
-    pub fn to_vec(&self) -> Vec<(String, Type)> {
-	let mut result: Vec<(String, Type)> = vec![];
-
-	for (k, v) in self.1.iter() {
-	    result.push((String::from(k), v.clone()))
-	}
-	result
+    pub fn to_vec(&self) -> Vec<(String, DeviceValue)> {
+	self.1
+	    .iter()
+	    .map(|(k, v)| (k.clone(), v.clone()))
+	    .collect()
     }
 
-    pub fn set(&self, v: T) -> (String, Type) {
+    pub fn set(&self, v: T) -> (String, DeviceValue) {
 	(self.0.clone(), v.to_type())
     }
 

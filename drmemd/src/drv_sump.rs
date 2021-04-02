@@ -35,10 +35,11 @@ use tokio::{ io::{ self, AsyncReadExt },
 	     sync::mpsc };
 use palette::{ named, Srgb, Yxy };
 use tracing::{ error, info, warn, debug };
+use drmem_driver_api::{ device::Device, Result, DbContext };
+use drmem_db_redis::{ Context, ConfigRedis };
+use drmem_config;
 
-use crate::config;
 use crate::hue;
-use crate::device::{ Device, db::Context };
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -204,12 +205,14 @@ async fn lamp_off(tx: &mut mpsc::Sender<hue::Program>, duty: f64) -> () {
 // interesting, related values, and writes these details to associated
 // devices' history.
 
-pub async fn monitor(cfg: &config::Config,
+pub async fn monitor(_cfg: &drmem_config::Config,
 		     mut tx: mpsc::Sender<hue::Program>)
-		     -> redis::RedisResult<()> {
+		     -> Result<()> {
     use std::net::{Ipv4Addr, SocketAddrV4};
 
-    let mut ctxt = Context::create("sump", cfg, None, None).await?;
+    let mut ctxt =
+	Context::create("sump", &ConfigRedis::default(), None, None)
+	.await?;
 
     let d_service: Device<bool> =
 	ctxt.define_device("service",

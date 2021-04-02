@@ -1,0 +1,26 @@
+[package]
+name = "drmem-config"
+version = "0.1.0"
+authors = ["Rich Neswold <rich.neswold@gmail.com>"]
+edition = "2018"
+license = "BSD-3-Clause"
+publish = false
+categories = ["embedded"]
+keywords = ["control-system", "automation"]
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[dependencies]
+async-trait = "0.1"
+clap = { version = "2", default-features = false }
+toml = "0.5.6"
+serde = "1.0.115"
+serde_derive = "1.0.115"
+tracing-subscriber = "^0.2"
+tracing-futures = "^0.2"
+tracing = { version = "^0.1", features = ["log"] }
+tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
+
+[features]
+redis-backend = []

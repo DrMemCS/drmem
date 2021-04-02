@@ -32,17 +32,16 @@ use std::time::Duration;
 use tracing::{warn};
 use palette::{named, Srgb, Yxy};
 use tokio::{ select, pin };
+use drmem_driver_api::Result;
+use drmem_config;
 
-mod config;
-mod device;
-mod driver;
 mod hue;
 mod httpd;
 mod drv_sump;
 
 #[tokio::main]
-async fn main() -> redis::RedisResult<()> {
-    if let Some(cfg) = config::get().await {
+async fn main() -> Result<()> {
+    if let Some(cfg) = drmem_config::get().await {
 
 	// Initialize the log system. The max log level is determined
 	// by the user (either through the config file or the command
