@@ -11,15 +11,12 @@ keywords = ["control-system", "automation"]
 [badges]
 maintenance = { status = "actively-developed" }
 
-# See more keys and their definitions at
-# https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 async-trait = "0.1"
 palette = "0.5"
 huebridge = "0.3.0"
 hyper = { version = "0.13.0", default-features = false, features = ["runtime"] }
-redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
+#redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["log"] }
