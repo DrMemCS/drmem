@@ -34,6 +34,7 @@ use async_trait::async_trait;
 use tracing::{ debug, info, warn };
 use drmem_driver_api::{ DbContext, Result, device::Device,
 		        types::{ Compat, DeviceValue, Error, ErrorKind } };
+use drmem_config::RedisConfig;
 
 // Translates a Redis error into a DrMem error.
 
@@ -190,22 +191,6 @@ fn from_value(v: &redis::Value) -> Result<DeviceValue>
     }
 }
 
-pub struct ConfigRedis {
-    pub addr: String,
-    pub port: u16,
-    pub dbn: i64
-}
-
-impl Default for ConfigRedis {
-    fn default() -> Self {
-	ConfigRedis {
-	    addr: String::from("127.0.0.1"),
-	    port: 6379,
-	    dbn: 0
-	}
-    }
-}
-
 /// Defines a context that uses redis for the back-end storage.
 pub struct Context {
     /// The base name used by the instance of the driver. Defining
@@ -220,7 +205,7 @@ impl<'a> Context {
 
     // Creates a connection to redis.
 
-    async fn make_connection(cfg: &ConfigRedis,
+    async fn make_connection(cfg: &RedisConfig,
 			     name: Option<String>,
 			     pword: Option<String>)
 			     -> Result<redis::aio::Connection> {
@@ -304,7 +289,7 @@ impl<'a> Context {
 
 #[async_trait]
 impl DbContext for Context {
-    type Cfg = ConfigRedis;
+    type Cfg = RedisConfig;
 
     /// Builds a new backend context which can interacts with `redis`.
     /// The parameters in `cfg` will be used to locate the `redis`

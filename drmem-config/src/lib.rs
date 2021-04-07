@@ -32,10 +32,30 @@ use tracing::{ warn, info, trace, Level };
 use toml::value;
 use serde_derive::{ Serialize, Deserialize };
 
+#[cfg(feature = "redis-backend")]
+#[derive(Serialize,Deserialize)]
+pub struct RedisConfig {
+    pub addr: String,
+    pub port: u16,
+    pub dbn: i64
+}
+
+#[cfg(feature = "redis-backend")]
+impl Default for RedisConfig {
+    fn default() -> Self {
+	RedisConfig {
+	    addr: String::from("127.0.0.1"),
+	    port: 6379,
+	    dbn: 0
+	}
+    }
+}
+
 #[derive(Serialize,Deserialize)]
 pub struct Config {
     log_level: String,
-    pub redis: Redis,
+    #[cfg(feature = "redis-backend")]
+    pub redis: RedisConfig,
     pub driver: Vec<Driver>
 }
 
@@ -54,25 +74,9 @@ impl Default for Config {
     fn default() -> Self {
 	Config {
 	    log_level: String::from("warn"),
-	    redis: Redis::default(),
+	    #[cfg(feature = "redis-backend")]
+	    redis: RedisConfig::default(),
 	    driver: vec![]
-	}
-    }
-}
-
-#[derive(Serialize,Deserialize)]
-pub struct Redis {
-    pub addr: String,
-    pub port: u16,
-    pub dbn: i64
-}
-
-impl Default for Redis {
-    fn default() -> Self {
-	Redis {
-	    addr: String::from("127.0.0.1"),
-	    port: 6379,
-	    dbn: 0
 	}
     }
 }
@@ -99,24 +103,6 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 	     .value_name("FILE")
 	     .help("Specifies the configuration file")
 	     .takes_value(true))
-        .arg(Arg::with_name("db_addr")
-	     .short("A")
-	     .long("db_addr")
-	     .value_name("ADDR")
-	     .help("IP address of redis database; defaults to localhost")
-	     .takes_value(true))
-        .arg(Arg::with_name("db_port")
-	     .short("P")
-	     .long("db_port")
-	     .value_name("PORT")
-	     .help("IP port address of redis database; defaults to 6379")
-	     .takes_value(true))
-        .arg(Arg::with_name("db_num")
-	     .short("n")
-	     .long("db_num")
-	     .value_name("DB_NUM")
-	     .help("selects which redis database to use; defaults to 0")
-	     .takes_value(true))
         .arg(Arg::with_name("verbose")
 	     .short("v")
 	     .long("verbose")
@@ -128,26 +114,6 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 	     .help("Displays the configuration and exits")
 	     .takes_value(false))
         .get_matches();
-
-    // Generate the configuration based on the command line arguments.
-
-    if let Some(addr) = matches.value_of("db_addr") {
-	cfg.redis.addr = String::from(addr)
-    }
-
-    if let Some(port) = matches.value_of("db_port") {
-	if let Ok(port) = port.parse::<u16>() {
-	    cfg.redis.port = port
-	}
-    }
-
-    if let Some(dbn) = matches.value_of("db_num") {
-	if let Ok(dbn) = dbn.parse::<i64>() {
-	    if dbn < 16 {
-		cfg.redis.dbn = dbn
-	    }
-	}
-    }
 
     // The number of '-v' options determines the log level.
 
@@ -231,6 +197,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_config() {
+	#[cfg(feature = "redis-backend")]
 	let cfg = r#"
 log_level = "info"
 
@@ -238,6 +205,18 @@ log_level = "info"
 addr = '127.0.0.1'
 port = 100
 dbn = 0
+
+# This section defines the drivers that get loaded.
+
+[[driver]]
+name = 'hue'
+prefix = 'hue'
+cfg = { ip = '127.0.0.1', key = 'blah' }
+"#;
+
+	#[cfg(not(feature = "redis-backend"))]
+	let cfg = r#"
+log_level = "info"
 
 # This section defines the drivers that get loaded.
 

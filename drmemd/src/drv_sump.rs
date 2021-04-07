@@ -36,8 +36,8 @@ use tokio::{ io::{ self, AsyncReadExt },
 use palette::{ named, Srgb, Yxy };
 use tracing::{ error, info, warn, debug };
 use drmem_driver_api::{ device::Device, Result, DbContext };
-use drmem_db_redis::{ Context, ConfigRedis };
-use drmem_config;
+use drmem_db_redis::Context;
+use drmem_config::RedisConfig;
 
 use crate::hue;
 
@@ -211,7 +211,7 @@ pub async fn monitor(_cfg: &drmem_config::Config,
     use std::net::{Ipv4Addr, SocketAddrV4};
 
     let mut ctxt =
-	Context::create("sump", &ConfigRedis::default(), None, None)
+	Context::create("sump", &RedisConfig::default(), None, None)
 	.await?;
 
     let d_service: Device<bool> =
