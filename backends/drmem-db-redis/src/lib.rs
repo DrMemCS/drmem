@@ -330,7 +330,7 @@ impl DbContext for Context {
 
 	debug!("defining '{}'", &dev_name);
 
-	match self.get_device::<T>(&info_key).await {
+	match self.get_device::<T>(&name).await {
 	    Ok(v) =>
 		Ok(v),
 	    Err(e) => {
