@@ -325,8 +325,6 @@ impl DbContext for Context {
 	Result<Device<T>>
     {
 	let dev_name = format!("{}:{}", &self.base, &name);
-	let info_key = self.info_key(&name);
-	let hist_key = self.history_key(&name);
 
 	debug!("defining '{}'", &dev_name);
 
@@ -336,6 +334,8 @@ impl DbContext for Context {
 	    Err(e) => {
 		warn!("'{}' isn't defined properly -- {:?}", &dev_name, e);
 
+		let hist_key = self.history_key(&name);
+		let info_key = self.info_key(&name);
 		let dev = Device::create(name, String::from(summary), units);
 
 		let temp = dev.to_vec();
