@@ -117,7 +117,7 @@ impl State {
 		    *self = State::Off { off_time: stamp };
 		    Some((duty.round() / 10.0, in_flow))
 		} else {
-		    warn!("ignoring short ON time -- {:.3} s", on_time);
+		    warn!("ignoring short ON time -- {:.0} ms", on_time);
 		    None
 		}
 	    }
