@@ -34,9 +34,12 @@ use toml::value;
 pub mod types;
 pub mod device;
 
+/// A `Result` type where the error value is a value from
+/// `drmem_api::types::Error`.
+
 pub type Result<T> = std::result::Result<T, types::Error>;
 
-/// The `Context` trait defines the API that a back-end needs to
+/// The `DbContext` trait defines the API that a back-end needs to
 /// implement to provide storage for -- and access to -- the state of
 /// each driver's devices.
 
@@ -76,11 +79,29 @@ pub trait DbContext {
 			  -> Result<()>;
 }
 
+/// All drivers implement the `Driver` trait.
 #[async_trait]
 pub trait Driver {
+
+    /// Creates a new instance of the driver. `ctxt` will contain the
+    /// driver's connection with the backend storage. `cfg` is a
+    /// HashMap table containing configuration information. This
+    /// information is obtained from the TOML configuration file. Each
+    /// driver has its own configuration information. It is
+    /// recommended that the driver validate the configuration.
     async fn new(ctxt: impl DbContext, addr: value::Table) -> Self;
 
+    /// The name of the driver. This should be relatively short, but
+    /// needs to be unique across all drivers.
     fn name() -> String;
+
+    /// A detailed description of the driver. The format of the string
+    /// should be markdown. The description should include any
+    /// configuration parameter needed in the TOML configuration
+    /// file. It should also mention the endpoints provided by the
+    /// driver.
     fn description() -> String;
+
+    /// A short, one-line summary of the driver.
     fn summary(&self) -> String;
 }
