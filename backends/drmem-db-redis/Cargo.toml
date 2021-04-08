@@ -3,10 +3,13 @@ name = "drmem-db-redis"
 version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2018"
+description = "Redis backend for Doctor Memory control system"
+homepage = "https://github.com/rneswold/drmem"
+repository = "https://github.com/rneswold/drmem"
 license = "BSD-3-Clause"
 publish = false
-categories = ["embedded"]
-keywords = ["control-system", "automation"]
+categories = ["embedded", "database"]
+keywords = ["control-system", "automation", "database"]
 
 [badges]
 maintenance = { status = "actively-developed" }

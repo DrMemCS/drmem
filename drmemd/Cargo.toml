@@ -3,9 +3,12 @@ name = "drmemd"
 version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2018"
+description = "Main process of the Doctor Memory control system"
+homepage = "https://github.com/rneswold/drmem"
+repository = "https://github.com/rneswold/drmem"
 license = "BSD-3-Clause"
 publish = false
-categories = ["embedded", "command-line-utilities"]
+categories = ["embedded", "hardware-support"]
 keywords = ["control-system", "automation"]
 
 [badges]
@@ -16,7 +19,6 @@ async-trait = "0.1"
 palette = "0.5"
 huebridge = "0.3.0"
 hyper = { version = "0.13.0", default-features = false, features = ["runtime"] }
-#redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["log"] }
