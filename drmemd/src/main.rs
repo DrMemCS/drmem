@@ -32,7 +32,7 @@ use std::time::Duration;
 use tracing::{warn};
 use palette::{named, Srgb, Yxy};
 use tokio::{ select, pin };
-use drmem_driver_api::Result;
+use drmem_api::Result;
 use drmem_config;
 
 mod hue;

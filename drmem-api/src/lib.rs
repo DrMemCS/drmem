@@ -77,7 +77,7 @@ pub trait DbContext {
 }
 
 #[async_trait]
-pub trait API {
+pub trait Driver {
     async fn new(ctxt: impl DbContext, addr: value::Table) -> Self;
 
     fn name() -> String;

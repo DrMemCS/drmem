@@ -24,7 +24,7 @@ tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
 juniper = "0.15"
 juniper_hyper = "0.6"
 
-drmem-driver-api = { path = "../drmem-driver-api", version = "0.1" }
+drmem-api = { path = "../drmem-api", version = "0.1" }
 drmem-config = { path = "../drmem-config", version = "0.1" }
 
 [dependencies.drmem-db-redis]

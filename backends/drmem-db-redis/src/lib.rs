@@ -32,8 +32,8 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use async_trait::async_trait;
 use tracing::{ debug, info, warn };
-use drmem_driver_api::{ DbContext, Result, device::Device,
-		        types::{ Compat, DeviceValue, Error, ErrorKind } };
+use drmem_api::{ DbContext, Result, device::Device,
+		 types::{ Compat, DeviceValue, Error, ErrorKind } };
 use drmem_config::RedisConfig;
 
 // Translates a Redis error into a DrMem error.

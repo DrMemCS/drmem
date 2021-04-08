@@ -35,7 +35,7 @@ use tokio::{ io::{ self, AsyncReadExt },
 	     sync::mpsc };
 use palette::{ named, Srgb, Yxy };
 use tracing::{ error, info, warn, debug };
-use drmem_driver_api::{ device::Device, Result, DbContext };
+use drmem_api::{ device::Device, Result, DbContext };
 use drmem_db_redis::Context;
 use drmem_config::RedisConfig;
 
