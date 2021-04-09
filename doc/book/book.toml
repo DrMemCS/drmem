@@ -1,5 +1,5 @@
 [book]
-title = "Doctor Memory -- A Small-Scale Control System"
-description = "Documentation for drmem, a small control system written in Rust"
+title = "DrMem -- A Small-Scale Control System"
+description = "Documentation for DrMem, a small control system written in Rust"
 src = "content"
 
