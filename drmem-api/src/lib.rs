@@ -29,7 +29,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use async_trait::async_trait;
-use toml::value;
 
 pub mod types;
 pub mod device;
@@ -45,14 +44,6 @@ pub type Result<T> = std::result::Result<T, types::Error>;
 
 #[async_trait]
 pub trait DbContext {
-    /// This associated type defines the structure of configuration
-    /// information.
-    type Cfg;
-
-    /// Creates an instance of the `Context`.
-    async fn create(name: &str, cfg: &Self::Cfg, account: Option<String>,
-		    password: Option<String>) -> Result<Box<Self>>;
-
     /// Used by a driver to define a readable device. `name` specifies
     /// the final segment of the device name (the prefix is determined
     /// by the driver's name.) `summary` should be a one-line
@@ -79,29 +70,4 @@ pub trait DbContext {
 			  -> Result<()>;
 }
 
-/// All drivers implement the `Driver` trait.
-#[async_trait]
-pub trait Driver {
-
-    /// Creates a new instance of the driver. `ctxt` will contain the
-    /// driver's connection with the backend storage. `cfg` is a
-    /// HashMap table containing configuration information. This
-    /// information is obtained from the TOML configuration file. Each
-    /// driver has its own configuration information. It is
-    /// recommended that the driver validate the configuration.
-    async fn new(ctxt: impl DbContext, addr: value::Table) -> Self;
-
-    /// The name of the driver. This should be relatively short, but
-    /// needs to be unique across all drivers.
-    fn name() -> String;
-
-    /// A detailed description of the driver. The format of the string
-    /// should be markdown. The description should include any
-    /// configuration parameter needed in the TOML configuration
-    /// file. It should also mention the endpoints provided by the
-    /// driver.
-    fn description() -> String;
-
-    /// A short, one-line summary of the driver.
-    fn summary(&self) -> String;
-}
+pub mod driver;

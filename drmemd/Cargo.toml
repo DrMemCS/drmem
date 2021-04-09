@@ -16,23 +16,33 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 async-trait = "0.1"
-palette = "0.5"
-huebridge = "0.3.0"
-hyper = { version = "0.13.0", default-features = false, features = ["runtime"] }
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["log"] }
 tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
+hyper = { version = "0.13.0", default-features = false, features = ["runtime"] }
 juniper = "0.15"
 juniper_hyper = "0.6"
 
 drmem-api = { path = "../drmem-api", version = "0.1" }
 drmem-config = { path = "../drmem-config", version = "0.1" }
 
+# This section defines the driver dependencies. Most drivers are
+# optional, but a few drivers define common devices for a `drmem`
+# installation.
+
+[dependencies.drmem-drv-sump]
+path = "../drivers/drmem-drv-sump"
+version = "0.1"
+
+# This section defines the dependencies for backend storage.
+
 [dependencies.drmem-db-redis]
 path = "../backends/drmem-db-redis"
 version = "0.1"
 optional = true
+
+# These are features that can be enabled for drmem.
 
 [features]
 default = ["redis-backend"]

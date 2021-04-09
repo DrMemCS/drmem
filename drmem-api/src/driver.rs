@@ -28,47 +28,25 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tracing::{warn};
-use tokio::{ select, pin };
-use drmem_api::{ driver::Driver, Result };
-use drmem_config;
-use drmem_db_redis;
+use async_trait::async_trait;
+use super::Result;
 
-mod httpd;
+/// All drivers implement the `Driver` trait.
+#[async_trait]
+pub trait Driver {
+    async fn run(&mut self) -> Result<()>;
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    if let Some(cfg) = drmem_config::get().await {
+    /// The name of the driver. This should be relatively short, but
+    /// needs to be unique across all drivers.
+    fn name() -> String;
 
-	// Initialize the log system. The max log level is determined
-	// by the user (either through the config file or the command
-	// line.)
+    /// A detailed description of the driver. The format of the string
+    /// should be markdown. The description should include any
+    /// configuration parameter needed in the TOML configuration
+    /// file. It should also mention the endpoints provided by the
+    /// driver.
+    fn description() -> String;
 
-	let subscriber = tracing_subscriber::fmt()
-	    .with_max_level(cfg.get_log_level())
-	    .finish();
-
-	tracing::subscriber::set_global_default(subscriber)
-	    .expect("Unable to set global default subscriber");
-
-	let svr_httpd = httpd::server();
-	pin!(svr_httpd);
-
-	let ctxt = drmem_db_redis::RedisContext::new("sump", &cfg.redis,
-						     None, None).await?;
-
-	let mut drv_pump = drmem_drv_sump::Sump::new(ctxt).await?;
-	let drv_pump = drv_pump.run();
-	pin!(drv_pump);
-
-	select! {
-	    Err(e) = drv_pump => {
-		warn!("monitor returned: {:?}", e);
-	    }
-	    Err(e) = svr_httpd => {
-		warn!("httpd returned: {:?}", e);
-	    }
-	}
-    }
-    Ok(())
+    /// A short, one-line summary of the driver.
+    fn summary(&self) -> String;
 }

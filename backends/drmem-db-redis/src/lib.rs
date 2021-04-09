@@ -192,7 +192,7 @@ fn from_value(v: &redis::Value) -> Result<DeviceValue>
 }
 
 /// Defines a context that uses redis for the back-end storage.
-pub struct Context {
+pub struct RedisContext {
     /// The base name used by the instance of the driver. Defining
     /// `Device` instances will add the last segment to the name.
     base: String,
@@ -201,7 +201,7 @@ pub struct Context {
     db_con: redis::aio::Connection,
 }
 
-impl<'a> Context {
+impl RedisContext {
 
     // Creates a connection to redis.
 
@@ -222,6 +222,18 @@ impl<'a> Context {
 	debug!("connecting to redis -- addr: {:?}, db#: {}, and account: {:?}",
 	       &info.addr, &info.db, &info.username);
 	xlat_result(redis::aio::connect_tokio(&info).await)
+    }
+
+    /// Builds a new backend context which can interacts with `redis`.
+    /// The parameters in `cfg` will be used to locate the `redis`
+    /// instance. If `name` and `pword` are not `None`, they will be used
+    /// for credentials when connecting to `redis`.
+
+    pub async fn new(base_name: &str, cfg: &RedisConfig, name: Option<String>,
+		     pword: Option<String>) -> Result<Self> {
+	let db_con = RedisContext::make_connection(cfg, name, pword).await?;
+
+	Ok(RedisContext { base: String::from(base_name), db_con })
     }
 
     // Returns the key that returns meta information for the device.
@@ -288,21 +300,7 @@ impl<'a> Context {
 }
 
 #[async_trait]
-impl DbContext for Context {
-    type Cfg = RedisConfig;
-
-    /// Builds a new backend context which can interacts with `redis`.
-    /// The parameters in `cfg` will be used to locate the `redis`
-    /// instance. If `name` and `pword` are not `None`, they will be
-    /// used for credentials when connecting to `redis`.
-
-    async fn create(base_name: &str, cfg: &Self::Cfg, name: Option<String>,
-		    pword: Option<String>) -> Result<Box<Self>> {
-	let db_con = Context::make_connection(cfg, name, pword).await?;
-
-	Ok(Box::new(Context { base: String::from(base_name), db_con }))
-    }
-
+impl DbContext for RedisContext {
     async fn define_device<T: Compat + Send>(&mut self,
 					     name: &str,
 					     summary: &str,

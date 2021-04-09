@@ -63,6 +63,12 @@ pub enum ErrorKind {
 #[derive(Debug,PartialEq)]
 pub struct Error(pub ErrorKind, pub String);
 
+impl From<std::io::Error> for Error {
+    fn from(_: std::io::Error) -> Self {
+	Error(ErrorKind::OperationError, String::from("I/O error"))
+    }
+}
+
 /// This module defines the fundamental types that can be associated
 /// with a device. Drivers set the type for each device they manage
 /// and, for devices that can be set, only accept values of the

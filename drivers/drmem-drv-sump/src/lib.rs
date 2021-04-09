@@ -28,18 +28,12 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::time::Duration;
-use tokio::{ io::{ self, AsyncReadExt },
-	     net::{ TcpStream, tcp::ReadHalf },
-	     time::delay_for,
-	     sync::mpsc };
-use palette::{ named, Srgb, Yxy };
+use std::net::{Ipv4Addr, SocketAddrV4};
+use async_trait::async_trait;
+use tokio::{ io::{ self, AsyncReadExt }, net::{ TcpStream, tcp::OwnedReadHalf } };
 use tracing::{ error, info, warn, debug };
-use drmem_api::{ device::Device, Result, DbContext };
-use drmem_db_redis::Context;
-use drmem_config::RedisConfig;
-
-use crate::hue;
+use drmem_db_redis::RedisContext;
+use drmem_api::{ DbContext, driver::Driver, device::Device, Result };
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -63,7 +57,7 @@ impl State {
     // sync-ing with the state, the state will get updated, but `None`
     // will be returned.
 
-    pub fn to_off(&mut self, stamp: u64) -> Option<(f64, f64)> {
+    pub fn off_event(&mut self, stamp: u64) -> Option<(f64, f64)> {
 	match *self {
 	    State::Unknown => {
 		info!("sync-ed with OFF state");
@@ -129,7 +123,7 @@ impl State {
     // the on event actually caused a state change, `true` is
     // returned.
 
-    pub fn to_on(&mut self, stamp: u64) -> bool {
+    pub fn on_event(&mut self, stamp: u64) -> bool {
 	match *self {
 	    State::Unknown => false,
 
@@ -156,135 +150,103 @@ impl State {
     }
 }
 
-// This function reads the next frame from the sump pump process. It
-// either returns `Ok()` with the two fields' values or `Err()` if a
-// socket error occurred.
-
-async fn get_reading(rx: &mut ReadHalf<'_>) -> io::Result<(u64, bool)> {
-    let stamp = rx.read_u64().await?;
-    let value = rx.read_u32().await?;
-
-    return Ok((stamp, value != 0))
+pub struct Sump {
+    rx: OwnedReadHalf,
+    state: State,
+    d_service: Device<bool>,
+    d_state: Device<bool>,
+    d_duty: Device<f64>,
+    d_inflow: Device<f64>,
+    ctxt: RedisContext,
 }
 
-async fn lamp_alert(tx: &mut mpsc::Sender<hue::Program>) -> () {
-    let r : Yxy = Srgb::<f32>::from_format(named::RED).into_linear().into();
-    let prog =
-	vec![hue::HueCommands::On { light: 5, bri: 255, color: Some(r) },
-	     hue::HueCommands::On { light: 8, bri: 255, color: Some(r) }];
+impl Sump {
+    pub async fn new(mut ctxt: RedisContext) -> Result<Self> {
+	let d_service: Device<bool> =
+	    ctxt.define_device("service",
+			       "status of connection to sump pump module",
+			       None).await?;
 
-    if let Err(e) = tx.send(prog).await {
-	warn!("sump alert returned error: {:?}", e)
+	let d_state: Device<bool> =
+	    ctxt.define_device("state",
+			       "active state of sump pump",
+			       None).await?;
+
+	let d_duty: Device<f64> =
+	    ctxt.define_device("duty",
+			       "sump pump on-time percentage during last cycle",
+			       Some(String::from("%"))).await?;
+
+	let d_inflow: Device<f64> =
+	    ctxt.define_device("in-flow",
+			       "sump pit fill rate during last cycle",
+			       Some(String::from("gpm"))).await?;
+
+	let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
+	let s = TcpStream::connect(addr).await?;
+	let (rx, _) = s.into_split();
+
+	Ok(Sump { rx, state: State::Unknown, ctxt, d_service, d_state,
+		  d_duty, d_inflow })
+    }
+
+    // This function reads the next frame from the sump pump process.
+    // It either returns `Ok()` with the two fields' values or `Err()`
+    // if a socket error occurred.
+
+    async fn get_reading(&mut self) -> io::Result<(u64, bool)> {
+	let stamp = self.rx.read_u64().await?;
+	let value = self.rx.read_u32().await?;
+
+	return Ok((stamp, value != 0))
     }
 }
 
-async fn lamp_off(tx: &mut mpsc::Sender<hue::Program>, duty: f64) -> () {
-    if duty >= 10.0 {
-	let b : Yxy = Srgb::<f32>::from_format(named::BLUE).into_linear().into();
-	let cc = if duty < 30.0 { named::YELLOW } else { named::RED };
-	let c : Yxy = Srgb::<f32>::from_format(cc).into_linear().into();
-	let prog =
-	    vec![hue::HueCommands::Off { light: 5 },
-		 hue::HueCommands::Off { light: 8 },
-		 hue::HueCommands::On { light: 5, bri: 255, color: Some(b) },
-		 hue::HueCommands::On { light: 8, bri: 255, color: Some(b) },
-		 hue::HueCommands::Pause { len: Duration::from_millis(1_000) },
-		 hue::HueCommands::On { light: 5, bri: 255, color: Some(c) },
-		 hue::HueCommands::On { light: 8, bri: 255, color: Some(c) },
-		 hue::HueCommands::Pause { len: Duration::from_millis(4_000) },
-		 hue::HueCommands::Off { light: 5 },
-		 hue::HueCommands::Off { light: 8 }];
+#[async_trait]
+impl Driver for Sump {
+    async fn run(&mut self) -> Result<()> {
+	self.ctxt.write_values(&[self.d_service.set(true)]).await?;
 
-	if let Err(e) = tx.send(prog).await {
-	    warn!("sump off returned error: {:?}", e)
-	}
-    }
-}
+	loop {
+	    match self.get_reading().await {
+		Ok((stamp, true)) =>
+		    if self.state.on_event(stamp) {
+			self.ctxt.write_values(&[self.d_state.set(true)])
+			    .await?;
+		    },
 
-// Returns an async function which monitors the sump pump, computes
-// interesting, related values, and writes these details to associated
-// devices' history.
+		Ok((stamp, false)) => {
+		    if let Some((duty, in_flow)) = self.state.off_event(stamp) {
+			info!("duty: {}%, in flow: {} gpm", duty, in_flow);
 
-pub async fn monitor(_cfg: &drmem_config::Config,
-		     mut tx: mpsc::Sender<hue::Program>)
-		     -> Result<()> {
-    use std::net::{Ipv4Addr, SocketAddrV4};
-
-    let mut ctxt =
-	Context::create("sump", &RedisConfig::default(), None, None)
-	.await?;
-
-    let d_service: Device<bool> =
-	ctxt.define_device("service",
-			   "status of connection to sump pump module",
-			   None).await?;
-
-    let d_state: Device<bool> =
-	ctxt.define_device("state",
-			   "active state of sump pump",
-			   None).await?;
-
-    let d_duty: Device<f64> =
-	ctxt.define_device("duty",
-			   "sump pump on-time percentage during last cycle",
-			   Some(String::from("%"))).await?;
-
-    let d_inflow: Device<f64> =
-	ctxt.define_device("in-flow",
-			   "sump pit fill rate during last cycle",
-			   Some(String::from("gpm"))).await?;
-
-    let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
-
-    loop {
-	match TcpStream::connect(addr).await {
-	    Ok(mut s) => {
-		let mut state = State::Unknown;
-		let (mut rx, _) = s.split();
-
-		ctxt.write_values(&[d_service.set(true)]).await?;
-
-		loop {
-		    match get_reading(&mut rx).await {
-			Ok((stamp, true)) =>
-			    if state.to_on(stamp) {
-				ctxt.write_values(&[d_state.set(true)])
-				    .await?;
-			    },
-			Ok((stamp, false)) => {
-			    if let Some((duty, in_flow)) = state.to_off(stamp) {
-				info!("duty: {}%, in flow: {} gpm", duty,
-				      in_flow);
-
-				ctxt.write_values(&[d_state.set(false),
-						    d_duty.set(duty),
-						    d_inflow.set(in_flow)])
-				    .await?;
-				lamp_off(&mut tx, duty).await
-			    }
-			},
-			Err(e) => {
-			    error!("couldn't read sump state -- {:?}", e);
-			    ctxt.write_values(&[d_service.set(false),
-						d_state.set(false)])
-				.await?;
-			    lamp_alert(&mut tx).await;
-			    break;
-			}
+			self.ctxt.write_values(&[self.d_state.set(false),
+						 self.d_duty.set(duty),
+						 self.d_inflow.set(in_flow)])
+			    .await?;
 		    }
-		    debug!("state: {:?}", state);
+		},
+
+		Err(e) => {
+		    error!("couldn't read sump state -- {:?}", e);
+		    self.ctxt.write_values(&[self.d_service.set(false),
+					     self.d_state.set(false)])
+			.await?;
+		    break Err(e.into())
 		}
-	    },
-	    Err(e) => {
-		ctxt.write_values(&[d_service.set(false),
-				    d_state.set(false)]).await?;
-		lamp_alert(&mut tx).await;
-		error!("couldn't connect to pump process -- {:?}", e)
 	    }
+	    debug!("state: {:?}", self.state);
 	}
+    }
 
-	// Delay for 10 seconds before retrying.
+    fn name() -> String {
+	String::from("sump")
+    }
 
-	delay_for(Duration::from_millis(10_000)).await;
+    fn description() -> String {
+	String::from("** TO DO **")
+    }
+
+    fn summary(&self) -> String {
+	String::from("sump pump monitor")
     }
 }
