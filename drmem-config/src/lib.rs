@@ -153,21 +153,21 @@ async fn from_file(path: &str) -> Option<Config> {
 }
 
 async fn find_cfg() -> Config {
-    if let Some(cfg) = from_file("./drmem.conf").await {
+    if let Some(cfg) = from_file("./drmem.toml").await {
 	cfg
     } else {
 	use std::env;
 
 	if let Ok(home) = env::var("HOME") {
-	    if let Some(cfg) = from_file(&(home + "/.drmem.conf")).await {
+	    if let Some(cfg) = from_file(&(home + "/.drmem.toml")).await {
 		return cfg;
 	    }
 	}
-	if let Some(cfg) = from_file("/usr/local/etc/drmem.conf").await {
+	if let Some(cfg) = from_file("/usr/local/etc/drmem.toml").await {
 	    cfg
-	} else if let Some(cfg) = from_file("/usr/pkg/etc/drmem.conf").await {
+	} else if let Some(cfg) = from_file("/usr/pkg/etc/drmem.toml").await {
 	    cfg
-	} else if let Some(cfg) = from_file("/etc/drmem.conf").await {
+	} else if let Some(cfg) = from_file("/etc/drmem.toml").await {
 	    cfg
 	} else {
 	    Config::default()
