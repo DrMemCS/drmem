@@ -30,32 +30,38 @@
 
 use tracing::{ warn, info, trace, Level };
 use toml::value;
-use serde_derive::{ Serialize, Deserialize };
+use serde_derive::{ Deserialize };
 
 #[cfg(feature = "redis-backend")]
-#[derive(Serialize,Deserialize)]
-pub struct RedisConfig {
-    pub addr: String,
-    pub port: u16,
-    pub dbn: i64
-}
+pub mod redis {
+    use serde_derive::{ Deserialize };
 
-#[cfg(feature = "redis-backend")]
-impl Default for RedisConfig {
-    fn default() -> Self {
-	RedisConfig {
-	    addr: String::from("127.0.0.1"),
-	    port: 6379,
-	    dbn: 0
+    #[derive(Deserialize)]
+    pub struct Config {
+	pub addr: String,
+	pub port: u16,
+	pub dbn: i64
+    }
+
+    impl Default for Config {
+	fn default() -> Self {
+	    Config {
+		addr: String::from("127.0.0.1"),
+		port: 6379,
+		#[cfg(debug_assertions)]
+		dbn: 1,
+		#[cfg(not(debug_assertions))]
+		dbn: 0,
+	    }
 	}
     }
 }
 
-#[derive(Serialize,Deserialize)]
+#[derive(Deserialize)]
 pub struct Config {
     log_level: String,
     #[cfg(feature = "redis-backend")]
-    pub redis: RedisConfig,
+    pub redis: redis::Config,
     pub driver: Vec<Driver>
 }
 
@@ -75,17 +81,17 @@ impl Default for Config {
 	Config {
 	    log_level: String::from("warn"),
 	    #[cfg(feature = "redis-backend")]
-	    redis: RedisConfig::default(),
+	    redis: redis::Config::default(),
 	    driver: vec![]
 	}
     }
 }
 
-#[derive(Serialize,Deserialize)]
+#[derive(Deserialize)]
 pub struct Driver {
     pub name: String,
-    pub prefix: String,		// XXX: needs to be validated
-    pub cfg: value::Table
+    pub prefix: Option<String>, // XXX: needs to be validated
+    pub cfg: Option<value::Table>
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
@@ -175,16 +181,37 @@ async fn find_cfg() -> Config {
     }
 }
 
+fn dump_config(cfg: &Config) -> () {
+    print!("Configuration:\n");
+    print!("    log level: {}\n\n", cfg.log_level);
+
+    #[cfg(feature = "redis-backend")]
+    {
+	print!("Using REDIS for storage:\n");
+	print!("    address: {}\n", &cfg.redis.addr);
+	print!("    port: {}\n", cfg.redis.port);
+	print!("    db #: {}\n\n", cfg.redis.dbn);
+    }
+
+    print!("Driver configuration:\n");
+    if cfg.driver.len() > 0 {
+	for ii in &cfg.driver {
+	    print!("    name: {}, prefix: {}, cfg: {:?}", &ii.name,
+		   ii.prefix.as_ref().unwrap_or(&String::from("\"\"")),
+		   ii.cfg.as_ref().unwrap_or(&value::Table::new()))
+	}
+    } else {
+	print!("    No drivers specified.\n");
+    }
+}
+
 #[tracing::instrument(name = "loading config")]
 pub async fn get() -> Option<Config> {
     let cfg = find_cfg().await;
     let (print_cfg, cfg) = from_cmdline(cfg);
 
     if print_cfg {
-	match toml::to_string(&cfg) {
-	    Ok(s) => println!("Combined configuration:\n\n{}", s),
-	    Err(e) => println!("Configuration error: {:?}", e)
-	}
+	dump_config(&cfg);
 	None
     } else {
 	Some(cfg)

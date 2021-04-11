@@ -34,7 +34,6 @@ use async_trait::async_trait;
 use tracing::{ debug, info, warn };
 use drmem_api::{ DbContext, Result, device::Device,
 		 types::{ Compat, DeviceValue, Error, ErrorKind } };
-use drmem_config::RedisConfig;
 
 // Translates a Redis error into a DrMem error.
 
@@ -205,7 +204,7 @@ impl RedisContext {
 
     // Creates a connection to redis.
 
-    async fn make_connection(cfg: &RedisConfig,
+    async fn make_connection(cfg: &drmem_config::redis::Config,
 			     name: Option<String>,
 			     pword: Option<String>)
 			     -> Result<redis::aio::Connection> {
@@ -229,8 +228,8 @@ impl RedisContext {
     /// instance. If `name` and `pword` are not `None`, they will be used
     /// for credentials when connecting to `redis`.
 
-    pub async fn new(base_name: &str, cfg: &RedisConfig, name: Option<String>,
-		     pword: Option<String>) -> Result<Self> {
+    pub async fn new(base_name: &str, cfg: &drmem_config::redis::Config,
+		     name: Option<String>, pword: Option<String>) -> Result<Self> {
 	let db_con = RedisContext::make_connection(cfg, name, pword).await?;
 
 	Ok(RedisContext { base: String::from(base_name), db_con })
