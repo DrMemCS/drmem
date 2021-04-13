@@ -190,6 +190,7 @@ impl State {
 
 pub struct Sump {
     rx: OwnedReadHalf,
+    tx: OwnedWriteHalf,
     state: State,
     d_service: Device<bool>,
     d_state: Device<bool>,
@@ -222,9 +223,12 @@ impl Sump {
 
 	let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
 	let s = TcpStream::connect(addr).await?;
-	let (rx, _) = s.into_split();
 
-	Ok(Sump { rx, state: State::Unknown, ctxt, d_service, d_state,
+	// Unfortunately, we have to hang onto the xmt handle
+
+	let (rx, tx) = s.into_split();
+
+	Ok(Sump { rx, tx, state: State::Unknown, ctxt, d_service, d_state,
 		  d_duty, d_inflow })
     }
 
