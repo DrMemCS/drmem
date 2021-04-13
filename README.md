@@ -51,6 +51,21 @@ your requirements.
 WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
 MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.*
 
+## Other Control System / Home Automation Projects
+
+DrMem is a young project. If you're looking for more complete
+solutions that are available now, here's a few options:
+
+- [EPICS](https://epics.anl.gov) is a professional control system used
+  in particle accelerators and observatories around the world.
+- [Mister House](https://github.com/hollie/misterhouse) is a home
+  automation system, written in Perl, that has been around for
+  decades.
+- Many devices can also be controlled by [Google's Home app](https://play.google.com/store/apps/details?id=com.google.android.apps.chromecast.app)
+  or [Apple's Home app](https://www.apple.com/ios/home/)
+
+But be sure to check back occasionally!
+
 ## Preparation
 
 The core service used in this control system is
