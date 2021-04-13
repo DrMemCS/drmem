@@ -11,9 +11,7 @@ to run. It also routes device settings to the appropriate drivers.
       instances.
 - [ ] Rather than have every driver linked into `drmemd`, they should
       be shared libraries that are dynamically loaded, based on
-      whether the configuration says they'll be needed (this is
-      related to the later item where each driver should be in its own
-      crate.)
+      whether the configuration says they'll be needed.
 
 ## Client Interface
 
@@ -26,6 +24,8 @@ clients to use. This interface gives clients these abilities:
 - [ ] Send settings to devices.
 - [ ] Get device info.
 - [ ] Set device info.
+- [ ] Gets loaded drivers and their information.
+- [ ] Gets devices managed by this node.
 
 # Driver API
 
@@ -35,9 +35,9 @@ driver's worldview onto `redis` data types and capabilities.
 
 - [ ] When starting up, a driver instance does the following for each
       device it manages:
-  - [ ] If the device exists, it verifies the entry is valid
+  - [X] If the device exists, it verifies the entry is valid
         (required fields present, proper types, etc.)
-  - [ ] If it doesn't exist, it creates the device entry and
+  - [X] If it doesn't exist, it creates the device entry and
         inserts a default value into its history.
 - [X] Writes hardware state to redis.
 - [ ] Receives settings (applies setting to hardware and writes to
@@ -48,7 +48,7 @@ driver's worldview onto `redis` data types and capabilities.
   - [ ] Test redis client/password ACLs
 - [X] Address information can be specified in config file.
 - [ ] Support register/unregister events
-- [ ] Needs to be in its own crate.
+- [X] Needs to be in its own crate.
 
 # Drivers
 
@@ -71,7 +71,6 @@ project.
       motion sensors but any ZigBee device that happens to work with it.
 - [ ] Tuya driver. An API used by many WiFi-based builbs, plugs, etc.
 - [ ] NTPD driver.
-- [ ] Move drivers into their own crate (once API crate is ready.)
 
 # Reactive Engine
 
