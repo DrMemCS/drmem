@@ -30,10 +30,48 @@
 
 use std::net::{Ipv4Addr, SocketAddrV4};
 use async_trait::async_trait;
-use tokio::{ io::{ self, AsyncReadExt }, net::{ TcpStream, tcp::OwnedReadHalf } };
+use tokio::{ io::{ self, AsyncReadExt },
+	     net::{ TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } } };
 use tracing::{ error, info, warn, debug };
 use drmem_db_redis::RedisContext;
 use drmem_api::{ DbContext, driver::Driver, device::Device, Result };
+
+const DESCRIPTION: &'static str = r#"
+This driver monitors the state of a sump pump and updates a set of
+devices based on its behavior.
+
+This driver communicates, via TCP, with a RaspberryPi that's
+monitoring a GPIO pin for state changes of the sump pump. It sends a
+12-byte packet whenever the state changes. The first 8 bytes holds a
+millisecond timestamp in big-endian format. The following 4 bytes
+holds the new state.
+
+With these packets, the driver can use the timestamps to compute duty
+cycles and incoming flows rates for the sump pit.
+
+# Configuration
+
+Three parameters are used to configure the driver:
+
+- `addr` is a string containing the host name, or IP address, of the
+  machine that's actually monitoring the sump pump.
+- `port` is an integer containing the port number of the service on
+  the remote machine.
+- `gpm` is an integer that repesents the gallons-per-minute capacity
+  of the sump pump.
+
+# Devices
+
+The driver creates these devices:
+
+| Base Name | Type | Units | Comment                                                   |
+|-----------|------|-------|-----------------------------------------------------------|
+| `service` | bool |       | Set to `true` when communicating with the remote service. |
+| `state`   | bool |       | Set to `true` when the pump is running.                   |
+| `duty`    | f64  | %     | Indicates duty cycle of last cycle.                       |
+| `in-flow` | f64  | gpm   | Indicates the in-flow rate for the last cycle.            |
+
+"#;
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -238,15 +276,9 @@ impl Driver for Sump {
 	}
     }
 
-    fn name() -> String {
-	String::from("sump")
-    }
+    fn name() -> &'static str { "sump" }
 
-    fn description() -> String {
-	String::from("** TO DO **")
-    }
+    fn description() -> &'static str { DESCRIPTION }
 
-    fn summary(&self) -> String {
-	String::from("sump pump monitor")
-    }
+    fn summary() -> &'static str { "sump pump monitor" }
 }
