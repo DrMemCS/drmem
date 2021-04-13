@@ -54,7 +54,8 @@ async fn main() -> Result<()> {
 	let svr_httpd = httpd::server();
 	pin!(svr_httpd);
 
-	let ctxt = drmem_db_redis::RedisContext::new("sump", &cfg.redis,
+	let ctxt = drmem_db_redis::RedisContext::new("sump",
+						     &cfg.get_backend(),
 						     None, None).await?;
 
 	let mut drv_pump = drmem_drv_sump::Sump::new(ctxt).await?;

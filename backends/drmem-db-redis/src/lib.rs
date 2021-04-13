@@ -204,15 +204,16 @@ impl RedisContext {
 
     // Creates a connection to redis.
 
-    async fn make_connection(cfg: &drmem_config::redis::Config,
+    async fn make_connection(cfg: &drmem_config::backend::Config,
 			     name: Option<String>,
 			     pword: Option<String>)
 			     -> Result<redis::aio::Connection> {
 	// Create connection information needed to access `redis`.
 
-	let addr = redis::ConnectionAddr::Tcp(cfg.addr.clone(), cfg.port);
+	let addr = redis::ConnectionAddr::Tcp(String::from(cfg.get_addr()),
+					      cfg.get_port());
 	let info = redis::ConnectionInfo { addr: Box::new(addr),
-					   db: cfg.dbn,
+					   db: cfg.get_dbn(),
 					   username: name,
 					   passwd: pword };
 
@@ -228,7 +229,7 @@ impl RedisContext {
     /// instance. If `name` and `pword` are not `None`, they will be used
     /// for credentials when connecting to `redis`.
 
-    pub async fn new(base_name: &str, cfg: &drmem_config::redis::Config,
+    pub async fn new(base_name: &str, cfg: &drmem_config::backend::Config,
 		     name: Option<String>, pword: Option<String>) -> Result<Self> {
 	let db_con = RedisContext::make_connection(cfg, name, pword).await?;
 

@@ -28,60 +28,72 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tracing::{ warn, info, trace, Level };
+use tracing::Level;
 use toml::value;
 use serde_derive::{ Deserialize };
 
 #[cfg(feature = "redis-backend")]
-pub mod redis {
+pub mod backend {
     use serde_derive::{ Deserialize };
 
     #[derive(Deserialize)]
     pub struct Config {
-	pub addr: String,
-	pub port: u16,
-	pub dbn: i64
+	pub addr: Option<String>,
+	pub port: Option<u16>,
+	pub dbn: Option<i64>
     }
 
-    impl Default for Config {
-	fn default() -> Self {
-	    Config {
-		addr: String::from("127.0.0.1"),
-		port: 6379,
-		#[cfg(debug_assertions)]
-		dbn: 1,
-		#[cfg(not(debug_assertions))]
-		dbn: 0,
-	    }
+    impl<'a> Config {
+	pub const fn new() -> Config {
+	    Config { addr: None, port: None, dbn: None }
 	}
+
+	pub fn get_addr(&'a self) -> &'a str {
+	    if let Some(v) = &self.addr { v.as_str() } else { "127.0.0.1" }
+	}
+
+	pub fn get_port(&self) -> u16 { self.port.unwrap_or(6379) }
+
+	#[cfg(debug_assertions)]
+	pub fn get_dbn(&self) -> i64 { self.dbn.unwrap_or(1) }
+	#[cfg(not(debug_assertions))]
+	pub fn get_dbn(&self) -> i64 { self.dbn.unwrap_or(0) }
     }
+
+    pub static DEF: Config = Config::new();
 }
 
 #[derive(Deserialize)]
 pub struct Config {
-    log_level: String,
-    #[cfg(feature = "redis-backend")]
-    pub redis: redis::Config,
+    log_level: Option<String>,
+    pub backend: Option<backend::Config>,
     pub driver: Vec<Driver>
 }
 
-impl Config {
+impl<'a> Config {
     pub fn get_log_level(&self) -> Level {
-	match self.log_level.as_str() {
-	    "info" => Level::INFO,
-	    "debug" => Level::DEBUG,
-	    "trace" => Level::TRACE,
-	    _ => Level::WARN
+	if let Some(v) = &self.log_level {
+	    match v.as_str() {
+		"info" => Level::INFO,
+		"debug" => Level::DEBUG,
+		"trace" => Level::TRACE,
+		_ => Level::WARN
+	    }
+	} else {
+	    Level::WARN
 	}
+    }
+
+    pub fn get_backend(&'a self) -> &'a backend::Config {
+	if let Some(v) = &self.backend { v } else { &backend::DEF }
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
 	Config {
-	    log_level: String::from("warn"),
-	    #[cfg(feature = "redis-backend")]
-	    redis: redis::Config::default(),
+	    log_level: None,
+	    backend: Some(backend::Config::new()),
 	    driver: vec![]
 	}
     }
@@ -125,9 +137,9 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 
     match matches.occurrences_of("verbose") {
         0 => (),
-        1 => cfg.log_level = String::from("info"),
-        2 => cfg.log_level = String::from("debug"),
-	_ => cfg.log_level = String::from("trace")
+        1 => cfg.log_level = Some(String::from("info")),
+        2 => cfg.log_level = Some(String::from("debug")),
+	_ => cfg.log_level = Some(String::from("trace"))
     };
 
     // Return the config built from the command line and a flag
@@ -136,26 +148,26 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
     (matches.is_present("print_cfg"), cfg)
 }
 
+fn parse_config(path: &str, contents: &str) -> Option<Config> {
+    match toml::from_str(&contents) {
+	Ok(cfg) => Some(cfg),
+	Err(e) => {
+	    print!("ERROR: {},\n       ignoring {}\n", e, path);
+	    None
+	}
+    }
+}
+
 async fn from_file(path: &str) -> Option<Config> {
     use tokio::fs;
 
-    trace!("looking for file `{}`", path);
     if let Ok(contents) = fs::read(path).await {
 	let contents = String::from_utf8_lossy(&contents);
 
-	match toml::from_str(&contents) {
-	    Ok(cfg) => {
-		info!("reading config from `{}`", path);
-		return Some(cfg)
-	    }
-	    Err(e) => {
-		warn!("error parsing `{}` : '{:?}' ... ignoring", path, e);
-	    }
-	}
+	parse_config(path, &contents)
     } else {
-	trace!("unable to read `{}`", path)
+	None
     }
-    None
 }
 
 async fn find_cfg() -> Config {
@@ -183,14 +195,14 @@ async fn find_cfg() -> Config {
 
 fn dump_config(cfg: &Config) -> () {
     print!("Configuration:\n");
-    print!("    log level: {}\n\n", cfg.log_level);
+    print!("    log level: {}\n\n", cfg.get_log_level());
 
     #[cfg(feature = "redis-backend")]
     {
 	print!("Using REDIS for storage:\n");
-	print!("    address: {}\n", &cfg.redis.addr);
-	print!("    port: {}\n", cfg.redis.port);
-	print!("    db #: {}\n\n", cfg.redis.dbn);
+	print!("    address: {}\n", &cfg.get_backend().get_addr());
+	print!("    port: {}\n", cfg.get_backend().get_port());
+	print!("    db #: {}\n\n", cfg.get_backend().get_dbn());
     }
 
     print!("Driver configuration:\n");
@@ -200,6 +212,7 @@ fn dump_config(cfg: &Config) -> () {
 		   ii.prefix.as_ref().unwrap_or(&String::from("\"\"")),
 		   ii.cfg.as_ref().unwrap_or(&value::Table::new()))
 	}
+	print!("\n");
     } else {
 	print!("    No drivers specified.\n");
     }
@@ -222,39 +235,159 @@ pub async fn get() -> Option<Config> {
 mod tests {
     use super::*;
 
+    fn test_defaults() {
+	// Verify that missing the [[driver]] section fails.
+
+	if let Ok(_) = toml::from_str::<Config>("") {
+	    panic!("TOML parser accepted missing [[driver]] section")
+	}
+
+	// Verify that the [[driver]] section needs an entry to be
+	// defined..
+
+	if let Ok(_) = toml::from_str::<Config>(r#"
+[[driver]]
+"#) {
+	    panic!("TOML parser accepted missing [[driver]] section")
+	}
+
+	// Verify a missing [backend] results in a properly defined
+	// default.
+
+	match toml::from_str::<Config>(r#"
+[[driver]]
+name = "none"
+"#) {
+	    Ok(cfg) => {
+		let def_cfg = Config::default();
+
+		#[cfg(feature = "redis-backend")]
+		{
+		    assert_eq!(cfg.get_backend().get_addr(),
+			       def_cfg.get_backend().get_addr());
+		    assert_eq!(cfg.get_backend().get_port(),
+			       def_cfg.get_backend().get_port());
+		    assert_eq!(cfg.get_backend().get_dbn(),
+			       def_cfg.get_backend().get_dbn());
+		}
+
+		assert_eq!(cfg.log_level, def_cfg.log_level);
+		assert_eq!(cfg.driver.len(), 1)
+	    }
+	    Err(e) =>
+		panic!("TOML parse error: {}", e)
+	}
+
+	// Verify the [backend] section can handle only one field at a
+	// time.
+
+	match toml::from_str::<Config>(r#"
+[backend]
+addr = "192.168.1.1"
+
+[[driver]]
+name = "none"
+"#) {
+	    Ok(cfg) => {
+		let def_cfg = Config::default();
+
+		#[cfg(feature = "redis-backend")]
+		{
+		    assert_eq!(cfg.get_backend().get_addr(), "192.168.1.1");
+		    assert_eq!(cfg.get_backend().get_port(),
+			       def_cfg.get_backend().get_port());
+		    assert_eq!(cfg.get_backend().get_dbn(),
+			       def_cfg.get_backend().get_dbn());
+		}
+	    }
+	    Err(e) =>
+		panic!("TOML parse error: {}", e)
+	}
+
+	match toml::from_str::<Config>(r#"
+[backend]
+port = 7000
+
+[[driver]]
+name = "none"
+"#) {
+	    Ok(cfg) => {
+		let def_cfg = Config::default();
+
+		#[cfg(feature = "redis-backend")]
+		{
+		    assert_eq!(cfg.get_backend().get_addr(),
+			       def_cfg.get_backend().get_addr());
+		    assert_eq!(cfg.get_backend().get_port(), 7000);
+		    assert_eq!(cfg.get_backend().get_dbn(),
+			       def_cfg.get_backend().get_dbn());
+		}
+	    }
+	    Err(e) =>
+		panic!("TOML parse error: {}", e)
+	}
+
+	match toml::from_str::<Config>(r#"
+[backend]
+dbn = 3
+
+[[driver]]
+name = "none"
+"#) {
+	    Ok(cfg) => {
+		let def_cfg = Config::default();
+
+		#[cfg(feature = "redis-backend")]
+		{
+		    assert_eq!(cfg.get_backend().get_addr(),
+			       def_cfg.get_backend().get_addr());
+		    assert_eq!(cfg.get_backend().get_port(),
+			       def_cfg.get_backend().get_port());
+		    assert_eq!(cfg.get_backend().get_dbn(), 3);
+		}
+	    }
+	    Err(e) =>
+		panic!("TOML parse error: {}", e)
+	}
+
+	// Verify the log_level can be set.
+
+	match toml::from_str::<Config>(r#"
+log_level = "trace"
+[[driver]]
+name = "none"
+"#) {
+	    Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::TRACE),
+	    Err(e) => panic!("TOML parse error: {}", e)
+	}
+	match toml::from_str::<Config>(r#"
+log_level = "debug"
+[[driver]]
+name = "none"
+"#) {
+	    Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::DEBUG),
+	    Err(e) => panic!("TOML parse error: {}", e)
+	}
+	match toml::from_str::<Config>(r#"
+log_level = "info"
+[[driver]]
+name = "none"
+"#) {
+	    Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::INFO),
+	    Err(e) => panic!("TOML parse error: {}", e)
+	}
+	match toml::from_str::<Config>(r#"
+log_level = "warn"
+[[driver]]
+name = "none"
+"#) {
+	    Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
+	    Err(e) => panic!("TOML parse error: {}", e)
+	}
+    }
+
     #[tokio::test]
     async fn test_config() {
-	#[cfg(feature = "redis-backend")]
-	let cfg = r#"
-log_level = "info"
-
-[redis]
-addr = '127.0.0.1'
-port = 100
-dbn = 0
-
-# This section defines the drivers that get loaded.
-
-[[driver]]
-name = 'hue'
-prefix = 'hue'
-cfg = { ip = '127.0.0.1', key = 'blah' }
-"#;
-
-	#[cfg(not(feature = "redis-backend"))]
-	let cfg = r#"
-log_level = "info"
-
-# This section defines the drivers that get loaded.
-
-[[driver]]
-name = 'hue'
-prefix = 'hue'
-cfg = { ip = '127.0.0.1', key = 'blah' }
-"#;
-
-	if let Err(e) = toml::from_str::<Config>(cfg) {
-	    panic!("couldn't parse: {}", e)
-	}
+	test_defaults()
     }
 }
