@@ -33,7 +33,7 @@ use std::convert::TryInto;
 use async_trait::async_trait;
 use tracing::{ debug, info, warn };
 use drmem_api::{ DbContext, Result, device::Device,
-		 types::{ Compat, DeviceValue, Error, ErrorKind } };
+		 types::{ DeviceValue, Error, ErrorKind } };
 
 // Translates a Redis error into a DrMem error.
 
@@ -87,8 +87,8 @@ fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
 // redis. This encoding lets us store type information in redis so
 // there's no rounding errors or misinterpretation of the data.
 
-fn to_redis<T: Compat>(val: T) -> Vec<u8> {
-    match val.to_type() {
+fn to_redis(val: &DeviceValue) -> Vec<u8> {
+    match val {
 	DeviceValue::Nil => vec![],
 	DeviceValue::Bool(false) => vec!['F' as u8],
 	DeviceValue::Bool(true) => vec!['T' as u8],
@@ -252,8 +252,8 @@ impl RedisContext {
     // Does some sanity checks on a device to see if it appears to be
     // valid.
 
-    async fn get_device<T: Compat + Send>(&mut self, name: &str)
-					  -> Result<Device<T>> {
+    async fn get_device<T: Into<DeviceValue> + Send>(&mut self, name: &str)
+						     -> Result<Device<T>> {
 	let info_key = self.info_key(name);
 	let data_type: String =
 	    xlat_result(redis::cmd("TYPE")
@@ -301,11 +301,11 @@ impl RedisContext {
 
 #[async_trait]
 impl DbContext for RedisContext {
-    async fn define_device<T: Compat + Send>(&mut self,
-					     name: &str,
-					     summary: &str,
-					     units: Option<String>) ->
-	Result<Device<T>>
+    async fn define_device<T: Into<DeviceValue> + Send>(&mut self,
+							name: &str,
+							summary: &str,
+							units: Option<String>)
+							-> Result<Device<T>>
     {
 	let dev_name = format!("{}:{}", &self.base, &name);
 
@@ -335,7 +335,7 @@ impl DbContext for RedisContext {
 					.atomic()
 					.del(&hist_key)
 					.xadd(&hist_key, "1",
-					      &[("value", to_redis(0))])
+					      &[("value", to_redis(&0i64.into()))])
 					.xdel(&hist_key, &["1"])
 					.del(&info_key)
 					.hset_multiple(&info_key, &fields)
@@ -448,13 +448,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_nil_encoder() {
-	assert_eq!(Vec::<u8>::new(), to_redis(DeviceValue::Nil));
+	assert_eq!(Vec::<u8>::new(), to_redis(&DeviceValue::Nil));
     }
 
     #[tokio::test]
     async fn test_bool_encoder() {
-	assert_eq!(vec![ 'F' as u8], to_redis(DeviceValue::Bool(false)));
-	assert_eq!(vec![ 'T' as u8], to_redis(DeviceValue::Bool(true)));
+	assert_eq!(vec![ 'F' as u8], to_redis(&DeviceValue::Bool(false)));
+	assert_eq!(vec![ 'T' as u8], to_redis(&DeviceValue::Bool(true)));
     }
 
     #[tokio::test]
@@ -478,7 +478,7 @@ mod tests {
 	];
 
 	for (v, rv) in values.iter() {
-	    assert_eq!(*rv, to_redis(DeviceValue::Int(*v)));
+	    assert_eq!(*rv, to_redis(&DeviceValue::Int(*v)));
 	}
     }
 }

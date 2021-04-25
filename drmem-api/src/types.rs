@@ -28,6 +28,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::convert::{ From, TryFrom };
+
 /// Enumerates all the errors that can be reported in `drmem`. Authors
 /// for new drivers or database backends should try to map their
 /// errors into one of these values. If no value of `ErrorKind` is
@@ -100,44 +102,78 @@ pub enum DeviceValue {
     Str(String)
 }
 
-/// This trait is defined for types that can trivially be converted to
-/// `types::DeviceValue`.
-pub trait Compat {
-    fn to_type(self) -> DeviceValue;
-}
+impl TryFrom<DeviceValue> for bool {
+    type Error = Error;
 
-impl Compat for DeviceValue {
-    fn to_type(self) -> DeviceValue {
-	self
+    fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
+	if let DeviceValue::Bool(v) = value {
+	    Ok(v)
+	} else {
+	    Err(Error(ErrorKind::TypeError,
+		      String::from("can't convert to boolean")))
+	}
     }
 }
 
-impl Compat for &DeviceValue {
-    fn to_type(self) -> DeviceValue {
-	self.clone()
+impl From<bool> for DeviceValue {
+    fn from(value: bool) -> Self {
+	DeviceValue::Bool(value)
     }
 }
 
-impl Compat for bool {
-    fn to_type(self) -> DeviceValue {
-	DeviceValue::Bool(self)
+impl TryFrom<DeviceValue> for i64 {
+    type Error = Error;
+
+    fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
+	if let DeviceValue::Int(v) = value {
+	    Ok(v)
+	} else {
+	    Err(Error(ErrorKind::TypeError,
+		      String::from("can't convert to integer")))
+	}
     }
 }
 
-impl Compat for i64 {
-    fn to_type(self) -> DeviceValue {
-	DeviceValue::Int(self)
+impl From<i64> for DeviceValue {
+    fn from(value: i64) -> Self {
+	DeviceValue::Int(value)
     }
 }
 
-impl Compat for f64 {
-    fn to_type(self) -> DeviceValue {
-	DeviceValue::Flt(self)
+impl TryFrom<DeviceValue> for f64 {
+    type Error = Error;
+
+    fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
+	if let DeviceValue::Flt(v) = value {
+	    Ok(v)
+	} else {
+	    Err(Error(ErrorKind::TypeError,
+		      String::from("can't convert to floating point")))
+	}
     }
 }
 
-impl Compat for String {
-    fn to_type(self) -> DeviceValue {
-	DeviceValue::Str(self)
+impl From<f64> for DeviceValue {
+    fn from(value: f64) -> Self {
+	DeviceValue::Flt(value)
+    }
+}
+
+impl TryFrom<DeviceValue> for String {
+    type Error = Error;
+
+    fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
+	if let DeviceValue::Str(v) = value {
+	    Ok(v)
+	} else {
+	    Err(Error(ErrorKind::TypeError,
+		      String::from("can't convert to floating point")))
+	}
+    }
+}
+
+impl From<String> for DeviceValue {
+    fn from(value: String) -> Self {
+	DeviceValue::Str(value)
     }
 }

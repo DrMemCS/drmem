@@ -29,10 +29,10 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::{ collections::HashMap, marker::PhantomData };
-use crate::{ Result, types::{ Compat, DeviceValue, Error, ErrorKind } };
+use crate::{ Result, types::{ DeviceValue, Error, ErrorKind } };
 
-// Define constant string slices that will be (hopefully) shared by
-// every device's HashMap.
+// Define constant string slices that will be shared by every device's
+// HashMap.
 
 const KEY_SUMMARY: &'static str = "summary";
 const KEY_UNITS: &'static str = "units";
@@ -45,7 +45,7 @@ type DeviceInfo = HashMap<String, DeviceValue>;
 
 pub struct Device<T>(String, DeviceInfo, PhantomData<T>);
 
-impl<T: Compat + Send> Device<T> {
+impl<T: Into<DeviceValue> + Send> Device<T> {
 
     /// Creates a new instance of a `Device`. `summary` is a one-line
     /// summary of the device. If the value returned by the device is
@@ -118,7 +118,7 @@ impl<T: Compat + Send> Device<T> {
     }
 
     pub fn set(&self, v: T) -> (String, DeviceValue) {
-	(self.0.clone(), v.to_type())
+	(self.0.clone(), v.into())
     }
 
 }

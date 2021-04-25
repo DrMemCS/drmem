@@ -50,10 +50,10 @@ pub trait DbContext {
     /// description of the device. `units` is an optional units
     /// field. Some devices (like boolean or string devices) don't
     /// require engineering units.
-    async fn define_device<T: types::Compat + Send>(&mut self,
-						    name: &str,
-						    summary: &str,
-						    units: Option<String>) ->
+    async fn define_device<T: Into<types::DeviceValue> + Send>(&mut self,
+							       name: &str,
+							       summary: &str,
+							       units: Option<String>) ->
 	Result<device::Device<T>>;
 
     /// Allows a driver to write values, associated with devices, to
