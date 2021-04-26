@@ -19,10 +19,10 @@ async-trait = "0.1"
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["log"] }
-tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
-hyper = { version = "0.13.0", default-features = false, features = ["runtime"] }
-juniper = "0.15"
-juniper_hyper = "0.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+hyper = { version = "0.14", default-features = false, features = ["runtime", "server", "http1", "http2"] }
+# juniper = "0.15"
+# juniper_hyper = "0.6"
 
 drmem-api = { path = "../drmem-api", version = "0.1" }
 drmem-config = { path = "../drmem-config", version = "0.1" }

@@ -78,6 +78,9 @@ fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
 		    Err(Error(ErrorKind::OperationError, msg)),
 		redis::ErrorKind::ExtensionError =>
 		    Err(Error(ErrorKind::OperationError, msg)),
+		redis::ErrorKind::ReadOnly =>
+		    Err(Error(ErrorKind::OperationError, msg)),
+		_ => Err(Error(ErrorKind::UnknownError, msg)),
 	    }
 	}
     }
@@ -204,24 +207,13 @@ impl RedisContext {
 
     // Creates a connection to redis.
 
-    async fn make_connection(cfg: &drmem_config::backend::Config,
-			     name: Option<String>,
-			     pword: Option<String>)
+    async fn make_connection(_cfg: &drmem_config::backend::Config,
+			     _name: Option<String>,
+			     _pword: Option<String>)
 			     -> Result<redis::aio::Connection> {
-	// Create connection information needed to access `redis`.
+	let client = redis::Client::open("redis://127.0.0.1/").unwrap();
 
-	let addr = redis::ConnectionAddr::Tcp(String::from(cfg.get_addr()),
-					      cfg.get_port());
-	let info = redis::ConnectionInfo { addr: Box::new(addr),
-					   db: cfg.get_dbn(),
-					   username: name,
-					   passwd: pword };
-
-	// Connect to redis and return the Connection.
-
-	debug!("connecting to redis -- addr: {:?}, db#: {}, and account: {:?}",
-	       &info.addr, &info.db, &info.username);
-	xlat_result(redis::aio::connect_tokio(&info).await)
+	xlat_result(client.get_tokio_connection().await)
     }
 
     /// Builds a new backend context which can interacts with `redis`.

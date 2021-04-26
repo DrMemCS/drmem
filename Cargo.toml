@@ -1,5 +1,11 @@
 [workspace]
-members = ["drmem-api", "drmem-config", "drivers/*", "backends/*", "drmemd"]
+members = [
+    "drmem-api",
+    "drmem-config",
+    "drivers/*",
+    "backends/*",
+    "drmemd"
+]
 
 # Profiles used by all binaries and packages.
 

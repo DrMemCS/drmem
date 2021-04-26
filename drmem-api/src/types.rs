@@ -60,6 +60,10 @@ pub enum ErrorKind {
     /// The requested operation couldn't complete. The description
     /// field will have more information for the user.
     OperationError,
+
+    /// A dependent library introduced a new error that hasn't been
+    /// properly mapped in DrMem. This needs to be reported as a bug.
+    UnknownError
 }
 
 #[derive(Debug,PartialEq)]

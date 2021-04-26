@@ -16,11 +16,11 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 async-trait = "0.1"
-redis = { version = "0.17.0", features = ["aio", "tokio-rt-core"] }
+redis = { version = "0.20", features = ["aio", "tokio-comp"] }
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["log"] }
-tokio = { version = "0.2", features = ["rt-threaded", "fs", "macros", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 drmem-api = { path = "../../drmem-api", version = "0.1" }
 

@@ -28,7 +28,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use hyper::{Body, Method, Response, Server, StatusCode};
+use std::convert::Infallible;
+use hyper::{Body, Response, server::Server, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
 
 pub async fn server() -> Result<(), hyper::Error> {
@@ -38,15 +39,15 @@ pub async fn server() -> Result<(), hyper::Error> {
     // from our `hello_world` function.
 
     let make_svc = make_service_fn(|_| async {
-	Ok::<_, hyper::Error>(service_fn(|req| async move {
+	Ok::<_, Infallible>(service_fn(|req| async move {
 	    match (req.method(), req.uri().path()) {
-		(&Method::GET, "/") =>
-		    juniper_hyper::graphiql("/graphql", None).await,
+		//(&Method::GET, "/") =>
+		//    juniper_hyper::graphiql("/graphql", None).await,
 		_ => {
 		    let mut response = Response::new(Body::empty());
 
 		    *response.status_mut() = StatusCode::NOT_FOUND;
-		    Ok(response)
+		    Ok::<_, hyper::Error>(response)
 		}
 	    }
 	}))
