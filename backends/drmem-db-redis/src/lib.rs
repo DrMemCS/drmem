@@ -35,7 +35,11 @@ use tracing::{ debug, info, warn };
 use drmem_api::{ DbContext, Result, device::Device,
 		 types::{ DeviceValue, Error, ErrorKind } };
 
-// Translates a Redis error into a DrMem error.
+// Translates a Redis error into a DrMem error. The translation is
+// slightly lossy in that we lose the exact Redis error that occurred
+// and, instead map it into a more general "backend" error. We
+// propagate the associated message so, hopefully, that's enough to
+// rebuild the context of the error.
 
 fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
     match res {
@@ -124,6 +128,8 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
     }
 }
 
+// Decodes an `i64` from an 8-byte buffer.
+
 fn decode_integer(buf: &[u8]) -> Result<DeviceValue> {
     if buf.len() >= 8 {
 	let buf = buf[..8].try_into().unwrap();
@@ -134,6 +140,8 @@ fn decode_integer(buf: &[u8]) -> Result<DeviceValue> {
 	      String::from("buffer too short for integer data")))
 }
 
+// Decodes an `f64` from an 8-byte buffer.
+
 fn decode_float(buf: &[u8]) -> Result<DeviceValue> {
     if buf.len() >= 8 {
 	let buf = buf[..8].try_into().unwrap();
@@ -143,6 +151,8 @@ fn decode_float(buf: &[u8]) -> Result<DeviceValue> {
     Err(Error(ErrorKind::TypeError,
 	      String::from("buffer too short for floating point data")))
 }
+
+// Decodes a UTF-8 encoded string from a raw, u8 buffer.
 
 fn decode_string(buf: &[u8]) -> Result<DeviceValue> {
     if buf.len() >= 4 {
@@ -162,6 +172,10 @@ fn decode_string(buf: &[u8]) -> Result<DeviceValue> {
     Err(Error(ErrorKind::TypeError,
 	      String::from("buffer too short for string data")))
 }
+
+// Returns a `DeviceValue` from a `redis::Value`. The only enumeration
+// we support is the `Value::Data` form since that's the one used to
+// return redis data.
 
 fn from_value(v: &redis::Value) -> Result<DeviceValue>
 {
@@ -218,8 +232,8 @@ impl RedisContext {
 
     /// Builds a new backend context which can interacts with `redis`.
     /// The parameters in `cfg` will be used to locate the `redis`
-    /// instance. If `name` and `pword` are not `None`, they will be used
-    /// for credentials when connecting to `redis`.
+    /// instance. If `name` and `pword` are not `None`, they will be
+    /// used for credentials when connecting to `redis`.
 
     pub async fn new(base_name: &str, cfg: &drmem_config::backend::Config,
 		     name: Option<String>, pword: Option<String>) -> Result<Self> {
@@ -389,14 +403,14 @@ mod tests {
 	}
     }
 
-    // Test correct DeviceValue::Nil decoding.
+    // Test correct decoding of DeviceValue::Nil values.
 
     #[tokio::test]
     async fn test_nil_decoder() {
 	assert_eq!(Ok(DeviceValue::Nil), from_value(&Value::Data(vec![])));
     }
 
-    // Test correct DeviceValue::Bool decoding.
+    // Test correct decoding of DeviceValue::Bool values.
 
     #[tokio::test]
     async fn test_bool_decoder() {
@@ -406,7 +420,7 @@ mod tests {
 		   from_value(&Value::Data(vec!['T' as u8])));
     }
 
-    // Test correct DeviceValue::Int decoding.
+    // Test correct decoding of DeviceValue::Int values.
 
     #[tokio::test]
     async fn test_int_decoder() {
@@ -438,16 +452,22 @@ mod tests {
 	}
     }
 
+    // Test correct encoding of DeviceValue::Nil values.
+
     #[tokio::test]
     async fn test_nil_encoder() {
 	assert_eq!(Vec::<u8>::new(), to_redis(&DeviceValue::Nil));
     }
+
+    // Test correct encoding of DeviceValue::Bool values.
 
     #[tokio::test]
     async fn test_bool_encoder() {
 	assert_eq!(vec![ 'F' as u8], to_redis(&DeviceValue::Bool(false)));
 	assert_eq!(vec![ 'T' as u8], to_redis(&DeviceValue::Bool(true)));
     }
+
+    // Test correct encoding of DeviceValue::Int values.
 
     #[tokio::test]
     async fn test_int_encoder() {
