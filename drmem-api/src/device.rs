@@ -31,21 +31,21 @@
 use std::{ collections::HashMap, marker::PhantomData };
 use crate::{ Result, types::{ DeviceValue, Error, ErrorKind } };
 
-// Define constant string slices that will be shared by every device's
-// HashMap.
-
-const KEY_SUMMARY: &'static str = "summary";
-const KEY_UNITS: &'static str = "units";
-
 /// A `Device` type provides a view into the database for a single
 /// device. It caches meta information and standardizes fields for
 /// devices, as well.
 
-type DeviceInfo = HashMap<String, DeviceValue>;
+type DeviceInfo = HashMap<&'static str, DeviceValue>;
 
 pub struct Device<T>(String, DeviceInfo, PhantomData<T>);
 
 impl<T: Into<DeviceValue> + Send> Device<T> {
+
+    // Define constant string slices that will be shared by every device's
+    // HashMap.
+
+    const KEY_SUMMARY: &'static str = "summary";
+    const KEY_UNITS: &'static str = "units";
 
     /// Creates a new instance of a `Device`. `summary` is a one-line
     /// summary of the device. If the value returned by the device is
@@ -55,10 +55,10 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
 		  -> Self {
 	let mut map = HashMap::new();
 
-	map.insert(String::from(KEY_SUMMARY), DeviceValue::Str(summary));
+	map.insert(Device::<T>::KEY_SUMMARY, DeviceValue::Str(summary));
 
 	if let Some(u) = units {
-	    map.insert(String::from(KEY_UNITS), DeviceValue::Str(u));
+	    map.insert(Device::<T>::KEY_UNITS, DeviceValue::Str(u));
 	}
 	Device(String::from(name), map, PhantomData)
     }
@@ -75,10 +75,10 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
 	// summary field is recommended to be a single line of text,
 	// but this code doesn't enforce it.
 
-	match map.get(KEY_SUMMARY) {
+	match map.get(Device::<T>::KEY_SUMMARY) {
 	    Some(DeviceValue::Str(val)) => {
 		let _ =
-		    result.insert(String::from(KEY_SUMMARY),
+		    result.insert(Device::<T>::KEY_SUMMARY,
 				  DeviceValue::Str(val.clone()));
 	    }
 	    Some(_) =>
@@ -92,10 +92,10 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
 	// Verify there is no "units" field or, if it exists, it's a
 	// string value.
 
-	match map.get(KEY_UNITS) {
+	match map.get(Device::<T>::KEY_UNITS) {
 	    Some(DeviceValue::Str(val)) => {
 		let _ =
-		    result.insert(String::from(KEY_UNITS),
+		    result.insert(Device::<T>::KEY_UNITS,
 				  DeviceValue::Str(val.clone()));
 	    }
 	    Some(_) =>
@@ -110,7 +110,7 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
     /// Returns a vector of pairs where each pair consists of a key
     /// and its associated value in the map.
 
-    pub fn to_vec(&self) -> Vec<(String, DeviceValue)> {
+    pub fn to_vec(&self) -> Vec<(&'static str, DeviceValue)> {
 	self.1
 	    .iter()
 	    .map(|(k, v)| (k.clone(), v.clone()))

@@ -328,10 +328,10 @@ impl DbContext for RedisContext {
 		let dev = Device::create(name, String::from(summary), units);
 
 		let temp = dev.to_vec();
-		let fields: Vec<(&String, Vec<u8>)> =
+		let fields: Vec<(String, Vec<u8>)> =
 		    temp
 		    .iter()
-		    .map(|(k, v)| (k, to_redis(v)))
+		    .map(|(k, v)| (String::from(*k), to_redis(v)))
 		    .collect();
 
 		// Create a command pipeline that deletes the two keys
