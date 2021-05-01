@@ -29,11 +29,12 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tracing::{warn};
-use tokio::{ select, pin };
+use tokio::pin;
 use drmem_api::{ driver::Driver, Result };
 use drmem_config;
 use drmem_db_redis;
 
+#[cfg(graphql)]
 mod httpd;
 
 #[tokio::main]
@@ -51,9 +52,6 @@ async fn main() -> Result<()> {
 	tracing::subscriber::set_global_default(subscriber)
 	    .expect("Unable to set global default subscriber");
 
-	let svr_httpd = httpd::server();
-	pin!(svr_httpd);
-
 	let ctxt = drmem_db_redis::RedisContext::new("sump",
 						     &cfg.get_backend(),
 						     None, None).await?;
@@ -62,12 +60,22 @@ async fn main() -> Result<()> {
 	let drv_pump = drv_pump.run();
 	pin!(drv_pump);
 
-	select! {
-	    Err(e) = drv_pump => {
-		warn!("monitor returned: {:?}", e);
-	    }
-	    Err(e) = svr_httpd => {
-		warn!("httpd returned: {:?}", e);
+	#[cfg(not(graphql))]
+	if let Err(e) = drv_pump.await {
+	    warn!("monitor returned: {:?}", e);
+	}
+	#[cfg(graphql)]
+	{
+	    let svr_httpd = httpd::server();
+	    pin!(svr_httpd);
+
+	    tokio::select! {
+		Err(e) = drv_pump => {
+		    warn!("monitor returned: {:?}", e);
+		}
+		Err(e) = svr_httpd => {
+		    warn!("httpd returned: {:?}", e);
+		}
 	    }
 	}
     }

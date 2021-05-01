@@ -20,9 +20,6 @@ tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["log"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-hyper = { version = "0.14", default-features = false, features = ["runtime", "server", "http1", "http2"] }
-# juniper = "0.15"
-# juniper_hyper = "0.6"
 
 drmem-api = { path = "../drmem-api", version = "0.1" }
 drmem-config = { path = "../drmem-config", version = "0.1" }
@@ -35,11 +32,28 @@ drmem-config = { path = "../drmem-config", version = "0.1" }
 path = "../drivers/drmem-drv-sump"
 version = "0.1"
 
-# This section defines the dependencies for backend storage.
+# This section defines the optional dependencies for backend storage.
 
 [dependencies.drmem-db-redis]
 path = "../backends/drmem-db-redis"
 version = "0.1"
+optional = true
+
+# This section defines the optional dependencies for the 'graphql'
+# feature.
+
+[dependencies.juniper]
+version = "0.15"
+optional = true
+
+[dependencies.juniper_hyper]
+version = "0.6"
+optional = true
+
+[dependencies.hyper]
+version = "0.14"
+default-features = false
+features = ["runtime", "server", "http1", "http2"]
 optional = true
 
 # These are features that can be enabled for drmem.
@@ -47,3 +61,4 @@ optional = true
 [features]
 default = ["redis-backend"]
 redis-backend = ["drmem-db-redis"]
+graphql = ["hyper", "juniper", "juniper_hyper"]
