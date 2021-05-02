@@ -70,4 +70,25 @@ pub trait DbContext {
 			  -> Result<()>;
 }
 
+pub mod framework {
+    use tokio::sync::{ mpsc, oneshot };
+
+    pub enum DriverRequest {
+	Ping(oneshot::Sender<()>),
+    }
+
+    pub enum ClientRequest {
+	Ping(oneshot::Sender<()>)
+    }
+
+    pub enum Request {
+	GetSummary(oneshot::Sender<&'static str>),
+	GetDescription(oneshot::Sender<&'static str>),
+    }
+
+    pub type DriverRequestChan = mpsc::Sender<DriverRequest>;
+    pub type ClientRequestChan = mpsc::Sender<ClientRequest>;
+    pub type RequestChan = mpsc::Receiver<Request>;
+}
+
 pub mod driver;

@@ -28,71 +28,20 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tracing::{warn};
-use tokio::pin;
-use drmem_api::{ driver::Driver, Result };
-use drmem_config::DriverConfig;
-use drmem_db_redis;
+use tokio::{ sync::mpsc, task::JoinHandle };
+use drmem_api::{ framework, Result };
 
-mod core;
-#[cfg(graphql)]
-mod httpd;
+pub fn start() -> (framework::DriverRequestChan, JoinHandle<Result<()>>) {
+    // Create a channel that drivers can use to make requests to the
+    // framework. This task will hang onto the Receiver end and each
+    // driver will get a .clone() of the transmit handle.
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    if let Some(cfg) = drmem_config::get().await {
+    let (tx_drv_req, mut rx_drv_req) = mpsc::channel(10);
 
-	// Initialize the log system. The max log level is determined
-	// by the user (either through the config file or the command
-	// line.)
+    (tx_drv_req,
+     tokio::spawn(async move {
+	 let _ = rx_drv_req.recv().await;
 
-	let subscriber = tracing_subscriber::fmt()
-	    .with_max_level(cfg.get_log_level())
-	    .finish();
-
-	tracing::subscriber::set_global_default(subscriber)
-	    .expect("Unable to set global default subscriber");
-
-	let (tx_drv_req, core_task) = core::start();
-
-	let ctxt = drmem_db_redis::RedisContext::new("sump",
-						     &cfg.get_backend(),
-						     None, None).await?;
-
-	let mut drv_pump =
-	    drmem_drv_sump::Sump::new(ctxt, &DriverConfig::new(),
-				      tx_drv_req).await?;
-	let drv_pump = drv_pump.run();
-	pin!(drv_pump);
-
-	#[cfg(not(graphql))]
-	{
-	    tokio::select! {
-		Err(e) = core_task => {
-		    warn!("core returned: {:?}", e);
-		}
-		Err(e) = drv_pump => {
-		    warn!("monitor returned: {:?}", e);
-		}
-	    }
-	}
-	#[cfg(graphql)]
-	{
-	    let svr_httpd = httpd::server();
-	    pin!(svr_httpd);
-
-	    tokio::select! {
-		Err(e) = core_task => {
-		    warn!("core returned: {:?}", e);
-		}
-		Err(e) = drv_pump => {
-		    warn!("monitor returned: {:?}", e);
-		}
-		Err(e) = svr_httpd => {
-		    warn!("httpd returned: {:?}", e);
-		}
-	    }
-	}
-    }
-    Ok(())
+	 Ok(())
+     }))
 }

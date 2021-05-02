@@ -34,7 +34,9 @@ use tokio::{ io::{ self, AsyncReadExt },
 	     net::{ TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } } };
 use tracing::{ error, info, warn, debug };
 use drmem_db_redis::RedisContext;
-use drmem_api::{ DbContext, driver::Driver, device::Device, Result };
+use drmem_config::DriverConfig;
+use drmem_api::{ types, framework, DbContext, driver::Driver, device::Device,
+		 Result };
 
 const DESCRIPTION: &'static str = r#"
 This driver monitors the state of a sump pump and updates a set of
@@ -200,7 +202,27 @@ pub struct Sump {
 }
 
 impl Sump {
-    pub async fn new(mut ctxt: RedisContext) -> Result<Self> {
+    pub async fn new(mut ctxt: RedisContext,
+		     cfg: &DriverConfig,
+		     req_core: framework::DriverRequestChan) -> Result<Self> {
+	// Validate the configuration.
+
+	let addr = match cfg.get("addr") {
+	    Some(addr) => addr,
+	    None =>
+		return Err(types::Error(types::ErrorKind::BadConfig,
+					String::from("missing 'addr' parameter in config")))
+	};
+
+	let port = match cfg.get("port") {
+	    Some(port) => port,
+	    None =>
+		return Err(types::Error(types::ErrorKind::BadConfig,
+					String::from("missing 'port' parameter in config")))
+	};
+
+	// Define the devices managed by this driver.
+
 	let d_service: Device<bool> =
 	    ctxt.define_device("service",
 			       "status of connection to sump pump module",

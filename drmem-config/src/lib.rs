@@ -99,6 +99,8 @@ impl Default for Config {
     }
 }
 
+pub type DriverConfig = value::Table;
+
 #[derive(Deserialize)]
 pub struct Driver {
     pub name: String,

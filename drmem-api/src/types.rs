@@ -61,6 +61,10 @@ pub enum ErrorKind {
     /// field will have more information for the user.
     OperationError,
 
+    /// A bad parameter was given in a configuration or a
+    /// configuration was missing a required parameter.
+    BadConfig,
+
     /// A dependent library introduced a new error that hasn't been
     /// properly mapped in DrMem. This needs to be reported as a bug.
     UnknownError
