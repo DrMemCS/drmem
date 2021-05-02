@@ -38,15 +38,15 @@ pub trait Driver {
 
     /// The name of the driver. This should be relatively short, but
     /// needs to be unique across all drivers.
-    fn name() -> &'static str;
+    fn name(&self) -> &'static str;
 
     /// A detailed description of the driver. The format of the string
     /// should be markdown. The description should include any
     /// configuration parameter needed in the TOML configuration
     /// file. It should also mention the endpoints provided by the
     /// driver.
-    fn description() -> &'static str;
+    fn description(&self) -> &'static str;
 
     /// A short, one-line summary of the driver.
-    fn summary() -> &'static str;
+    fn summary(&self) -> &'static str;
 }

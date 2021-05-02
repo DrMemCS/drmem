@@ -280,9 +280,9 @@ impl Driver for Sump {
 	}
     }
 
-    fn name() -> &'static str { "sump" }
+    fn name(&self) -> &'static str { "sump" }
 
-    fn description() -> &'static str { DESCRIPTION }
+    fn description(&self) -> &'static str { DESCRIPTION }
 
-    fn summary() -> &'static str { "sump pump monitor" }
+    fn summary(&self) -> &'static str { "sump pump monitor" }
 }
