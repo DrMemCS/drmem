@@ -221,11 +221,20 @@ impl RedisContext {
 
     // Creates a connection to redis.
 
-    async fn make_connection(_cfg: &drmem_config::backend::Config,
-			     _name: Option<String>,
-			     _pword: Option<String>)
+    async fn make_connection(cfg: &drmem_config::backend::Config,
+			     name: Option<String>,
+			     pword: Option<String>)
 			     -> Result<redis::aio::Connection> {
-	let client = redis::Client::open("redis://127.0.0.1/").unwrap();
+	use redis::{ConnectionInfo, ConnectionAddr};
+
+	let ci = ConnectionInfo {
+	    addr: Box::new(ConnectionAddr::Tcp(String::from(cfg.get_addr()),
+					       cfg.get_port())),
+	    db: cfg.get_dbn(),
+	    username: name,
+	    passwd: pword
+	};
+	let client = redis::Client::open(ci).unwrap();
 
 	xlat_result(client.get_tokio_connection().await)
     }
