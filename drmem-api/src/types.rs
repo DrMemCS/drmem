@@ -28,7 +28,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::convert::{ From, TryFrom };
+use std::convert::{From, TryFrom};
 
 /// Enumerates all the errors that can be reported in `drmem`. Authors
 /// for new drivers or database backends should try to map their
@@ -40,7 +40,7 @@ use std::convert::{ From, TryFrom };
 /// value and use the associated description string to explain the
 /// details.
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum ErrorKind {
     /// Returned whenever a resource cannot be found.
     NotFound,
@@ -67,15 +67,15 @@ pub enum ErrorKind {
 
     /// A dependent library introduced a new error that hasn't been
     /// properly mapped in DrMem. This needs to be reported as a bug.
-    UnknownError
+    UnknownError,
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Error(pub ErrorKind, pub String);
 
 impl From<std::io::Error> for Error {
     fn from(_: std::io::Error) -> Self {
-	Error(ErrorKind::OperationError, String::from("I/O error"))
+        Error(ErrorKind::OperationError, String::from("I/O error"))
     }
 }
 
@@ -107,25 +107,27 @@ pub enum DeviceValue {
     Flt(f64),
 
     ///For devices that return/accept text.
-    Str(String)
+    Str(String),
 }
 
 impl TryFrom<DeviceValue> for bool {
     type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
-	if let DeviceValue::Bool(v) = value {
-	    Ok(v)
-	} else {
-	    Err(Error(ErrorKind::TypeError,
-		      String::from("can't convert to boolean")))
-	}
+        if let DeviceValue::Bool(v) = value {
+            Ok(v)
+        } else {
+            Err(Error(
+                ErrorKind::TypeError,
+                String::from("can't convert to boolean"),
+            ))
+        }
     }
 }
 
 impl From<bool> for DeviceValue {
     fn from(value: bool) -> Self {
-	DeviceValue::Bool(value)
+        DeviceValue::Bool(value)
     }
 }
 
@@ -133,18 +135,20 @@ impl TryFrom<DeviceValue> for i64 {
     type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
-	if let DeviceValue::Int(v) = value {
-	    Ok(v)
-	} else {
-	    Err(Error(ErrorKind::TypeError,
-		      String::from("can't convert to integer")))
-	}
+        if let DeviceValue::Int(v) = value {
+            Ok(v)
+        } else {
+            Err(Error(
+                ErrorKind::TypeError,
+                String::from("can't convert to integer"),
+            ))
+        }
     }
 }
 
 impl From<i64> for DeviceValue {
     fn from(value: i64) -> Self {
-	DeviceValue::Int(value)
+        DeviceValue::Int(value)
     }
 }
 
@@ -152,18 +156,20 @@ impl TryFrom<DeviceValue> for f64 {
     type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
-	if let DeviceValue::Flt(v) = value {
-	    Ok(v)
-	} else {
-	    Err(Error(ErrorKind::TypeError,
-		      String::from("can't convert to floating point")))
-	}
+        if let DeviceValue::Flt(v) = value {
+            Ok(v)
+        } else {
+            Err(Error(
+                ErrorKind::TypeError,
+                String::from("can't convert to floating point"),
+            ))
+        }
     }
 }
 
 impl From<f64> for DeviceValue {
     fn from(value: f64) -> Self {
-	DeviceValue::Flt(value)
+        DeviceValue::Flt(value)
     }
 }
 
@@ -171,17 +177,19 @@ impl TryFrom<DeviceValue> for String {
     type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
-	if let DeviceValue::Str(v) = value {
-	    Ok(v)
-	} else {
-	    Err(Error(ErrorKind::TypeError,
-		      String::from("can't convert to floating point")))
-	}
+        if let DeviceValue::Str(v) = value {
+            Ok(v)
+        } else {
+            Err(Error(
+                ErrorKind::TypeError,
+                String::from("can't convert to floating point"),
+            ))
+        }
     }
 }
 
 impl From<String> for DeviceValue {
     fn from(value: String) -> Self {
-	DeviceValue::Str(value)
+        DeviceValue::Str(value)
     }
 }

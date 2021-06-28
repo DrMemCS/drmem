@@ -30,8 +30,8 @@
 
 use async_trait::async_trait;
 
-pub mod types;
 pub mod device;
+pub mod types;
 
 /// A `Result` type where the error value is a value from
 /// `drmem_api::types::Error`.
@@ -50,11 +50,9 @@ pub trait DbContext {
     /// description of the device. `units` is an optional units
     /// field. Some devices (like boolean or string devices) don't
     /// require engineering units.
-    async fn define_device<T: Into<types::DeviceValue> + Send>(&mut self,
-							       name: &str,
-							       summary: &str,
-							       units: Option<String>) ->
-	Result<device::Device<T>>;
+    async fn define_device<T: Into<types::DeviceValue> + Send>(
+        &mut self, name: &str, summary: &str, units: Option<String>,
+    ) -> Result<device::Device<T>>;
 
     /// Allows a driver to write values, associated with devices, to
     /// the database. The `values` array indicate which devices should
@@ -66,8 +64,9 @@ pub trait DbContext {
     /// devices. Each call to this function makes an atomic change to
     /// the database so if all devices are changed in a single call,
     /// clients will see a consistent change.
-    async fn write_values(&mut self, values: &[(String, types::DeviceValue)])
-			  -> Result<()>;
+    async fn write_values(
+        &mut self, values: &[(String, types::DeviceValue)],
+    ) -> Result<()>;
 }
 
 pub mod framework {

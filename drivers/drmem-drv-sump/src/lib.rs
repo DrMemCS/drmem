@@ -82,14 +82,13 @@ The driver creates these devices:
 enum State {
     Unknown,
     Off { off_time: u64 },
-    On { off_time: u64, on_time: u64 }
+    On { off_time: u64, on_time: u64 },
 }
 
 // This interface allows a State value to update itself when an event
 // occurs.
 
 impl State {
-
     // This method is called when an off event occurs. The timestamp
     // of the off event needs to be provided. If the state machine has
     // enough information of the previous pump cycle, it will return
@@ -98,64 +97,66 @@ impl State {
     // will be returned.
 
     pub fn off_event(&mut self, stamp: u64) -> Option<(f64, f64)> {
-	match *self {
-	    State::Unknown => {
-		info!("sync-ed with OFF state");
-		*self = State::Off { off_time: stamp };
-		None
-	    },
+        match *self {
+            State::Unknown => {
+                info!("sync-ed with OFF state");
+                *self = State::Off { off_time: stamp };
+                None
+            }
 
-	    State::Off { .. } => {
-		warn!("ignoring duplicate OFF event");
-		None
-	    },
+            State::Off { .. } => {
+                warn!("ignoring duplicate OFF event");
+                None
+            }
 
-	    State::On { off_time, on_time } => {
-		// The time stamp of the OFF time should come after
-		// the ON time. If it isn't, the sump pump task has a
-		// problem (i.e. system time was adjusted.) We can't
-		// give a decent computation, so just go into the DOWN
-		// state.
+            State::On { off_time, on_time } => {
+                // The time stamp of the OFF time should come after
+                // the ON time. If it isn't, the sump pump task has a
+                // problem (i.e. system time was adjusted.) We can't
+                // give a decent computation, so just go into the DOWN
+                // state.
 
-		if on_time >= stamp {
-		    warn!("timestamp for OFF event is {} ms ahead of ON event",
-			  on_time - stamp);
-		    *self = State::Off { off_time: stamp };
-		    return None
-		}
+                if on_time >= stamp {
+                    warn!(
+                        "timestamp for OFF event is {} ms ahead of ON event",
+                        on_time - stamp
+                    );
+                    *self = State::Off { off_time: stamp };
+                    return None;
+                }
 
-		let on_time = (stamp - on_time) as f64;
+                let on_time = (stamp - on_time) as f64;
 
-		// After the first storm, there was one entry that
-		// glitched. The state of the motor registered "ON"
-		// for 50 ms, turned off, turned on 400ms later, and
-		// then stayed on for the rest of the normal,
-		// six-second cycle.
-		//
-		// I'm going under the assumption that the pump wasn't
-		// drawing enough current at the start of the cycle so
-		// the current switch's detection "faded" in and out.
-		// This could be due to not setting the sensitivity of
-		// the switch high enough or, possibly, the pump
-		// failing (once in a great while, we hear the pump go
-		// through a strange-sounding cycle.)
-		//
-		// If the ON cycle is less than a half second, we'll
-		// ignore it and stay in the ON state.
+                // After the first storm, there was one entry that
+                // glitched. The state of the motor registered "ON"
+                // for 50 ms, turned off, turned on 400ms later, and
+                // then stayed on for the rest of the normal,
+                // six-second cycle.
+                //
+                // I'm going under the assumption that the pump wasn't
+                // drawing enough current at the start of the cycle so
+                // the current switch's detection "faded" in and out.
+                // This could be due to not setting the sensitivity of
+                // the switch high enough or, possibly, the pump
+                // failing (once in a great while, we hear the pump go
+                // through a strange-sounding cycle.)
+                //
+                // If the ON cycle is less than a half second, we'll
+                // ignore it and stay in the ON state.
 
-		if on_time > 500.0 {
-		    let off_time = (stamp - off_time) as f64;
-		    let duty = on_time * 1000.0 / off_time;
-		    let in_flow = (2680.0 * duty / 60.0).round() / 1000.0;
+                if on_time > 500.0 {
+                    let off_time = (stamp - off_time) as f64;
+                    let duty = on_time * 1000.0 / off_time;
+                    let in_flow = (2680.0 * duty / 60.0).round() / 1000.0;
 
-		    *self = State::Off { off_time: stamp };
-		    Some((duty.round() / 10.0, in_flow))
-		} else {
-		    warn!("ignoring short ON time -- {:.0} ms", on_time);
-		    None
-		}
-	    }
-	}
+                    *self = State::Off { off_time: stamp };
+                    Some((duty.round() / 10.0, in_flow))
+                } else {
+                    warn!("ignoring short ON time -- {:.0} ms", on_time);
+                    None
+                }
+            }
+        }
     }
 
     // This method is called when updating the state with an on
@@ -164,29 +165,34 @@ impl State {
     // returned.
 
     pub fn on_event(&mut self, stamp: u64) -> bool {
-	match *self {
-	    State::Unknown => false,
+        match *self {
+            State::Unknown => false,
 
-	    State::Off { off_time } => {
-		// Make sure the ON time occurred *after* the OFF
-		// time. This is necessary for the computations to
-		// yield valid results.
+            State::Off { off_time } => {
+                // Make sure the ON time occurred *after* the OFF
+                // time. This is necessary for the computations to
+                // yield valid results.
 
-		if stamp > off_time {
-		    *self = State::On { off_time, on_time: stamp };
-		    true
-		} else {
-		    warn!("timestamp for ON event is {} ms ahead of OFF event",
-			  off_time - stamp);
-		    false
-		}
-	    },
+                if stamp > off_time {
+                    *self = State::On {
+                        off_time,
+                        on_time: stamp,
+                    };
+                    true
+                } else {
+                    warn!(
+                        "timestamp for ON event is {} ms ahead of OFF event",
+                        off_time - stamp
+                    );
+                    false
+                }
+            }
 
-	    State::On { .. } => {
-		warn!("ignoring duplicate ON event");
-		false
-	    }
-	}
+            State::On { .. } => {
+                warn!("ignoring duplicate ON event");
+                false
+            }
+        }
     }
 }
 
@@ -207,51 +213,73 @@ impl Sump {
 		     req_core: framework::DriverRequestChan) -> Result<Self> {
 	// Validate the configuration.
 
-	let addr = match cfg.get("addr") {
-	    Some(addr) => addr,
-	    None =>
-		return Err(types::Error(types::ErrorKind::BadConfig,
-					String::from("missing 'addr' parameter in config")))
-	};
+        let addr = match cfg.get("addr") {
+            Some(addr) => addr,
+            None => {
+                return Err(types::Error(
+                    types::ErrorKind::BadConfig,
+                    String::from("missing 'addr' parameter in config"),
+                ))
+            }
+        };
 
-	let port = match cfg.get("port") {
-	    Some(port) => port,
-	    None =>
-		return Err(types::Error(types::ErrorKind::BadConfig,
-					String::from("missing 'port' parameter in config")))
-	};
+        let port = match cfg.get("port") {
+            Some(port) => port,
+            None => {
+                return Err(types::Error(
+                    types::ErrorKind::BadConfig,
+                    String::from("missing 'port' parameter in config"),
+                ))
+            }
+        };
 
-	// Define the devices managed by this driver.
+        // Define the devices managed by this driver.
 
-	let d_service: Device<bool> =
-	    ctxt.define_device("service",
-			       "status of connection to sump pump module",
-			       None).await?;
+        let d_service: Device<bool> = ctxt
+            .define_device(
+                "service",
+                "status of connection to sump pump module",
+                None,
+            )
+            .await?;
 
-	let d_state: Device<bool> =
-	    ctxt.define_device("state",
-			       "active state of sump pump",
-			       None).await?;
+        let d_state: Device<bool> = ctxt
+            .define_device("state", "active state of sump pump", None)
+            .await?;
 
-	let d_duty: Device<f64> =
-	    ctxt.define_device("duty",
-			       "sump pump on-time percentage during last cycle",
-			       Some(String::from("%"))).await?;
+        let d_duty: Device<f64> = ctxt
+            .define_device(
+                "duty",
+                "sump pump on-time percentage during last cycle",
+                Some(String::from("%")),
+            )
+            .await?;
 
-	let d_inflow: Device<f64> =
-	    ctxt.define_device("in-flow",
-			       "sump pit fill rate during last cycle",
-			       Some(String::from("gpm"))).await?;
+        let d_inflow: Device<f64> = ctxt
+            .define_device(
+                "in-flow",
+                "sump pit fill rate during last cycle",
+                Some(String::from("gpm")),
+            )
+            .await?;
 
-	let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
-	let s = TcpStream::connect(addr).await?;
+        let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
+        let s = TcpStream::connect(addr).await?;
 
-	// Unfortunately, we have to hang onto the xmt handle
+        // Unfortunately, we have to hang onto the xmt handle
 
-	let (rx, tx) = s.into_split();
+        let (rx, tx) = s.into_split();
 
-	Ok(Sump { rx, tx, state: State::Unknown, ctxt, d_service, d_state,
-		  d_duty, d_inflow })
+        Ok(Sump {
+            rx,
+            tx,
+            state: State::Unknown,
+            ctxt,
+            d_service,
+            d_state,
+            d_duty,
+            d_inflow,
+        })
     }
 
     // This function reads the next frame from the sump pump process.
@@ -259,10 +287,10 @@ impl Sump {
     // if a socket error occurred.
 
     async fn get_reading(&mut self) -> io::Result<(u64, bool)> {
-	let stamp = self.rx.read_u64().await?;
-	let value = self.rx.read_u32().await?;
+        let stamp = self.rx.read_u64().await?;
+        let value = self.rx.read_u32().await?;
 
-	return Ok((stamp, value != 0))
+        return Ok((stamp, value != 0));
     }
 }
 
@@ -271,40 +299,54 @@ impl Driver for Sump {
     async fn run(&mut self) -> Result<()> {
 	self.ctxt.write_values(&[self.d_service.set(true)]).await?;
 
-	loop {
-	    match self.get_reading().await {
-		Ok((stamp, true)) =>
-		    if self.state.on_event(stamp) {
-			self.ctxt.write_values(&[self.d_state.set(true)])
-			    .await?;
-		    },
+        loop {
+            match self.get_reading().await {
+                Ok((stamp, true)) => {
+                    if self.state.on_event(stamp) {
+                        self.ctxt
+                            .write_values(&[self.d_state.set(true)])
+                            .await?;
+                    }
+                }
 
-		Ok((stamp, false)) => {
-		    if let Some((duty, in_flow)) = self.state.off_event(stamp) {
-			info!("duty: {}%, in flow: {} gpm", duty, in_flow);
+                Ok((stamp, false)) => {
+                    if let Some((duty, in_flow)) = self.state.off_event(stamp) {
+                        info!("duty: {}%, in flow: {} gpm", duty, in_flow);
 
-			self.ctxt.write_values(&[self.d_state.set(false),
-						 self.d_duty.set(duty),
-						 self.d_inflow.set(in_flow)])
-			    .await?;
-		    }
-		},
+                        self.ctxt
+                            .write_values(&[
+                                self.d_state.set(false),
+                                self.d_duty.set(duty),
+                                self.d_inflow.set(in_flow),
+                            ])
+                            .await?;
+                    }
+                }
 
-		Err(e) => {
-		    error!("couldn't read sump state -- {:?}", e);
-		    self.ctxt.write_values(&[self.d_service.set(false),
-					     self.d_state.set(false)])
-			.await?;
-		    break Err(e.into())
-		}
-	    }
-	    debug!("state: {:?}", self.state);
-	}
+                Err(e) => {
+                    error!("couldn't read sump state -- {:?}", e);
+                    self.ctxt
+                        .write_values(&[
+                            self.d_service.set(false),
+                            self.d_state.set(false),
+                        ])
+                        .await?;
+                    break Err(e.into());
+                }
+            }
+            debug!("state: {:?}", self.state);
+        }
     }
 
-    fn name(&self) -> &'static str { "sump" }
+    fn name(&self) -> &'static str {
+        "sump"
+    }
 
-    fn description(&self) -> &'static str { DESCRIPTION }
+    fn description(&self) -> &'static str {
+        DESCRIPTION
+    }
 
-    fn summary(&self) -> &'static str { "sump pump monitor" }
+    fn summary(&self) -> &'static str {
+        "sump pump monitor"
+    }
 }

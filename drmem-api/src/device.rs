@@ -28,8 +28,11 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{ collections::HashMap, marker::PhantomData };
-use crate::{ Result, types::{ DeviceValue, Error, ErrorKind } };
+use crate::{
+    types::{DeviceValue, Error, ErrorKind},
+    Result,
+};
+use std::{collections::HashMap, marker::PhantomData};
 
 /// A `Device` type provides a view into the database for a single
 /// device. It caches meta information and standardizes fields for
@@ -40,7 +43,6 @@ type DeviceInfo = HashMap<&'static str, DeviceValue>;
 pub struct Device<T>(String, DeviceInfo, PhantomData<T>);
 
 impl<T: Into<DeviceValue> + Send> Device<T> {
-
     // Define constant string slices that will be shared by every device's
     // HashMap.
 
@@ -51,74 +53,81 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
     /// summary of the device. If the value returned by the device is
     /// in engineering units, then they can be specified with `units`.
 
-    pub fn create(name: &str, summary: String, units: Option<String>)
-		  -> Self {
-	let mut map = HashMap::new();
+    pub fn create(name: &str, summary: String, units: Option<String>) -> Self {
+        let mut map = HashMap::new();
 
-	map.insert(Device::<T>::KEY_SUMMARY, DeviceValue::Str(summary));
+        map.insert(Device::<T>::KEY_SUMMARY, DeviceValue::Str(summary));
 
-	if let Some(u) = units {
-	    map.insert(Device::<T>::KEY_UNITS, DeviceValue::Str(u));
-	}
-	Device(String::from(name), map, PhantomData)
+        if let Some(u) = units {
+            map.insert(Device::<T>::KEY_UNITS, DeviceValue::Str(u));
+        }
+        Device(String::from(name), map, PhantomData)
     }
 
     /// Creates a `Device` type from a hash map of key/values
     /// (presumably obtained from redis.) The fields are checked for
     /// proper structure.
 
-    pub fn create_from_map(name: &str, map: HashMap<String, DeviceValue>)
-			   -> Result<Self> {
-	let mut result = DeviceInfo::new();
+    pub fn create_from_map(
+        name: &str, map: HashMap<String, DeviceValue>,
+    ) -> Result<Self> {
+        let mut result = DeviceInfo::new();
 
-	// Verify a 'summary' field exists and is a string. The
-	// summary field is recommended to be a single line of text,
-	// but this code doesn't enforce it.
+        // Verify a 'summary' field exists and is a string. The
+        // summary field is recommended to be a single line of text,
+        // but this code doesn't enforce it.
 
-	match map.get(Device::<T>::KEY_SUMMARY) {
-	    Some(DeviceValue::Str(val)) => {
-		let _ =
-		    result.insert(Device::<T>::KEY_SUMMARY,
-				  DeviceValue::Str(val.clone()));
-	    }
-	    Some(_) =>
-		return Err(Error(ErrorKind::TypeError,
-				 String::from("'summary' field isn't a string"))),
-	    None =>
-		return Err(Error(ErrorKind::NotFound,
-				 String::from("'summary' is missing")))
-	}
+        match map.get(Device::<T>::KEY_SUMMARY) {
+            Some(DeviceValue::Str(val)) => {
+                let _ = result.insert(
+                    Device::<T>::KEY_SUMMARY,
+                    DeviceValue::Str(val.clone()),
+                );
+            }
+            Some(_) => {
+                return Err(Error(
+                    ErrorKind::TypeError,
+                    String::from("'summary' field isn't a string"),
+                ))
+            }
+            None => {
+                return Err(Error(
+                    ErrorKind::NotFound,
+                    String::from("'summary' is missing"),
+                ))
+            }
+        }
 
-	// Verify there is no "units" field or, if it exists, it's a
-	// string value.
+        // Verify there is no "units" field or, if it exists, it's a
+        // string value.
 
-	match map.get(Device::<T>::KEY_UNITS) {
-	    Some(DeviceValue::Str(val)) => {
-		let _ =
-		    result.insert(Device::<T>::KEY_UNITS,
-				  DeviceValue::Str(val.clone()));
-	    }
-	    Some(_) =>
-		return Err(Error(ErrorKind::TypeError,
-				 String::from("'units' field isn't a string"))),
-	    None => ()
-	}
+        match map.get(Device::<T>::KEY_UNITS) {
+            Some(DeviceValue::Str(val)) => {
+                let _ = result.insert(
+                    Device::<T>::KEY_UNITS,
+                    DeviceValue::Str(val.clone()),
+                );
+            }
+            Some(_) => {
+                return Err(Error(
+                    ErrorKind::TypeError,
+                    String::from("'units' field isn't a string"),
+                ))
+            }
+            None => (),
+        }
 
-	Ok(Device(String::from(name), result, PhantomData))
+        Ok(Device(String::from(name), result, PhantomData))
     }
 
     /// Returns a vector of pairs where each pair consists of a key
     /// and its associated value in the map.
 
     pub fn to_vec(&self) -> Vec<(&'static str, DeviceValue)> {
-	self.1
-	    .iter()
-	    .map(|(k, v)| (k.clone(), v.clone()))
-	    .collect()
+        self.1.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 
     pub fn set(&self, v: T) -> (String, DeviceValue) {
-	(self.0.clone(), v.into())
+        (self.0.clone(), v.into())
     }
-
 }

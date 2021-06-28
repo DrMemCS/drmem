@@ -34,30 +34,44 @@ use serde_derive::{ Deserialize };
 
 #[cfg(feature = "redis-backend")]
 pub mod backend {
-    use serde_derive::{ Deserialize };
+    use serde_derive::Deserialize;
 
     #[derive(Deserialize)]
     pub struct Config {
-	pub addr: Option<String>,
-	pub port: Option<u16>,
-	pub dbn: Option<i64>
+        pub addr: Option<String>,
+        pub port: Option<u16>,
+        pub dbn: Option<i64>,
     }
 
     impl<'a> Config {
-	pub const fn new() -> Config {
-	    Config { addr: None, port: None, dbn: None }
-	}
+        pub const fn new() -> Config {
+            Config {
+                addr: None,
+                port: None,
+                dbn: None,
+            }
+        }
 
-	pub fn get_addr(&'a self) -> &'a str {
-	    if let Some(v) = &self.addr { v.as_str() } else { "127.0.0.1" }
-	}
+        pub fn get_addr(&'a self) -> &'a str {
+            if let Some(v) = &self.addr {
+                v.as_str()
+            } else {
+                "127.0.0.1"
+            }
+        }
 
-	pub fn get_port(&self) -> u16 { self.port.unwrap_or(6379) }
+        pub fn get_port(&self) -> u16 {
+            self.port.unwrap_or(6379)
+        }
 
-	#[cfg(debug_assertions)]
-	pub fn get_dbn(&self) -> i64 { self.dbn.unwrap_or(1) }
-	#[cfg(not(debug_assertions))]
-	pub fn get_dbn(&self) -> i64 { self.dbn.unwrap_or(0) }
+        #[cfg(debug_assertions)]
+        pub fn get_dbn(&self) -> i64 {
+            self.dbn.unwrap_or(1)
+        }
+        #[cfg(not(debug_assertions))]
+        pub fn get_dbn(&self) -> i64 {
+            self.dbn.unwrap_or(0)
+        }
     }
 
     pub static DEF: Config = Config::new();
@@ -67,35 +81,39 @@ pub mod backend {
 pub struct Config {
     log_level: Option<String>,
     pub backend: Option<backend::Config>,
-    pub driver: Vec<Driver>
+    pub driver: Vec<Driver>,
 }
 
 impl<'a> Config {
     pub fn get_log_level(&self) -> Level {
-	if let Some(v) = &self.log_level {
-	    match v.as_str() {
-		"info" => Level::INFO,
-		"debug" => Level::DEBUG,
-		"trace" => Level::TRACE,
-		_ => Level::WARN
-	    }
-	} else {
-	    Level::WARN
-	}
+        if let Some(v) = &self.log_level {
+            match v.as_str() {
+                "info" => Level::INFO,
+                "debug" => Level::DEBUG,
+                "trace" => Level::TRACE,
+                _ => Level::WARN,
+            }
+        } else {
+            Level::WARN
+        }
     }
 
     pub fn get_backend(&'a self) -> &'a backend::Config {
-	if let Some(v) = &self.backend { v } else { &backend::DEF }
+        if let Some(v) = &self.backend {
+            v
+        } else {
+            &backend::DEF
+        }
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
-	Config {
-	    log_level: None,
-	    backend: Some(backend::Config::new()),
-	    driver: vec![]
-	}
+        Config {
+            log_level: None,
+            backend: Some(backend::Config::new()),
+            driver: vec![],
+        }
     }
 }
 
@@ -105,11 +123,11 @@ pub type DriverConfig = value::Table;
 pub struct Driver {
     pub name: String,
     pub prefix: Option<String>, // XXX: needs to be validated
-    pub cfg: Option<value::Table>
+    pub cfg: Option<value::Table>,
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
-    use clap::{Arg, App};
+    use clap::{App, Arg};
 
     // Define the command line arguments.
 
@@ -117,22 +135,28 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
         .version("0.1")
         .author("Rich Neswold <rich.neswold@gmail.com>")
         .about("A small, yet capable, control system.")
-        .arg(Arg::with_name("config")
-	     .short("c")
-	     .long("config")
-	     .value_name("FILE")
-	     .help("Specifies the configuration file")
-	     .takes_value(true))
-        .arg(Arg::with_name("verbose")
-	     .short("v")
-	     .long("verbose")
-	     .multiple(true)
-	     .help("Sets verbosity of log; can be used more than once")
-	     .takes_value(false))
-        .arg(Arg::with_name("print_cfg")
-	     .long("print-config")
-	     .help("Displays the configuration and exits")
-	     .takes_value(false))
+        .arg(
+            Arg::with_name("config")
+                .short("c")
+                .long("config")
+                .value_name("FILE")
+                .help("Specifies the configuration file")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("verbose")
+                .short("v")
+                .long("verbose")
+                .multiple(true)
+                .help("Sets verbosity of log; can be used more than once")
+                .takes_value(false),
+        )
+        .arg(
+            Arg::with_name("print_cfg")
+                .long("print-config")
+                .help("Displays the configuration and exits")
+                .takes_value(false),
+        )
         .get_matches();
 
     // The number of '-v' options determines the log level.
@@ -141,7 +165,7 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
         0 => (),
         1 => cfg.log_level = Some(String::from("info")),
         2 => cfg.log_level = Some(String::from("debug")),
-	_ => cfg.log_level = Some(String::from("trace"))
+        _ => cfg.log_level = Some(String::from("trace")),
     };
 
     // Return the config built from the command line and a flag
@@ -152,11 +176,11 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 
 fn parse_config(path: &str, contents: &str) -> Option<Config> {
     match toml::from_str(&contents) {
-	Ok(cfg) => Some(cfg),
-	Err(e) => {
-	    print!("ERROR: {},\n       ignoring {}\n", e, path);
-	    None
-	}
+        Ok(cfg) => Some(cfg),
+        Err(e) => {
+            print!("ERROR: {},\n       ignoring {}\n", e, path);
+            None
+        }
     }
 }
 
@@ -164,34 +188,34 @@ async fn from_file(path: &str) -> Option<Config> {
     use tokio::fs;
 
     if let Ok(contents) = fs::read(path).await {
-	let contents = String::from_utf8_lossy(&contents);
+        let contents = String::from_utf8_lossy(&contents);
 
-	parse_config(path, &contents)
+        parse_config(path, &contents)
     } else {
-	None
+        None
     }
 }
 
 async fn find_cfg() -> Config {
     if let Some(cfg) = from_file("./drmem.toml").await {
-	cfg
+        cfg
     } else {
-	use std::env;
+        use std::env;
 
-	if let Ok(home) = env::var("HOME") {
-	    if let Some(cfg) = from_file(&(home + "/.drmem.toml")).await {
-		return cfg;
-	    }
-	}
-	if let Some(cfg) = from_file("/usr/local/etc/drmem.toml").await {
-	    cfg
-	} else if let Some(cfg) = from_file("/usr/pkg/etc/drmem.toml").await {
-	    cfg
-	} else if let Some(cfg) = from_file("/etc/drmem.toml").await {
-	    cfg
-	} else {
-	    Config::default()
-	}
+        if let Ok(home) = env::var("HOME") {
+            if let Some(cfg) = from_file(&(home + "/.drmem.toml")).await {
+                return cfg;
+            }
+        }
+        if let Some(cfg) = from_file("/usr/local/etc/drmem.toml").await {
+            cfg
+        } else if let Some(cfg) = from_file("/usr/pkg/etc/drmem.toml").await {
+            cfg
+        } else if let Some(cfg) = from_file("/etc/drmem.toml").await {
+            cfg
+        } else {
+            Config::default()
+        }
     }
 }
 
@@ -201,22 +225,25 @@ fn dump_config(cfg: &Config) -> () {
 
     #[cfg(feature = "redis-backend")]
     {
-	print!("Using REDIS for storage:\n");
-	print!("    address: {}\n", &cfg.get_backend().get_addr());
-	print!("    port: {}\n", cfg.get_backend().get_port());
-	print!("    db #: {}\n\n", cfg.get_backend().get_dbn());
+        print!("Using REDIS for storage:\n");
+        print!("    address: {}\n", &cfg.get_backend().get_addr());
+        print!("    port: {}\n", cfg.get_backend().get_port());
+        print!("    db #: {}\n\n", cfg.get_backend().get_dbn());
     }
 
     print!("Driver configuration:\n");
     if cfg.driver.len() > 0 {
-	for ii in &cfg.driver {
-	    print!("    name: {}, prefix: {}, cfg: {:?}", &ii.name,
-		   ii.prefix.as_ref().unwrap_or(&String::from("\"\"")),
-		   ii.cfg.as_ref().unwrap_or(&value::Table::new()))
-	}
-	print!("\n");
+        for ii in &cfg.driver {
+            print!(
+                "    name: {}, prefix: {}, cfg: {:?}",
+                &ii.name,
+                ii.prefix.as_ref().unwrap_or(&String::from("\"\"")),
+                ii.cfg.as_ref().unwrap_or(&value::Table::new())
+            )
+        }
+        print!("\n");
     } else {
-	print!("    No drivers specified.\n");
+        print!("    No drivers specified.\n");
     }
 }
 
@@ -226,10 +253,10 @@ pub async fn get() -> Option<Config> {
     let (print_cfg, cfg) = from_cmdline(cfg);
 
     if print_cfg {
-	dump_config(&cfg);
-	None
+        dump_config(&cfg);
+        None
     } else {
-	Some(cfg)
+        Some(cfg)
     }
 }
 
@@ -238,158 +265,190 @@ mod tests {
     use super::*;
 
     fn test_defaults() {
-	// Verify that missing the [[driver]] section fails.
+        // Verify that missing the [[driver]] section fails.
 
-	if let Ok(_) = toml::from_str::<Config>("") {
-	    panic!("TOML parser accepted missing [[driver]] section")
-	}
+        if let Ok(_) = toml::from_str::<Config>("") {
+            panic!("TOML parser accepted missing [[driver]] section")
+        }
 
-	// Verify that the [[driver]] section needs an entry to be
-	// defined..
+        // Verify that the [[driver]] section needs an entry to be
+        // defined..
 
-	if let Ok(_) = toml::from_str::<Config>(r#"
+        if let Ok(_) = toml::from_str::<Config>(
+            r#"
 [[driver]]
-"#) {
-	    panic!("TOML parser accepted missing [[driver]] section")
-	}
+"#,
+        ) {
+            panic!("TOML parser accepted missing [[driver]] section")
+        }
 
-	// Verify a missing [backend] results in a properly defined
-	// default.
+        // Verify a missing [backend] results in a properly defined
+        // default.
 
-	match toml::from_str::<Config>(r#"
+        match toml::from_str::<Config>(
+            r#"
 [[driver]]
 name = "none"
-"#) {
-	    Ok(cfg) => {
-		let def_cfg = Config::default();
+"#,
+        ) {
+            Ok(cfg) => {
+                let def_cfg = Config::default();
 
-		#[cfg(feature = "redis-backend")]
-		{
-		    assert_eq!(cfg.get_backend().get_addr(),
-			       def_cfg.get_backend().get_addr());
-		    assert_eq!(cfg.get_backend().get_port(),
-			       def_cfg.get_backend().get_port());
-		    assert_eq!(cfg.get_backend().get_dbn(),
-			       def_cfg.get_backend().get_dbn());
-		}
+                #[cfg(feature = "redis-backend")]
+                {
+                    assert_eq!(
+                        cfg.get_backend().get_addr(),
+                        def_cfg.get_backend().get_addr()
+                    );
+                    assert_eq!(
+                        cfg.get_backend().get_port(),
+                        def_cfg.get_backend().get_port()
+                    );
+                    assert_eq!(
+                        cfg.get_backend().get_dbn(),
+                        def_cfg.get_backend().get_dbn()
+                    );
+                }
 
-		assert_eq!(cfg.log_level, def_cfg.log_level);
-		assert_eq!(cfg.driver.len(), 1)
-	    }
-	    Err(e) =>
-		panic!("TOML parse error: {}", e)
-	}
+                assert_eq!(cfg.log_level, def_cfg.log_level);
+                assert_eq!(cfg.driver.len(), 1)
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
 
-	// Verify the [backend] section can handle only one field at a
-	// time.
+        // Verify the [backend] section can handle only one field at a
+        // time.
 
-	match toml::from_str::<Config>(r#"
+        match toml::from_str::<Config>(
+            r#"
 [backend]
 addr = "192.168.1.1"
 
 [[driver]]
 name = "none"
-"#) {
-	    Ok(cfg) => {
-		let def_cfg = Config::default();
+"#,
+        ) {
+            Ok(cfg) => {
+                let def_cfg = Config::default();
 
-		#[cfg(feature = "redis-backend")]
-		{
-		    assert_eq!(cfg.get_backend().get_addr(), "192.168.1.1");
-		    assert_eq!(cfg.get_backend().get_port(),
-			       def_cfg.get_backend().get_port());
-		    assert_eq!(cfg.get_backend().get_dbn(),
-			       def_cfg.get_backend().get_dbn());
-		}
-	    }
-	    Err(e) =>
-		panic!("TOML parse error: {}", e)
-	}
+                #[cfg(feature = "redis-backend")]
+                {
+                    assert_eq!(cfg.get_backend().get_addr(), "192.168.1.1");
+                    assert_eq!(
+                        cfg.get_backend().get_port(),
+                        def_cfg.get_backend().get_port()
+                    );
+                    assert_eq!(
+                        cfg.get_backend().get_dbn(),
+                        def_cfg.get_backend().get_dbn()
+                    );
+                }
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
 
-	match toml::from_str::<Config>(r#"
+        match toml::from_str::<Config>(
+            r#"
 [backend]
 port = 7000
 
 [[driver]]
 name = "none"
-"#) {
-	    Ok(cfg) => {
-		let def_cfg = Config::default();
+"#,
+        ) {
+            Ok(cfg) => {
+                let def_cfg = Config::default();
 
-		#[cfg(feature = "redis-backend")]
-		{
-		    assert_eq!(cfg.get_backend().get_addr(),
-			       def_cfg.get_backend().get_addr());
-		    assert_eq!(cfg.get_backend().get_port(), 7000);
-		    assert_eq!(cfg.get_backend().get_dbn(),
-			       def_cfg.get_backend().get_dbn());
-		}
-	    }
-	    Err(e) =>
-		panic!("TOML parse error: {}", e)
-	}
+                #[cfg(feature = "redis-backend")]
+                {
+                    assert_eq!(
+                        cfg.get_backend().get_addr(),
+                        def_cfg.get_backend().get_addr()
+                    );
+                    assert_eq!(cfg.get_backend().get_port(), 7000);
+                    assert_eq!(
+                        cfg.get_backend().get_dbn(),
+                        def_cfg.get_backend().get_dbn()
+                    );
+                }
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
 
-	match toml::from_str::<Config>(r#"
+        match toml::from_str::<Config>(
+            r#"
 [backend]
 dbn = 3
 
 [[driver]]
 name = "none"
-"#) {
-	    Ok(cfg) => {
-		let def_cfg = Config::default();
+"#,
+        ) {
+            Ok(cfg) => {
+                let def_cfg = Config::default();
 
-		#[cfg(feature = "redis-backend")]
-		{
-		    assert_eq!(cfg.get_backend().get_addr(),
-			       def_cfg.get_backend().get_addr());
-		    assert_eq!(cfg.get_backend().get_port(),
-			       def_cfg.get_backend().get_port());
-		    assert_eq!(cfg.get_backend().get_dbn(), 3);
-		}
-	    }
-	    Err(e) =>
-		panic!("TOML parse error: {}", e)
-	}
+                #[cfg(feature = "redis-backend")]
+                {
+                    assert_eq!(
+                        cfg.get_backend().get_addr(),
+                        def_cfg.get_backend().get_addr()
+                    );
+                    assert_eq!(
+                        cfg.get_backend().get_port(),
+                        def_cfg.get_backend().get_port()
+                    );
+                    assert_eq!(cfg.get_backend().get_dbn(), 3);
+                }
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
 
-	// Verify the log_level can be set.
+        // Verify the log_level can be set.
 
-	match toml::from_str::<Config>(r#"
+        match toml::from_str::<Config>(
+            r#"
 log_level = "trace"
 [[driver]]
 name = "none"
-"#) {
-	    Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::TRACE),
-	    Err(e) => panic!("TOML parse error: {}", e)
-	}
-	match toml::from_str::<Config>(r#"
+"#,
+        ) {
+            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::TRACE),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+        match toml::from_str::<Config>(
+            r#"
 log_level = "debug"
 [[driver]]
 name = "none"
-"#) {
-	    Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::DEBUG),
-	    Err(e) => panic!("TOML parse error: {}", e)
-	}
-	match toml::from_str::<Config>(r#"
+"#,
+        ) {
+            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::DEBUG),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+        match toml::from_str::<Config>(
+            r#"
 log_level = "info"
 [[driver]]
 name = "none"
-"#) {
-	    Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::INFO),
-	    Err(e) => panic!("TOML parse error: {}", e)
-	}
-	match toml::from_str::<Config>(r#"
+"#,
+        ) {
+            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::INFO),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+        match toml::from_str::<Config>(
+            r#"
 log_level = "warn"
 [[driver]]
 name = "none"
-"#) {
-	    Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
-	    Err(e) => panic!("TOML parse error: {}", e)
-	}
+"#,
+        ) {
+            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
     }
 
     #[tokio::test]
     async fn test_config() {
-	test_defaults()
+        test_defaults()
     }
 }

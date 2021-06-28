@@ -35,6 +35,7 @@ use drmem_config::DriverConfig;
 use drmem_db_redis;
 
 mod core;
+
 #[cfg(graphql)]
 mod httpd;
 

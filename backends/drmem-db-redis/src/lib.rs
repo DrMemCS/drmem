@@ -43,11 +43,10 @@ use drmem_api::{ DbContext, Result, device::Device,
 
 fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
     match res {
-	Ok(res) => Ok(res),
-	Err(err) => {
-	    let msg = String::from(err
-				   .detail()
-				   .unwrap_or("no further information"));
+        Ok(res) => Ok(res),
+        Err(err) => {
+            let msg =
+                String::from(err.detail().unwrap_or("no further information"));
 
 	    match err.kind() {
 		redis::ErrorKind::ResponseError =>
@@ -96,35 +95,35 @@ fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
 
 fn to_redis(val: &DeviceValue) -> Vec<u8> {
     match val {
-	DeviceValue::Nil => vec![],
-	DeviceValue::Bool(false) => vec!['F' as u8],
-	DeviceValue::Bool(true) => vec!['T' as u8],
+        DeviceValue::Nil => vec![],
+        DeviceValue::Bool(false) => vec!['F' as u8],
+        DeviceValue::Bool(true) => vec!['T' as u8],
 
-	DeviceValue::Int(v) => {
-	    let mut buf: Vec<u8> = Vec::with_capacity(9);
+        DeviceValue::Int(v) => {
+            let mut buf: Vec<u8> = Vec::with_capacity(9);
 
-	    buf.push('I' as u8);
-	    buf.extend_from_slice(&v.to_be_bytes());
-	    buf
-	},
+            buf.push('I' as u8);
+            buf.extend_from_slice(&v.to_be_bytes());
+            buf
+        }
 
-	DeviceValue::Flt(v) => {
-	    let mut buf: Vec<u8> = Vec::with_capacity(9);
+        DeviceValue::Flt(v) => {
+            let mut buf: Vec<u8> = Vec::with_capacity(9);
 
-	    buf.push('D' as u8);
-	    buf.extend_from_slice(&v.to_be_bytes());
-	    buf
-	},
+            buf.push('D' as u8);
+            buf.extend_from_slice(&v.to_be_bytes());
+            buf
+        }
 
-	DeviceValue::Str(s) => {
-	    let s = s.as_bytes();
-	    let mut buf: Vec<u8> = Vec::with_capacity(5 + s.len());
+        DeviceValue::Str(s) => {
+            let s = s.as_bytes();
+            let mut buf: Vec<u8> = Vec::with_capacity(5 + s.len());
 
-	    buf.push('S' as u8);
-	    buf.extend_from_slice(&(s.len() as u32).to_be_bytes());
-	    buf.extend_from_slice(&s);
-	    buf
-	}
+            buf.push('S' as u8);
+            buf.extend_from_slice(&(s.len() as u32).to_be_bytes());
+            buf.extend_from_slice(&s);
+            buf
+        }
     }
 }
 
@@ -132,78 +131,82 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
 
 fn decode_integer(buf: &[u8]) -> Result<DeviceValue> {
     if buf.len() >= 8 {
-	let buf = buf[..8].try_into().unwrap();
+        let buf = buf[..8].try_into().unwrap();
 
-	return Ok(DeviceValue::Int(i64::from_be_bytes(buf)))
+        return Ok(DeviceValue::Int(i64::from_be_bytes(buf)));
     }
-    Err(Error(ErrorKind::TypeError,
-	      String::from("buffer too short for integer data")))
+    Err(Error(
+        ErrorKind::TypeError,
+        String::from("buffer too short for integer data"),
+    ))
 }
 
 // Decodes an `f64` from an 8-byte buffer.
 
 fn decode_float(buf: &[u8]) -> Result<DeviceValue> {
     if buf.len() >= 8 {
-	let buf = buf[..8].try_into().unwrap();
+        let buf = buf[..8].try_into().unwrap();
 
-	return Ok(DeviceValue::Flt(f64::from_be_bytes(buf)))
+        return Ok(DeviceValue::Flt(f64::from_be_bytes(buf)));
     }
-    Err(Error(ErrorKind::TypeError,
-	      String::from("buffer too short for floating point data")))
+    Err(Error(
+        ErrorKind::TypeError,
+        String::from("buffer too short for floating point data"),
+    ))
 }
 
 // Decodes a UTF-8 encoded string from a raw, u8 buffer.
 
 fn decode_string(buf: &[u8]) -> Result<DeviceValue> {
     if buf.len() >= 4 {
-	let len_buf = buf[..4].try_into().unwrap();
-	let len = u32::from_be_bytes(len_buf) as usize;
+        let len_buf = buf[..4].try_into().unwrap();
+        let len = u32::from_be_bytes(len_buf) as usize;
 
-	if buf.len() >= (4 + len) as usize {
-	    let str_vec = buf[4..4 + len].to_vec();
+        if buf.len() >= (4 + len) as usize {
+            let str_vec = buf[4..4 + len].to_vec();
 
-	    return match String::from_utf8(str_vec) {
-		Ok(s) => Ok(DeviceValue::Str(s)),
-		Err(_) => Err(Error(ErrorKind::TypeError,
-				    String::from("string not UTF-8")))
-	    }
-	}
+            return match String::from_utf8(str_vec) {
+                Ok(s) => Ok(DeviceValue::Str(s)),
+                Err(_) => Err(Error(
+                    ErrorKind::TypeError,
+                    String::from("string not UTF-8"),
+                )),
+            };
+        }
     }
-    Err(Error(ErrorKind::TypeError,
-	      String::from("buffer too short for string data")))
+    Err(Error(
+        ErrorKind::TypeError,
+        String::from("buffer too short for string data"),
+    ))
 }
 
 // Returns a `DeviceValue` from a `redis::Value`. The only enumeration
 // we support is the `Value::Data` form since that's the one used to
 // return redis data.
 
-fn from_value(v: &redis::Value) -> Result<DeviceValue>
-{
+fn from_value(v: &redis::Value) -> Result<DeviceValue> {
     if let redis::Value::Data(buf) = v {
+        // The buffer has to have at least one character in order to
+        // be decoded.
 
 	// The buffer has to have at least one character in order to
 	// be decoded.
 
-	if buf.len() > 0 {
-	    match buf[0] as char {
-		'F' => Ok(DeviceValue::Bool(false)),
-		'T' => Ok(DeviceValue::Bool(true)),
-		'I' => decode_integer(&buf[1..]),
-		'D' => decode_float(&buf[1..]),
-		'S' => decode_string(&buf[1..]),
-
-		// Any other character in the tag field is unknown and
-		// can't be decoded as a `DeviceValue`.
-
-		_ =>
-		    Err(Error(ErrorKind::TypeError,
-			      String::from("unknown tag")))
-	    }
-	} else {
-	    Ok(DeviceValue::Nil)
-	}
+                // Any other character in the tag field is unknown and
+                // can't be decoded as a `DeviceValue`.
+                _ => Err(Error(
+                    ErrorKind::TypeError,
+                    String::from("unknown tag"),
+                )),
+            }
+        } else {
+            Ok(DeviceValue::Nil)
+        }
     } else {
-	Err(Error(ErrorKind::TypeError, String::from("bad redis::Value")))
+        Err(Error(
+            ErrorKind::TypeError,
+            String::from("bad redis::Value"),
+        ))
     }
 }
 
@@ -218,7 +221,6 @@ pub struct RedisContext {
 }
 
 impl RedisContext {
-
     // Creates a connection to redis.
 
     async fn make_connection(cfg: &drmem_config::backend::Config,
@@ -236,7 +238,7 @@ impl RedisContext {
 	};
 	let client = redis::Client::open(ci).unwrap();
 
-	xlat_result(client.get_tokio_connection().await)
+        xlat_result(client.get_tokio_connection().await)
     }
 
     /// Builds a new backend context which can interacts with `redis`.
@@ -244,139 +246,152 @@ impl RedisContext {
     /// instance. If `name` and `pword` are not `None`, they will be
     /// used for credentials when connecting to `redis`.
 
-    pub async fn new(base_name: &str, cfg: &drmem_config::backend::Config,
-		     name: Option<String>, pword: Option<String>) -> Result<Self> {
-	let db_con = RedisContext::make_connection(cfg, name, pword).await?;
+    pub async fn new(
+        base_name: &str, cfg: &drmem_config::backend::Config,
+        name: Option<String>, pword: Option<String>,
+    ) -> Result<Self> {
+        let db_con = RedisContext::make_connection(cfg, name, pword).await?;
 
-	Ok(RedisContext { base: String::from(base_name), db_con })
+        Ok(RedisContext {
+            base: String::from(base_name),
+            db_con,
+        })
     }
 
     // Returns the key that returns meta information for the device.
 
     fn info_key(&self, name: &str) -> String {
-	format!("{}:{}#info", &self.base, &name)
+        format!("{}:{}#info", &self.base, &name)
     }
 
     // Returns the key that returns time-series information for the
     // device.
 
     fn history_key(&self, name: &str) -> String {
-	format!("{}:{}#hist", &self.base, &name)
+        format!("{}:{}#hist", &self.base, &name)
     }
 
     // Does some sanity checks on a device to see if it appears to be
     // valid.
 
-    async fn get_device<T: Into<DeviceValue> + Send>(&mut self, name: &str)
-						     -> Result<Device<T>> {
-	let info_key = self.info_key(name);
-	let data_type: String =
-	    xlat_result(redis::cmd("TYPE")
-			.arg(&info_key)
-			.query_async(&mut self.db_con)
-			.await)?;
+    async fn get_device<T: Into<DeviceValue> + Send>(
+        &mut self, name: &str,
+    ) -> Result<Device<T>> {
+        let info_key = self.info_key(name);
+        let data_type: String = xlat_result(
+            redis::cmd("TYPE")
+                .arg(&info_key)
+                .query_async(&mut self.db_con)
+                .await,
+        )?;
 
-	// If the info key is a "hash" type, we assume the device has
-	// been created and maintained properly.
+        // If the info key is a "hash" type, we assume the device has
+        // been created and maintained properly.
 
-	match data_type.as_str() {
-	    "hash" => {
-		let mut result: HashMap<String, redis::Value> =
-		    xlat_result(redis::Cmd::hgetall(&info_key)
-				.query_async(&mut self.db_con)
-				.await)?;
+        match data_type.as_str() {
+            "hash" => {
+                let mut result: HashMap<String, redis::Value> = xlat_result(
+                    redis::Cmd::hgetall(&info_key)
+                        .query_async(&mut self.db_con)
+                        .await,
+                )?;
 
-		// Convert the HaspMap<String, redis::Value> into a
-		// HashMap<String, DeviceValue>. As it converts each
-		// entry, it checks to see if the associated
-		// redis::Value can be translated. If not, it is
-		// ignored.
+                // Convert the HaspMap<String, redis::Value> into a
+                // HashMap<String, DeviceValue>. As it converts each
+                // entry, it checks to see if the associated
+                // redis::Value can be translated. If not, it is
+                // ignored.
 
-		let fields = result
-		    .drain()
-		    .filter_map(|(k, v)|
-				if let Ok(v) = from_value(&v) {
-				    Some((k, v))
-				} else {
-				    None
-				})
-		    .collect();
+                let fields = result
+                    .drain()
+                    .filter_map(|(k, v)| {
+                        if let Ok(v) = from_value(&v) {
+                            Some((k, v))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-		Device::create_from_map(name, fields)
-	    },
-	    "none" =>
-		Err(Error(ErrorKind::NotFound,
-			  String::from("device doesn't exist"))),
-	    _ =>
-		Err(Error(ErrorKind::NotFound,
-			  String::from("wrong type associated with key"))),
-	}
+                Device::create_from_map(name, fields)
+            }
+            "none" => Err(Error(
+                ErrorKind::NotFound,
+                String::from("device doesn't exist"),
+            )),
+            _ => Err(Error(
+                ErrorKind::NotFound,
+                String::from("wrong type associated with key"),
+            )),
+        }
     }
 }
 
 #[async_trait]
 impl DbContext for RedisContext {
-    async fn define_device<T: Into<DeviceValue> + Send>(&mut self,
-							name: &str,
-							summary: &str,
-							units: Option<String>)
-							-> Result<Device<T>>
-    {
-	let dev_name = format!("{}:{}", &self.base, &name);
+    async fn define_device<T: Into<DeviceValue> + Send>(
+        &mut self, name: &str, summary: &str, units: Option<String>,
+    ) -> Result<Device<T>> {
+        let dev_name = format!("{}:{}", &self.base, &name);
 
-	debug!("defining '{}'", &dev_name);
+        debug!("defining '{}'", &dev_name);
 
-	match self.get_device::<T>(&name).await {
-	    Ok(v) =>
-		Ok(v),
-	    Err(e) => {
-		warn!("'{}' isn't defined properly -- {:?}", &dev_name, e);
+        match self.get_device::<T>(&name).await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                warn!("'{}' isn't defined properly -- {:?}", &dev_name, e);
 
-		let hist_key = self.history_key(&name);
-		let info_key = self.info_key(&name);
-		let dev = Device::create(name, String::from(summary), units);
+                let hist_key = self.history_key(&name);
+                let info_key = self.info_key(&name);
+                let dev = Device::create(name, String::from(summary), units);
 
-		let temp = dev.to_vec();
-		let fields: Vec<(String, Vec<u8>)> =
-		    temp
-		    .iter()
-		    .map(|(k, v)| (String::from(*k), to_redis(v)))
-		    .collect();
+                let temp = dev.to_vec();
+                let fields: Vec<(String, Vec<u8>)> = temp
+                    .iter()
+                    .map(|(k, v)| (String::from(*k), to_redis(v)))
+                    .collect();
 
-		// Create a command pipeline that deletes the two keys
-		// and then creates them properly with default values.
+                // Create a command pipeline that deletes the two keys
+                // and then creates them properly with default values.
 
-		let _: () = xlat_result(redis::pipe()
-					.atomic()
-					.del(&hist_key)
-					.xadd(&hist_key, "1",
-					      &[("value", to_redis(&0i64.into()))])
-					.xdel(&hist_key, &["1"])
-					.del(&info_key)
-					.hset_multiple(&info_key, &fields)
-					.query_async(&mut self.db_con).await)?;
+                let _: () = xlat_result(
+                    redis::pipe()
+                        .atomic()
+                        .del(&hist_key)
+                        .xadd(
+                            &hist_key,
+                            "1",
+                            &[("value", to_redis(&0i64.into()))],
+                        )
+                        .xdel(&hist_key, &["1"])
+                        .del(&info_key)
+                        .hset_multiple(&info_key, &fields)
+                        .query_async(&mut self.db_con)
+                        .await,
+                )?;
 
-		info!("'{}' has been successfully created", &dev_name);
-		Ok(dev)
-	    }
-	}
+                info!("'{}' has been successfully created", &dev_name);
+                Ok(dev)
+            }
+        }
     }
 
-    async fn write_values(&mut self, values: &[(String, DeviceValue)])
-			  -> Result<()> {
-	let mut pipe = redis::pipe();
-	let mut cmd = pipe.atomic();
+    async fn write_values(
+        &mut self, values: &[(String, DeviceValue)],
+    ) -> Result<()> {
+        let mut pipe = redis::pipe();
+        let mut cmd = pipe.atomic();
 
-	for (dev, val) in values {
-	    let key = self.history_key(&dev);
+        for (dev, val) in values {
+            let key = self.history_key(&dev);
 
-	    cmd = cmd.xadd(key, "*", &[("value", to_redis(val))]);
+            cmd = cmd.xadd(key, "*", &[("value", to_redis(val))]);
 
-	    // TODO: need to check alarm limits -- and add the command
-	    // to announce it -- as the command is built-up.
-	}
+            // TODO: need to check alarm limits -- and add the command
+            // to announce it -- as the command is built-up.
+        }
 
-	xlat_result(cmd.query_async(&mut self.db_con).await)
+        xlat_result(cmd.query_async(&mut self.db_con).await)
     }
 }
 
@@ -387,119 +402,156 @@ impl DbContext for RedisContext {
 
 #[cfg(test)]
 mod tests {
-    use redis::{ Value };
     use super::*;
+    use redis::Value;
 
     // We only want to convert Value::Data() forms. These tests make
     // sure the other variants don't translate.
 
     #[tokio::test]
     async fn test_reject_invalid_forms() {
-	if let Ok(v) = from_value(&Value::Nil) {
-	    panic!("Value::Nil incorrectly translated to {:?}", v);
-	}
-	if let Ok(v) = from_value(&Value::Int(0)) {
-	    panic!("Value::Int incorrectly translated to {:?}", v);
-	}
-	if let Ok(v) = from_value(&Value::Bulk(vec![])) {
-	    panic!("Value::Bulk incorrectly translated to {:?}", v);
-	}
-	if let Ok(v) = from_value(&Value::Status(String::from(""))) {
-	    panic!("Value::Status incorrectly translated to {:?}", v);
-	}
-	if let Ok(v) = from_value(&Value::Okay) {
-	    panic!("Value::Okay incorrectly translated to {:?}", v);
-	}
+        if let Ok(v) = from_value(&Value::Nil) {
+            panic!("Value::Nil incorrectly translated to {:?}", v);
+        }
+        if let Ok(v) = from_value(&Value::Int(0)) {
+            panic!("Value::Int incorrectly translated to {:?}", v);
+        }
+        if let Ok(v) = from_value(&Value::Bulk(vec![])) {
+            panic!("Value::Bulk incorrectly translated to {:?}", v);
+        }
+        if let Ok(v) = from_value(&Value::Status(String::from(""))) {
+            panic!("Value::Status incorrectly translated to {:?}", v);
+        }
+        if let Ok(v) = from_value(&Value::Okay) {
+            panic!("Value::Okay incorrectly translated to {:?}", v);
+        }
     }
 
     // Test correct decoding of DeviceValue::Nil values.
 
     #[tokio::test]
     async fn test_nil_decoder() {
-	assert_eq!(Ok(DeviceValue::Nil), from_value(&Value::Data(vec![])));
+        assert_eq!(Ok(DeviceValue::Nil), from_value(&Value::Data(vec![])));
     }
 
     // Test correct decoding of DeviceValue::Bool values.
 
     #[tokio::test]
     async fn test_bool_decoder() {
-	assert_eq!(Ok(DeviceValue::Bool(false)),
-		   from_value(&Value::Data(vec!['F' as u8])));
-	assert_eq!(Ok(DeviceValue::Bool(true)),
-		   from_value(&Value::Data(vec!['T' as u8])));
+        assert_eq!(
+            Ok(DeviceValue::Bool(false)),
+            from_value(&Value::Data(vec!['F' as u8]))
+        );
+        assert_eq!(
+            Ok(DeviceValue::Bool(true)),
+            from_value(&Value::Data(vec!['T' as u8]))
+        );
     }
 
     // Test correct decoding of DeviceValue::Int values.
 
     #[tokio::test]
     async fn test_int_decoder() {
-	let values: Vec<(i64, Vec<u8>)> = vec![
-	    (0, vec!['I' as u8,
-		     0x00u8, 0x00u8, 0x00u8, 0x00u8,
-		     0x00u8, 0x00u8, 0x00u8, 0x00u8]),
-	    (1, vec!['I' as u8,
-		     0x00u8, 0x00u8, 0x00u8, 0x00u8,
-		     0x00u8, 0x00u8, 0x00u8, 0x01u8]),
-	    (-1, vec!['I' as u8,
-		      0xffu8, 0xffu8, 0xffu8, 0xffu8,
-		      0xffu8, 0xffu8, 0xffu8, 0xffu8]),
-	    (0x7fffffffffffffff, vec!['I' as u8,
-				      0x7fu8, 0xffu8, 0xffu8, 0xffu8,
-				      0xffu8, 0xffu8, 0xffu8, 0xffu8]),
-	    (-0x8000000000000000, vec!['I' as u8,
-				       0x80u8, 0x00u8, 0x00u8, 0x00u8,
-				       0x00u8, 0x00u8, 0x00u8, 0x00u8]),
-	    (0x0123456789abcdef, vec!['I' as u8,
-				      0x01u8, 0x23u8, 0x45u8, 0x67u8,
-				      0x89u8, 0xabu8, 0xcdu8, 0xefu8]),
-	];
+        let values: Vec<(i64, Vec<u8>)> = vec![
+            (
+                0,
+                vec![
+                    'I' as u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8,
+                    0x00u8, 0x00u8,
+                ],
+            ),
+            (
+                1,
+                vec![
+                    'I' as u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8,
+                    0x00u8, 0x01u8,
+                ],
+            ),
+            (
+                -1,
+                vec![
+                    'I' as u8, 0xffu8, 0xffu8, 0xffu8, 0xffu8, 0xffu8, 0xffu8,
+                    0xffu8, 0xffu8,
+                ],
+            ),
+            (
+                0x7fffffffffffffff,
+                vec![
+                    'I' as u8, 0x7fu8, 0xffu8, 0xffu8, 0xffu8, 0xffu8, 0xffu8,
+                    0xffu8, 0xffu8,
+                ],
+            ),
+            (
+                -0x8000000000000000,
+                vec![
+                    'I' as u8, 0x80u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8,
+                    0x00u8, 0x00u8,
+                ],
+            ),
+            (
+                0x0123456789abcdef,
+                vec![
+                    'I' as u8, 0x01u8, 0x23u8, 0x45u8, 0x67u8, 0x89u8, 0xabu8,
+                    0xcdu8, 0xefu8,
+                ],
+            ),
+        ];
 
-	for (v, rv) in values.iter() {
-	    let data = Value::Data(rv.to_vec());
+        for (v, rv) in values.iter() {
+            let data = Value::Data(rv.to_vec());
 
-	    assert_eq!(Ok(DeviceValue::Int(*v)), from_value(&data));
-	}
+            assert_eq!(Ok(DeviceValue::Int(*v)), from_value(&data));
+        }
     }
 
     // Test correct encoding of DeviceValue::Nil values.
 
     #[tokio::test]
     async fn test_nil_encoder() {
-	assert_eq!(Vec::<u8>::new(), to_redis(&DeviceValue::Nil));
+        assert_eq!(Vec::<u8>::new(), to_redis(&DeviceValue::Nil));
     }
 
     // Test correct encoding of DeviceValue::Bool values.
 
     #[tokio::test]
     async fn test_bool_encoder() {
-	assert_eq!(vec![ 'F' as u8], to_redis(&DeviceValue::Bool(false)));
-	assert_eq!(vec![ 'T' as u8], to_redis(&DeviceValue::Bool(true)));
+        assert_eq!(vec!['F' as u8], to_redis(&DeviceValue::Bool(false)));
+        assert_eq!(vec!['T' as u8], to_redis(&DeviceValue::Bool(true)));
     }
 
     // Test correct encoding of DeviceValue::Int values.
 
     #[tokio::test]
     async fn test_int_encoder() {
-	let values: Vec<(i64, Vec<u8>)> = vec![
-	    (0, vec![ 'I' as u8, 0x00, 0x00, 0x00, 0x00,
-		       0x00, 0x00, 0x00, 0x00 ]),
-	    (1, vec![ 'I' as u8, 0x00, 0x00, 0x00, 0x00,
-		       0x00, 0x00, 0x00, 0x01 ]),
-	    (-1, vec![ 'I' as u8, 0xff, 0xff, 0xff, 0xff,
-			0xff, 0xff, 0xff, 0xff ]),
-	    (0x7fffffffffffffff,
-	     vec![ 'I' as u8, 0x7f, 0xff, 0xff, 0xff,
-		    0xff, 0xff, 0xff, 0xff ]),
-	    (-0x8000000000000000,
-	     vec![ 'I' as u8, 0x80, 0x00, 0x00, 0x00,
-		    0x00, 0x00, 0x00, 0x00 ]),
-	    (0x0123456789abcdef,
-	     vec![ 'I' as u8, 0x01, 0x23, 0x45, 0x67,
-		    0x89, 0xab, 0xcd, 0xef ]),
-	];
+        let values: Vec<(i64, Vec<u8>)> = vec![
+            (
+                0,
+                vec!['I' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            ),
+            (
+                1,
+                vec!['I' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01],
+            ),
+            (
+                -1,
+                vec!['I' as u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+            ),
+            (
+                0x7fffffffffffffff,
+                vec!['I' as u8, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+            ),
+            (
+                -0x8000000000000000,
+                vec!['I' as u8, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            ),
+            (
+                0x0123456789abcdef,
+                vec!['I' as u8, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef],
+            ),
+        ];
 
-	for (v, rv) in values.iter() {
-	    assert_eq!(*rv, to_redis(&DeviceValue::Int(*v)));
-	}
+        for (v, rv) in values.iter() {
+            assert_eq!(*rv, to_redis(&DeviceValue::Int(*v)));
+        }
     }
 }

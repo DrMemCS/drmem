@@ -38,10 +38,12 @@ pub fn start() -> (framework::DriverRequestChan, JoinHandle<Result<()>>) {
 
     let (tx_drv_req, mut rx_drv_req) = mpsc::channel(10);
 
-    (tx_drv_req,
-     tokio::spawn(async move {
-	 let _ = rx_drv_req.recv().await;
+    (
+        tx_drv_req,
+        tokio::spawn(async move {
+            let _ = rx_drv_req.recv().await;
 
-	 Ok(())
-     }))
+            Ok(())
+        }),
+    )
 }
