@@ -29,7 +29,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use crate::{
-    types::{DeviceValue, Error, ErrorKind},
+    types::{DeviceValue, DrMemError},
     Result,
 };
 use std::{collections::HashMap, marker::PhantomData};
@@ -84,18 +84,8 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
                     DeviceValue::Str(val.clone()),
                 );
             }
-            Some(_) => {
-                return Err(Error(
-                    ErrorKind::TypeError,
-                    String::from("'summary' field isn't a string"),
-                ))
-            }
-            None => {
-                return Err(Error(
-                    ErrorKind::NotFound,
-                    String::from("'summary' is missing"),
-                ))
-            }
+            Some(_) => return Err(DrMemError::TypeError),
+            None => return Err(DrMemError::NotFound),
         }
 
         // Verify there is no "units" field or, if it exists, it's a
@@ -108,12 +98,7 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
                     DeviceValue::Str(val.clone()),
                 );
             }
-            Some(_) => {
-                return Err(Error(
-                    ErrorKind::TypeError,
-                    String::from("'units' field isn't a string"),
-                ))
-            }
+            Some(_) => return Err(DrMemError::TypeError),
             None => (),
         }
 

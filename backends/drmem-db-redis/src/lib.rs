@@ -28,12 +28,15 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use async_trait::async_trait;
+use drmem_api::{
+    device::Device,
+    types::{DeviceValue, DrMemError},
+    DbContext, Result,
+};
 use std::collections::HashMap;
 use std::convert::TryInto;
-use async_trait::async_trait;
-use tracing::{ debug, info, warn };
-use drmem_api::{ DbContext, Result, device::Device,
-		 types::{ DeviceValue, Error, ErrorKind } };
+use tracing::{debug, info, warn};
 
 // Translates a Redis error into a DrMem error. The translation is
 // slightly lossy in that we lose the exact Redis error that occurred
@@ -44,48 +47,35 @@ use drmem_api::{ DbContext, Result, device::Device,
 fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
     match res {
         Ok(res) => Ok(res),
-        Err(err) => {
-            let msg =
-                String::from(err.detail().unwrap_or("no further information"));
+        Err(err) => match err.kind() {
+            redis::ErrorKind::ResponseError
+            | redis::ErrorKind::ClusterDown
+            | redis::ErrorKind::CrossSlot
+            | redis::ErrorKind::MasterDown
+            | redis::ErrorKind::IoError => {
+                Err(DrMemError::DbCommunicationError)
+            }
 
-	    match err.kind() {
-		redis::ErrorKind::ResponseError =>
-		    Err(Error(ErrorKind::DbCommunicationError, msg)),
-		redis::ErrorKind::AuthenticationFailed =>
-		    Err(Error(ErrorKind::AuthenticationError, msg)),
-		redis::ErrorKind::TypeError =>
-		    Err(Error(ErrorKind::TypeError, msg)),
-		redis::ErrorKind::ExecAbortError =>
-		    Err(Error(ErrorKind::OperationError, msg)),
-		redis::ErrorKind::BusyLoadingError =>
-		    Err(Error(ErrorKind::OperationError, msg)),
-		redis::ErrorKind::NoScriptError =>
-		    Err(Error(ErrorKind::NotFound, msg)),
-		redis::ErrorKind::InvalidClientConfig =>
-		    Err(Error(ErrorKind::AuthenticationError, msg)),
-		redis::ErrorKind::Moved =>
-		    Err(Error(ErrorKind::NotFound, msg)),
-		redis::ErrorKind::Ask =>
-		    Err(Error(ErrorKind::NotFound, msg)),
-		redis::ErrorKind::TryAgain =>
-		    Err(Error(ErrorKind::OperationError, msg)),
-		redis::ErrorKind::ClusterDown =>
-		    Err(Error(ErrorKind::DbCommunicationError, msg)),
-		redis::ErrorKind::CrossSlot =>
-		    Err(Error(ErrorKind::DbCommunicationError, msg)),
-		redis::ErrorKind::MasterDown =>
-		    Err(Error(ErrorKind::DbCommunicationError, msg)),
-		redis::ErrorKind::IoError =>
-		    Err(Error(ErrorKind::DbCommunicationError, msg)),
-		redis::ErrorKind::ClientError =>
-		    Err(Error(ErrorKind::OperationError, msg)),
-		redis::ErrorKind::ExtensionError =>
-		    Err(Error(ErrorKind::OperationError, msg)),
-		redis::ErrorKind::ReadOnly =>
-		    Err(Error(ErrorKind::OperationError, msg)),
-		_ => Err(Error(ErrorKind::UnknownError, msg)),
-	    }
-	}
+            redis::ErrorKind::AuthenticationFailed
+            | redis::ErrorKind::InvalidClientConfig => {
+                Err(DrMemError::AuthenticationError)
+            }
+
+            redis::ErrorKind::TypeError => Err(DrMemError::TypeError),
+
+            redis::ErrorKind::ExecAbortError
+            | redis::ErrorKind::BusyLoadingError
+            | redis::ErrorKind::TryAgain
+            | redis::ErrorKind::ClientError
+            | redis::ErrorKind::ExtensionError
+            | redis::ErrorKind::ReadOnly => Err(DrMemError::OperationError),
+
+            redis::ErrorKind::NoScriptError
+            | redis::ErrorKind::Moved
+            | redis::ErrorKind::Ask => Err(DrMemError::NotFound),
+
+            _ => Err(DrMemError::UnknownError),
+        },
     }
 }
 
@@ -135,10 +125,7 @@ fn decode_integer(buf: &[u8]) -> Result<DeviceValue> {
 
         return Ok(DeviceValue::Int(i64::from_be_bytes(buf)));
     }
-    Err(Error(
-        ErrorKind::TypeError,
-        String::from("buffer too short for integer data"),
-    ))
+    Err(DrMemError::TypeError)
 }
 
 // Decodes an `f64` from an 8-byte buffer.
@@ -149,10 +136,7 @@ fn decode_float(buf: &[u8]) -> Result<DeviceValue> {
 
         return Ok(DeviceValue::Flt(f64::from_be_bytes(buf)));
     }
-    Err(Error(
-        ErrorKind::TypeError,
-        String::from("buffer too short for floating point data"),
-    ))
+    Err(DrMemError::TypeError)
 }
 
 // Decodes a UTF-8 encoded string from a raw, u8 buffer.
@@ -167,17 +151,11 @@ fn decode_string(buf: &[u8]) -> Result<DeviceValue> {
 
             return match String::from_utf8(str_vec) {
                 Ok(s) => Ok(DeviceValue::Str(s)),
-                Err(_) => Err(Error(
-                    ErrorKind::TypeError,
-                    String::from("string not UTF-8"),
-                )),
+                Err(_) => Err(DrMemError::TypeError),
             };
         }
     }
-    Err(Error(
-        ErrorKind::TypeError,
-        String::from("buffer too short for string data"),
-    ))
+    Err(DrMemError::TypeError)
 }
 
 // Returns a `DeviceValue` from a `redis::Value`. The only enumeration
@@ -189,24 +167,23 @@ fn from_value(v: &redis::Value) -> Result<DeviceValue> {
         // The buffer has to have at least one character in order to
         // be decoded.
 
-	// The buffer has to have at least one character in order to
-	// be decoded.
+        if buf.len() > 0 {
+            match buf[0] as char {
+                'F' => Ok(DeviceValue::Bool(false)),
+                'T' => Ok(DeviceValue::Bool(true)),
+                'I' => decode_integer(&buf[1..]),
+                'D' => decode_float(&buf[1..]),
+                'S' => decode_string(&buf[1..]),
 
                 // Any other character in the tag field is unknown and
                 // can't be decoded as a `DeviceValue`.
-                _ => Err(Error(
-                    ErrorKind::TypeError,
-                    String::from("unknown tag"),
-                )),
+                _ => Err(DrMemError::TypeError),
             }
         } else {
             Ok(DeviceValue::Nil)
         }
     } else {
-        Err(Error(
-            ErrorKind::TypeError,
-            String::from("bad redis::Value"),
-        ))
+        Err(DrMemError::TypeError)
     }
 }
 
@@ -288,41 +265,32 @@ impl RedisContext {
         // If the info key is a "hash" type, we assume the device has
         // been created and maintained properly.
 
-        match data_type.as_str() {
-            "hash" => {
-                let mut result: HashMap<String, redis::Value> = xlat_result(
-                    redis::Cmd::hgetall(&info_key)
-                        .query_async(&mut self.db_con)
-                        .await,
-                )?;
+        if data_type.as_str() == "hash" {
+            let mut result: HashMap<String, redis::Value> = xlat_result(
+                redis::Cmd::hgetall(&info_key)
+                    .query_async(&mut self.db_con)
+                    .await,
+            )?;
 
-                // Convert the HaspMap<String, redis::Value> into a
-                // HashMap<String, DeviceValue>. As it converts each
-                // entry, it checks to see if the associated
-                // redis::Value can be translated. If not, it is
-                // ignored.
+            // Convert the HaspMap<String, redis::Value> into a
+            // HashMap<String, DeviceValue>. As it converts each
+            // entry, it checks to see if the associated redis::Value
+            // can be translated. If not, it is ignored.
 
-                let fields = result
-                    .drain()
-                    .filter_map(|(k, v)| {
-                        if let Ok(v) = from_value(&v) {
-                            Some((k, v))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+            let fields = result
+                .drain()
+                .filter_map(|(k, v)| {
+                    if let Ok(v) = from_value(&v) {
+                        Some((k, v))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
-                Device::create_from_map(name, fields)
-            }
-            "none" => Err(Error(
-                ErrorKind::NotFound,
-                String::from("device doesn't exist"),
-            )),
-            _ => Err(Error(
-                ErrorKind::NotFound,
-                String::from("wrong type associated with key"),
-            )),
+            Device::create_from_map(name, fields)
+        } else {
+            Err(DrMemError::NotFound)
         }
     }
 }

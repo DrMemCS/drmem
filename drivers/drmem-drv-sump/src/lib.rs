@@ -215,22 +215,12 @@ impl Sump {
 
         let addr = match cfg.get("addr") {
             Some(addr) => addr,
-            None => {
-                return Err(types::Error(
-                    types::ErrorKind::BadConfig,
-                    String::from("missing 'addr' parameter in config"),
-                ))
-            }
+            None => return Err(types::DrMemError::BadConfig),
         };
 
         let port = match cfg.get("port") {
             Some(port) => port,
-            None => {
-                return Err(types::Error(
-                    types::ErrorKind::BadConfig,
-                    String::from("missing 'port' parameter in config"),
-                ))
-            }
+            None => return Err(types::DrMemError::BadConfig),
         };
 
         // Define the devices managed by this driver.
@@ -264,7 +254,9 @@ impl Sump {
             .await?;
 
         let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
-        let s = TcpStream::connect(addr).await?;
+        let s = TcpStream::connect(addr).await.map_err(|_| {
+            types::DrMemError::MissingPeer(String::from("sump pump"))
+        })?;
 
         // Unfortunately, we have to hang onto the xmt handle
 
@@ -331,7 +323,7 @@ impl Driver for Sump {
                             self.d_state.set(false),
                         ])
                         .await?;
-                    break Err(e.into());
+                    break Err(types::DrMemError::OperationError);
                 }
             }
             debug!("state: {:?}", self.state);

@@ -29,6 +29,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::convert::{From, TryFrom};
+use std::fmt;
 
 /// Enumerates all the errors that can be reported in `drmem`. Authors
 /// for new drivers or database backends should try to map their
@@ -41,9 +42,19 @@ use std::convert::{From, TryFrom};
 /// details.
 
 #[derive(Debug, PartialEq)]
-pub enum ErrorKind {
+pub enum DrMemError {
     /// Returned whenever a resource cannot be found.
     NotFound,
+
+    /// A resource or name is already in use.
+    InUse,
+
+    /// The device name is already registered to another driver.
+    DeviceDefined(String),
+
+    /// Reported when the peer of a communication channel has closed
+    /// its handle.
+    MissingPeer(String),
 
     /// A type mismatch is preventing the operation from continuing.
     TypeError,
@@ -70,12 +81,30 @@ pub enum ErrorKind {
     UnknownError,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Error(pub ErrorKind, pub String);
+impl std::error::Error for DrMemError {}
 
-impl From<std::io::Error> for Error {
-    fn from(_: std::io::Error) -> Self {
-        Error(ErrorKind::OperationError, String::from("I/O error"))
+impl fmt::Display for DrMemError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DrMemError::NotFound => write!(f, "item not found"),
+            DrMemError::InUse => write!(f, "item is in use"),
+            DrMemError::DeviceDefined(name) => {
+                write!(f, "device {} is already defined", &name)
+            }
+            DrMemError::MissingPeer(detail) => {
+                write!(f, "{} is missing peer", detail)
+            }
+            DrMemError::TypeError => write!(f, "incorrect type"),
+            DrMemError::DbCommunicationError => {
+                write!(f, "db communication error")
+            }
+            DrMemError::AuthenticationError => write!(f, "permission error"),
+            DrMemError::OperationError => {
+                write!(f, "couldn't complete operation")
+            }
+            DrMemError::BadConfig => write!(f, "bad configuration"),
+            DrMemError::UnknownError => write!(f, "unhandled error"),
+        }
     }
 }
 
@@ -111,16 +140,13 @@ pub enum DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for bool {
-    type Error = Error;
+    type Error = DrMemError;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Bool(v) = value {
             Ok(v)
         } else {
-            Err(Error(
-                ErrorKind::TypeError,
-                String::from("can't convert to boolean"),
-            ))
+            Err(DrMemError::TypeError)
         }
     }
 }
@@ -132,16 +158,13 @@ impl From<bool> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for i64 {
-    type Error = Error;
+    type Error = DrMemError;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Int(v) = value {
             Ok(v)
         } else {
-            Err(Error(
-                ErrorKind::TypeError,
-                String::from("can't convert to integer"),
-            ))
+            Err(DrMemError::TypeError)
         }
     }
 }
@@ -153,16 +176,13 @@ impl From<i64> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for f64 {
-    type Error = Error;
+    type Error = DrMemError;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Flt(v) = value {
             Ok(v)
         } else {
-            Err(Error(
-                ErrorKind::TypeError,
-                String::from("can't convert to floating point"),
-            ))
+            Err(DrMemError::TypeError)
         }
     }
 }
@@ -174,16 +194,13 @@ impl From<f64> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for String {
-    type Error = Error;
+    type Error = DrMemError;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Str(v) = value {
             Ok(v)
         } else {
-            Err(Error(
-                ErrorKind::TypeError,
-                String::from("can't convert to floating point"),
-            ))
+            Err(DrMemError::TypeError)
         }
     }
 }
