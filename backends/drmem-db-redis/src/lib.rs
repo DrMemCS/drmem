@@ -200,20 +200,24 @@ pub struct RedisContext {
 impl RedisContext {
     // Creates a connection to redis.
 
-    async fn make_connection(cfg: &drmem_config::backend::Config,
-			     name: Option<String>,
-			     pword: Option<String>)
-			     -> Result<redis::aio::Connection> {
-	use redis::{ConnectionInfo, ConnectionAddr};
+    async fn make_connection(
+        cfg: &drmem_config::backend::Config, name: Option<String>,
+        pword: Option<String>,
+    ) -> Result<redis::aio::Connection> {
+        use redis::{ConnectionAddr, ConnectionInfo, RedisConnectionInfo};
 
-	let ci = ConnectionInfo {
-	    addr: Box::new(ConnectionAddr::Tcp(String::from(cfg.get_addr()),
-					       cfg.get_port())),
-	    db: cfg.get_dbn(),
-	    username: name,
-	    passwd: pword
-	};
-	let client = redis::Client::open(ci).unwrap();
+        let ci = ConnectionInfo {
+            addr: ConnectionAddr::Tcp(
+                String::from(cfg.get_addr()),
+                cfg.get_port(),
+            ),
+            redis: RedisConnectionInfo {
+                db: cfg.get_dbn(),
+                username: name,
+                password: pword,
+            },
+        };
+        let client = redis::Client::open(ci).unwrap();
 
         xlat_result(client.get_tokio_connection().await)
     }
