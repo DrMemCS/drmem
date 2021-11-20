@@ -111,7 +111,7 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
 
             buf.push(b'S');
             buf.extend_from_slice(&(s.len() as u32).to_be_bytes());
-            buf.extend_from_slice(&s);
+            buf.extend_from_slice(s);
             buf
         }
     }
@@ -308,13 +308,13 @@ impl DbContext for RedisContext {
 
         debug!("defining '{}'", &dev_name);
 
-        match self.get_device::<T>(&name).await {
+        match self.get_device::<T>(name).await {
             Ok(v) => Ok(v),
             Err(e) => {
                 warn!("'{}' isn't defined properly -- {:?}", &dev_name, e);
 
-                let hist_key = self.history_key(&name);
-                let info_key = self.info_key(&name);
+                let hist_key = self.history_key(name);
+                let info_key = self.info_key(name);
                 let dev = Device::create(name, String::from(summary), units);
 
                 let temp = dev.to_vec();
@@ -355,7 +355,7 @@ impl DbContext for RedisContext {
         let mut cmd = pipe.atomic();
 
         for (dev, val) in values {
-            let key = self.history_key(&dev);
+            let key = self.history_key(dev);
 
             cmd = cmd.xadd(key, "*", &[("value", to_redis(val))]);
 

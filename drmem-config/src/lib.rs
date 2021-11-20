@@ -175,7 +175,7 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 }
 
 fn parse_config(path: &str, contents: &str) -> Option<Config> {
-    match toml::from_str(&contents) {
+    match toml::from_str(contents) {
         Ok(cfg) => Some(cfg),
         Err(e) => {
             print!("ERROR: {},\n       ignoring {}\n", e, path);
