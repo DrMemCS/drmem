@@ -219,16 +219,16 @@ async fn find_cfg() -> Config {
     }
 }
 
-fn dump_config(cfg: &Config) -> () {
-    print!("Configuration:\n");
-    print!("    log level: {}\n\n", cfg.get_log_level());
+fn dump_config(cfg: &Config) {
+    println!("Configuration:");
+    println!("    log level: {}\n", cfg.get_log_level());
 
     #[cfg(feature = "redis-backend")]
     {
-        print!("Using REDIS for storage:\n");
-        print!("    address: {}\n", &cfg.get_backend().get_addr());
-        print!("    port: {}\n", cfg.get_backend().get_port());
-        print!("    db #: {}\n\n", cfg.get_backend().get_dbn());
+        println!("Using REDIS for storage:");
+        println!("    address: {}", &cfg.get_backend().get_addr());
+        println!("    port: {}", cfg.get_backend().get_port());
+        println!("    db #: {}\n", cfg.get_backend().get_dbn());
     }
 
     println!("Driver configuration:");
@@ -241,9 +241,9 @@ fn dump_config(cfg: &Config) -> () {
                 ii.cfg.as_ref().unwrap_or(&value::Table::new())
             )
         }
-        print!("\n");
+        println!();
     } else {
-        print!("    No drivers specified.\n");
+        println!("    No drivers specified.");
     }
 }
 
