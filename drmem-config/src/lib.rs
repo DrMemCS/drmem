@@ -231,8 +231,8 @@ fn dump_config(cfg: &Config) -> () {
         print!("    db #: {}\n\n", cfg.get_backend().get_dbn());
     }
 
-    print!("Driver configuration:\n");
-    if cfg.driver.len() > 0 {
+    println!("Driver configuration:");
+    if !cfg.driver.is_empty() {
         for ii in &cfg.driver {
             print!(
                 "    name: {}, prefix: {}, cfg: {:?}",

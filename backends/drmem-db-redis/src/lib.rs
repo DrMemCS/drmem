@@ -167,7 +167,7 @@ fn from_value(v: &redis::Value) -> Result<DeviceValue> {
         // The buffer has to have at least one character in order to
         // be decoded.
 
-        if buf.len() > 0 {
+        if !buf.is_empty() {
             match buf[0] as char {
                 'F' => Ok(DeviceValue::Bool(false)),
                 'T' => Ok(DeviceValue::Bool(true)),
