@@ -86,13 +86,13 @@ fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
 fn to_redis(val: &DeviceValue) -> Vec<u8> {
     match val {
         DeviceValue::Nil => vec![],
-        DeviceValue::Bool(false) => vec!['F' as u8],
-        DeviceValue::Bool(true) => vec!['T' as u8],
+        DeviceValue::Bool(false) => vec![b'F'],
+        DeviceValue::Bool(true) => vec![b'T'],
 
         DeviceValue::Int(v) => {
             let mut buf: Vec<u8> = Vec::with_capacity(9);
 
-            buf.push('I' as u8);
+            buf.push(b'I');
             buf.extend_from_slice(&v.to_be_bytes());
             buf
         }
@@ -100,7 +100,7 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
         DeviceValue::Flt(v) => {
             let mut buf: Vec<u8> = Vec::with_capacity(9);
 
-            buf.push('D' as u8);
+            buf.push(b'D');
             buf.extend_from_slice(&v.to_be_bytes());
             buf
         }
@@ -109,7 +109,7 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
             let s = s.as_bytes();
             let mut buf: Vec<u8> = Vec::with_capacity(5 + s.len());
 
-            buf.push('S' as u8);
+            buf.push(b'S');
             buf.extend_from_slice(&(s.len() as u32).to_be_bytes());
             buf.extend_from_slice(&s);
             buf
