@@ -31,12 +31,9 @@ all cores of the system, further reducing latencies (or providing more
 scalability.)
 
 * **Simplicity**. DrMem is targeted for small installations so we
-want to minimize the number services that need to be managed. It turns
-out that the types available in `redis` can support most of the
-use-cases in a control system, so that's the core of DrMem. Add in
-the process that interacts with hardware and an optional task that can
-tie devices together with functional rules and you get a small, yet
-powerful, control system.
+want to minimize the number services that need to be managed. The `drmemd`
+executable, along with a configuration file that defines your location's
+set of devices, is all you need.
 
 * **Accessibility**. Although DrMem is capable running in the
 background with no user interaction, it is useful to have an interface
