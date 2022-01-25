@@ -1,3 +1,5 @@
+<img src="https://github.com/rneswold/drmem/raw/master/assets/logo/drmem-logo.png" alt="DrMem"/>
+
 # DrMem
 
 The DrMem Project strives to be a complete, easy-to-use control system
