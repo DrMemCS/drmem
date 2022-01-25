@@ -1,6 +1,8 @@
-<img src="https://github.com/rneswold/drmem/raw/master/assets/logo/drmem-logo.png" alt="DrMem"/>
+<img src="https://github.com/rneswold/drmem/raw/master/assets/logo/drmem-header-small.png" alt="DrMem Logo"/>
 
-# DrMem
+_A small, capable control system for the hobbyist_
+
+---
 
 The DrMem Project strives to be a complete, easy-to-use control system
 for home automation. Like the Arduino and RaspberryPi communities,
