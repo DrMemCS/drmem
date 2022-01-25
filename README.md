@@ -62,10 +62,12 @@ solutions that are available now, here's a few options:
 - [Mister House](https://github.com/hollie/misterhouse) is a home
   automation system, written in Perl, that has been around for
   decades.
+- [Home Assistant](https://www.home-assistant.io) is a nice-looking,
+  well-polished, home automation system.
 - Many devices can also be controlled by [Google's Home app](https://play.google.com/store/apps/details?id=com.google.android.apps.chromecast.app)
   or [Apple's Home app](https://www.apple.com/ios/home/)
 
-But be sure to check back occasionally!
+But be sure to check back occasionally as `drmem ` matures!
 
 ## Preparation
 
