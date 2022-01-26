@@ -15,8 +15,8 @@ to run. It also routes device settings to the appropriate drivers.
 
 ## Client Interface
 
-`drmemd` contains a web server which provides a GraphQL interface for
-clients to use. This interface gives clients these abilities:
+`drmemd` contains a web server which provides a GraphQL/gRPC interface
+for clients to use. This interface gives clients these abilities:
 
 - [ ] Get latest value of a device.
 - [ ] Get time range of data for a device.
@@ -26,6 +26,14 @@ clients to use. This interface gives clients these abilities:
 - [ ] Set device info.
 - [ ] Gets loaded drivers and their information.
 - [ ] Gets devices managed by this node.
+- Security considerations
+  - Devices can be marked public/private? Public devices are
+    accessible to the Reactive Engine and external clients. Private
+    devices are only accessible to the Reactive Engine.
+  - Client connections should be encrypted
+  - Add ACLs? This means there should be accounts/passwords?
+  - Maybe client port is only accessible via loopback interface; then
+    `ssh` can do the authentication?
 
 # Driver API
 
