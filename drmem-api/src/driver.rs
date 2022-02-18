@@ -32,9 +32,9 @@
 //! interact with the core of DrMem.
 
 use async_trait::async_trait;
+use drmem_types::{DeviceValue, DrMemError};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use toml::value;
-use drmem_types::{DeviceValue, DrMemError};
 
 use super::Result;
 
@@ -175,12 +175,10 @@ impl RequestChan {
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device(
         &self, name: &str,
-    ) -> Result<(
-        broadcast::Sender<DeviceValue>,
-        mpsc::Receiver<DeviceValue>,
-    )> {
+    ) -> Result<(broadcast::Sender<DeviceValue>, mpsc::Receiver<DeviceValue>)>
+    {
         let (tx, rx) = oneshot::channel();
-	let result = self
+        let result = self
             .req_chan
             .send(Request::AddReadWriteDevice {
                 dev_name: format!("{}:{}", self.prefix, name),

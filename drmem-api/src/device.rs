@@ -28,8 +28,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use drmem_types::{DeviceValue, DrMemError};
 use crate::Result;
+use drmem_types::{DeviceValue, DrMemError};
 use std::{collections::HashMap, marker::PhantomData};
 
 /// A `Device` type provides a view into the database for a single

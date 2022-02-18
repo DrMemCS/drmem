@@ -29,9 +29,9 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use async_trait::async_trait;
-use drmem_types::{DeviceValue, DrMemError};
 use drmem_api::{device::Device, driver, DbContext, Result};
 use drmem_db_redis::RedisContext;
+use drmem_types::{DeviceValue, DrMemError};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use tokio::{
     io::{self, AsyncReadExt},
@@ -265,9 +265,9 @@ impl Sump {
             .await?;
 
         let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
-        let s = TcpStream::connect(addr).await.map_err(|_| {
-            DrMemError::MissingPeer(String::from("sump pump"))
-        })?;
+        let s = TcpStream::connect(addr)
+            .await
+            .map_err(|_| DrMemError::MissingPeer(String::from("sump pump")))?;
 
         // Unfortunately, we have to hang onto the xmt handle
 
@@ -293,7 +293,7 @@ impl Sump {
         let stamp = self.rx.read_u64().await?;
         let value = self.rx.read_u32().await?;
 
-        return Ok((stamp, value != 0));
+        Ok((stamp, value != 0))
     }
 }
 

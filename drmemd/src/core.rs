@@ -28,8 +28,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use drmem_types::DrMemError;
 use drmem_api::{driver, Result};
+use drmem_types::DrMemError;
 use std::collections::{hash_map, HashMap};
 use tokio::{
     select,
@@ -102,9 +102,8 @@ impl State {
     fn send_reply<T>(
         dev_name: &str, rpy_chan: oneshot::Sender<Result<T>>, val: Option<T>,
     ) {
-        let result = val.ok_or_else(||
-            DrMemError::DeviceDefined(String::from(dev_name))
-        );
+        let result = val
+            .ok_or_else(|| DrMemError::DeviceDefined(String::from(dev_name)));
 
         if rpy_chan.send(result).is_err() {
             warn!("driver exited before a reply could be sent")
@@ -113,14 +112,20 @@ impl State {
 
     async fn handle_driver_request(&mut self, req: driver::Request) {
         match req {
-            driver::Request::AddReadonlyDevice { ref dev_name, rpy_chan } => {
-		let result = self.devices.insert_ro_device(dev_name.into());
+            driver::Request::AddReadonlyDevice {
+                ref dev_name,
+                rpy_chan,
+            } => {
+                let result = self.devices.insert_ro_device(dev_name.into());
 
                 State::send_reply(dev_name, rpy_chan, result)
             }
 
-            driver::Request::AddReadWriteDevice { ref dev_name, rpy_chan } => {
-		let result = self.devices.insert_rw_device(dev_name.into());
+            driver::Request::AddReadWriteDevice {
+                ref dev_name,
+                rpy_chan,
+            } => {
+                let result = self.devices.insert_rw_device(dev_name.into());
 
                 State::send_reply(dev_name, rpy_chan, result)
             }
