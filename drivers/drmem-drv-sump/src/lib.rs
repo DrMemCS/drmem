@@ -218,10 +218,11 @@ pub struct Sump {
 }
 
 impl Sump {
-    pub async fn new(mut ctxt: RedisContext,
-		     cfg: &DriverConfig,
-		     req_core: framework::DriverRequestChan) -> Result<Self> {
-	// Validate the configuration.
+    pub async fn new(
+        mut ctxt: RedisContext, cfg: &driver::Config,
+        req_core: driver::RequestChan,
+    ) -> Result<Self> {
+        // Validate the configuration.
 
         let addr = match cfg.get("addr") {
             Some(addr) => addr,
@@ -297,9 +298,18 @@ impl Sump {
 }
 
 #[async_trait]
-impl Driver for Sump {
-    async fn run(&mut self) -> Result<()> {
-	self.ctxt.write_values(&[self.d_service.set(true)]).await?;
+impl driver::API for Sump {
+    fn create(
+        cfg: driver::Config, drc: driver::RequestChan,
+    ) -> Result<Box<dyn driver::API>>
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
+
+    async fn run(mut self) -> Result<()> {
+        self.ctxt.write_values(&[self.d_service.set(true)]).await?;
 
         loop {
             match self.get_reading().await {
