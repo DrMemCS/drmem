@@ -21,6 +21,7 @@ tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+futures = { version = "0.3", features = ["std"] }
 
 drmem-types = { path = "../../drmem-types", version = "0.1" }
 drmem-api = { path = "../../drmem-api", version = "0.1" }

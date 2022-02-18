@@ -57,9 +57,27 @@ default-features = false
 features = ["runtime", "server", "http1", "http2"]
 optional = true
 
+# This section defines the optional dependencies for the 'gRPC'
+# feature.
+
+[dependencies.tonic]
+version = "0.6"
+features = ["prost", "compression"]
+optional = true
+
+[dependencies.prost]
+version = "0.9"
+optional = true
+
+[build-dependencies.tonic-build]
+version = "0.6"
+features = ["compression"]
+optional = true
+
 # These are features that can be enabled for drmem.
 
 [features]
 default = ["redis-backend"]
 redis-backend = ["drmem-db-redis"]
 graphql = ["hyper", "juniper", "juniper_hyper"]
+grpc = ["tonic", "prost", "tonic-build"]
