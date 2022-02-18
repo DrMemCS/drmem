@@ -13,5 +13,5 @@ members = [
 [profile.release]
 opt-level = 3
 debug = false
-lto = true
+lto = "thin"
 debug-assertions = false
