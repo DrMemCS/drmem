@@ -28,7 +28,6 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::net::{Ipv4Addr, SocketAddrV4};
 use async_trait::async_trait;
 use drmem_types::{DeviceValue, DrMemError};
 use drmem_api::{device::Device, driver, DbContext, Result};
@@ -43,40 +42,46 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn};
 
-const DESCRIPTION: &'static str = r#"
-This driver monitors the state of a sump pump and updates a set of
-devices based on its behavior.
+const DESCRIPTION: &str = r#"
+This driver monitors the state of a sump pump through a custom,
+non-commercial interface and updates a set of devices based on its
+behavior.
 
-This driver communicates, via TCP, with a RaspberryPi that's
+The sump pump state is obatined via TCP with a RaspberryPi that's
 monitoring a GPIO pin for state changes of the sump pump. It sends a
 12-byte packet whenever the state changes. The first 8 bytes holds a
 millisecond timestamp in big-endian format. The following 4 bytes
 holds the new state.
 
 With these packets, the driver can use the timestamps to compute duty
-cycles and incoming flows rates for the sump pit.
+cycles and incoming flows rates for the sump pit each time the pump
+turns off. The `state`, `duty`, and `in-flow` parameters are updated
+simulataneously and, hence will have the same timestamps.
 
 # Configuration
 
-Three parameters are used to configure the driver:
+The driver needs to know where to access the remote service. It also
+needs to know how to scale the results. Two driver arguments are used
+to specify this information:
 
-- `addr` is a string containing the host name, or IP address, of the
-  machine that's actually monitoring the sump pump.
-- `port` is an integer containing the port number of the service on
-  the remote machine.
+- `addr` is a string containing the host name, or IP address, and port
+  number of the machine that's actually monitoring the sump pump (in
+  **"hostname:#"** or **"\#.#.#.#:#"** format.)
 - `gpm` is an integer that repesents the gallons-per-minute capacity
-  of the sump pump.
+  of the sump pump. The pump owner's manual will typically have a
+  table indicating the flow rate based on the rise of the discharge
+  pipe.
 
 # Devices
 
 The driver creates these devices:
 
-| Base Name | Type | Units | Comment                                                   |
-|-----------|------|-------|-----------------------------------------------------------|
-| `service` | bool |       | Set to `true` when communicating with the remote service. |
-| `state`   | bool |       | Set to `true` when the pump is running.                   |
-| `duty`    | f64  | %     | Indicates duty cycle of last cycle.                       |
-| `in-flow` | f64  | gpm   | Indicates the in-flow rate for the last cycle.            |
+| Base Name | Type     | Units | Comment                                                   |
+|-----------|----------|-------|-----------------------------------------------------------|
+| `service` | bool, RO |       | Set to `true` when communicating with the remote service. |
+| `state`   | bool, RO |       | Set to `true` when the pump is running.                   |
+| `duty`    | f64, RO  | %     | Indicates duty cycle of last cycle.                       |
+| `in-flow` | f64, RO  | gpm   | Indicates the in-flow rate for the last cycle.            |
 
 "#;
 
