@@ -29,6 +29,10 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use async_trait::async_trait;
+use tokio::sync::{broadcast, mpsc, oneshot};
+use toml::value;
+use drmem_types::{DeviceValue, DrMemError};
+
 use super::Result;
 
 /// All drivers implement the `Driver` trait.

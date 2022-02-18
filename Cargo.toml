@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "drmem-types",
     "drmem-api",
     "drmem-config",
     "drivers/*",

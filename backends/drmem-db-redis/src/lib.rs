@@ -29,9 +29,9 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use async_trait::async_trait;
+use drmem_types::{DeviceValue, DrMemError};
 use drmem_api::{
     device::Device,
-    types::{DeviceValue, DrMemError},
     DbContext, Result,
 };
 use std::collections::HashMap;

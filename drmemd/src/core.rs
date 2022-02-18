@@ -28,8 +28,16 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tokio::{ sync::mpsc, task::JoinHandle };
-use drmem_api::{ framework, Result };
+use drmem_types::DrMemError;
+use drmem_api::{driver, Result};
+use std::collections::{hash_map, HashMap};
+use tokio::{
+    select,
+    sync::{broadcast, mpsc, oneshot},
+    task::JoinHandle,
+};
+use tracing::{info_span, warn};
+use tracing_futures::Instrument;
 
 pub fn start() -> (framework::DriverRequestChan, JoinHandle<Result<()>>) {
     // Create a channel that drivers can use to make requests to the

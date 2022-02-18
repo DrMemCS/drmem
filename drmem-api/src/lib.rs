@@ -29,14 +29,14 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use async_trait::async_trait;
+use drmem_types::{DeviceValue, DrMemError};
 
 pub mod device;
-pub mod types;
 
 /// A `Result` type where the error value is a value from
 /// `drmem_api::types::Error`.
 
-pub type Result<T> = std::result::Result<T, types::DrMemError>;
+pub type Result<T> = std::result::Result<T, DrMemError>;
 
 /// The `DbContext` trait defines the API that a back-end needs to
 /// implement to provide storage for -- and access to -- the state of
@@ -50,7 +50,7 @@ pub trait DbContext {
     /// description of the device. `units` is an optional units
     /// field. Some devices (like boolean or string devices) don't
     /// require engineering units.
-    async fn define_device<T: Into<types::DeviceValue> + Send>(
+    async fn define_device<T: Into<DeviceValue> + Send>(
         &mut self, name: &str, summary: &str, units: Option<String>,
     ) -> Result<device::Device<T>>;
 
@@ -65,7 +65,7 @@ pub trait DbContext {
     /// the database so if all devices are changed in a single call,
     /// clients will see a consistent change.
     async fn write_values(
-        &mut self, values: &[(String, types::DeviceValue)],
+        &mut self, values: &[(String, DeviceValue)],
     ) -> Result<()>;
 }
 

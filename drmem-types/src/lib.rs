@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, Richard M Neswold, Jr.
+// Copyright (c) 2020-2022, Richard M Neswold, Jr.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -28,25 +28,27 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+//! Defines fundamental types used throughout the DrMem codebase.
+
 use std::convert::{From, TryFrom};
 use std::fmt;
 
-/// Enumerates all the errors that can be reported in `drmem`. Authors
-/// for new drivers or database backends should try to map their
-/// errors into one of these values. If no value of `ErrorKind` is
+/// Enumerates all the errors that can be reported in DrMem. Authors
+/// for new drivers or storage backends should try to map their
+/// errors into one of these values. If no current value is
 /// appropriate, a new one could be added (requiring a new release of
-/// this crate) but make sure the new code is generic enough that it
-/// may be useful for other drivers or backends. For instance, don't
-/// add an error value that is specific to Redis. Add a more general
-/// value and use the associated description string to explain the
-/// details.
+/// this crate) but make sure the new error code is generic enough
+/// that it may be useful for other drivers or backends. For instance,
+/// don't add an error value that is specific to Redis. Add a more
+/// general value and use the associated description string to explain
+/// the details.
 
 #[derive(Debug, PartialEq)]
 pub enum DrMemError {
     /// Returned whenever a resource cannot be found.
     NotFound,
 
-    /// A resource or name is already in use.
+    /// A resource is already in use.
     InUse,
 
     /// The device name is already registered to another driver.
@@ -108,22 +110,12 @@ impl fmt::Display for DrMemError {
     }
 }
 
-/// This module defines the fundamental types that can be associated
-/// with a device. Drivers set the type for each device they manage
-/// and, for devices that can be set, only accept values of the
-/// correct type.
-///
-/// This is the module to expand, if devices need to return new,
-/// exotic types.
-
-/// Primitive types available to devices.
+/// Defines fundamental types that can be associated with a
+/// device. Drivers set the type for each device they manage and, for
+/// devices that can be set, only accept values of the correct type.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeviceValue {
-    /// Devices shouldn't use this type as it may go away. It was
-    /// created to solve a limitation in an early version of `drmem`.
-    Nil,
-
-    /// For devices that return/accept a simply true/false, on/off,
+    /// For devices that return/accept a simple true/false, on/off,
     /// etc. state.
     Bool(bool),
 
@@ -135,7 +127,12 @@ pub enum DeviceValue {
     /// For devices that return/accept floating point numbers.
     Flt(f64),
 
-    ///For devices that return/accept text.
+    /// For devices that return/accept text. Since strings can greatly
+    /// vary in size, care must be taken when returning this type. A
+    /// driver that returns strings rapidly should keep them short.
+    /// Longer strings should be returned at a slower rate. If the
+    /// system takes too much time serializing string data, it could
+    /// throw other portions of DrMem out of "soft real-time".
     Str(String),
 }
 

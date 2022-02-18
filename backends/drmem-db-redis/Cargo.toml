@@ -22,6 +22,7 @@ tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
+drmem-types = { path = "../../drmem-types", version = "0.1" }
 drmem-api = { path = "../../drmem-api", version = "0.1" }
 
 [dependencies.drmem-config]
