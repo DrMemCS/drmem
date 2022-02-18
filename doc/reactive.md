@@ -3,15 +3,16 @@
 The Reactive Engine adds higher-level controls to the system. The
 drivers in `drmem` interact with hardware and make them available as
 "devices". These devices can be controlled through applications using
-a GraphQL interface. But in many cases, you want intelligent control
-of the hardware without having an application running all the time.
+a GraphQL/gRPC interface. But in many cases, you want intelligent
+control of the hardware without having an application running all the
+time.
 
 The Reactive Engine accepts a source file that describes the logic to
 be run all the time in the context of the `drmem` process.
 
 ## Features
 
-- When `drmem` starts, a command line or config file option 
+- When `drmem` starts, a command line or config file option
   specifies the source for the RE.
 - The running system should allow a new source file to replace the
   current config. This prevents us from having to restart `drmem`
@@ -35,13 +36,13 @@ represent the data used when reading or writing to hardware.
     float       64-bit, IEEE            1.0, 1.5e30
     string      utf-8 encoded           "can contain text"
     color       32-bit, unsigned        #ffffffff,
-                                        #red,             // named colors
+                                        #red,                  // named colors
                                         #(1.0, 1.0, 1.0)       // RGB
                                         #(1.0, 1.0, 1.0, 1.0)  // RGBA
                                         #(1.0, 1.0)            // XY
     stamp       64-bit, unsigned,
                 milliseconds since
-                1970
+                1970, UTC
 
 ### Container Types
 
@@ -185,7 +186,7 @@ code easier to read:
 
     let MOTION = device "motion:status"
     let BULB = control "bulb:status"
-    
+
     MOTION |> BULB
 
 ### Example #2
@@ -202,7 +203,7 @@ detected and keeps the light on for a minute once motion stops.
     let MOTION = device "motion:status"
     let BULB = control "bulb:status"
     let TIMER = timer 60_000 (not MOTION)
-    
+
     or [MOTION, TIMER] |> BULB
 
 By OR-ing together the motion detector and the timer, you get the
@@ -236,19 +237,19 @@ seconds after the pump turns off.
 
     let STATE = device "pump:state"
     let DUTY = device "pump:duty"
-    
+
     // Define a 5 second timer that activates everytime the pump
     // turns off and the duty cycle is too high.
-    
+
     let TIMER = timer 5_000 (and [not STATE, DUTY >= 20.0])
-    
+
     // Create a stream that returns #yellow when the timer is active.
     // Otherwise it returns #black.
-    
+
     let WARN = switch TIMER #yellow #black
-    
+
     // Tie the logic together into a stream and send it to the bulb.
-    
+
     switch STATE #blue WARN |> control "bulb:color"
 
 ## Implementation Details
@@ -295,7 +296,7 @@ This event loop should keep track of the latest timestamp and write to
 the log whenever new data arrives with an older timestamp.
 
 This should mostly work when `redis` is running on the same node as
-`drmem` (since they'll have the same system clock and, therefore, 
+`drmem` (since they'll have the same system clock and, therefore,
 correlated timestamps.) On distributed systems, timers may get
 reported before remote data, so there may be out of order stamps.
 
@@ -310,7 +311,7 @@ reported before remote data, so there may be out of order stamps.
   changes, the database will show perfectly correlated data.
 - Yes. We could create a function `delta : {_} -> {int}` that
   computes milliseconds between elements. If this function seems
-  useful, then we need timestamps. 
+  useful, then we need timestamps.
 
 If we set a device and specify its stamp, it'll get stored in `redis`
 with that timestamp. It's possible for a program to have a `control`
@@ -333,7 +334,7 @@ What does this do?
 
     let BULB_IN = device "bulb:state"
     let BULB_OUT = control "bulb:state"
-    
+
     BULB_IN |> BULB_OUT
 
 At first glance, it looks like an infinite loop: The state of the bulb
@@ -356,4 +357,3 @@ Celsius reading from a Fahrenheit reading using the same timestamp. To
 have two related devices update at the same time (i.e. have the same
 timestamp) it should be done in the driver and the driver should add
 those entries atomically.
-
