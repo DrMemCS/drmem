@@ -222,7 +222,7 @@ impl RedisContext {
         xlat_result(client.get_tokio_connection().await)
     }
 
-    /// Builds a new backend context which can interacts with `redis`.
+    /// Builds a new backend context which interacts with `redis`.
     /// The parameters in `cfg` will be used to locate the `redis`
     /// instance. If `name` and `pword` are not `None`, they will be
     /// used for credentials when connecting to `redis`.
