@@ -28,72 +28,107 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tracing::{warn};
+use drmem_api::{
+    driver::{self, API},
+    Result,
+};
+use drmem_config::Config;
 use tokio::pin;
-use drmem_api::{ driver::Driver, Result };
-use drmem_config::DriverConfig;
-use drmem_db_redis;
+use tracing::warn;
 
 mod core;
 
 #[cfg(graphql)]
 mod httpd;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+// Initializes the `drmemd` application. It determines the
+// configuration and sets up the logger. It returns `Some(Config)`
+// with the found configuration, if the applications is to run. It
+// returns `None` if the program should exit (because a command line
+// option asked for a "usage" message, for instance.)
+
+async fn init_app() -> Option<Config> {
+    // If a configuration is returned, set up the logger.
+
     if let Some(cfg) = drmem_config::get().await {
+        // Initialize the log system. The max log level is determined
+        // by the user (either through the config file or the command
+        // line.)
 
-	// Initialize the log system. The max log level is determined
-	// by the user (either through the config file or the command
-	// line.)
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(cfg.get_log_level())
+            .finish();
 
-	let subscriber = tracing_subscriber::fmt()
-	    .with_max_level(cfg.get_log_level())
-	    .finish();
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("Unable to set global default subscriber");
+        Some(cfg)
+    } else {
+        None
+    }
+}
 
-	tracing::subscriber::set_global_default(subscriber)
-	    .expect("Unable to set global default subscriber");
+// Runs the main body of the application. This top-level task reads
+// the config, starts the drivers, and monitors their health.
 
-	let (tx_drv_req, core_task) = core::start();
+async fn run() -> Result<()> {
+    if let Some(cfg) = init_app().await {
+        // Start the core task. It returns a handle to a channel with
+        // which to make requests. It also returns the task handle.
 
-	let ctxt = drmem_db_redis::RedisContext::new("sump",
-						     &cfg.get_backend(),
-						     None, None).await?;
+        let (tx_drv_req, core_task) = core::start();
 
-	let mut drv_pump =
-	    drmem_drv_sump::Sump::new(ctxt, &DriverConfig::new(),
-				      tx_drv_req).await?;
-	let drv_pump = drv_pump.run();
-	pin!(drv_pump);
+        let ctxt = drmem_db_redis::RedisContext::new(
+            "sump",
+            cfg.get_backend(),
+            None,
+            None,
+        )
+        .await?;
 
-	#[cfg(not(graphql))]
-	{
-	    tokio::select! {
+        let drv_pump = drmem_drv_sump::Sump::new(
+            ctxt,
+            &driver::Config::new(),
+            driver::RequestChan::new("basement:sump", &tx_drv_req),
+        )
+        .await?;
+        let drv_pump = drv_pump.run();
+        pin!(drv_pump);
+
+        #[cfg(not(graphql))]
+        {
+            tokio::select! {
 		Err(e) = core_task => {
-		    warn!("core returned: {:?}", e);
+                    warn!("core returned: {:?}", e);
 		}
 		Err(e) = drv_pump => {
-		    warn!("monitor returned: {:?}", e);
+                    warn!("monitor returned: {:?}", e);
 		}
-	    }
-	}
-	#[cfg(graphql)]
-	{
-	    let svr_httpd = httpd::server();
-	    pin!(svr_httpd);
+            }
+        }
+        #[cfg(graphql)]
+        {
+            let svr_httpd = httpd::server();
+            pin!(svr_httpd);
 
-	    tokio::select! {
+            tokio::select! {
 		Err(e) = core_task => {
-		    warn!("core returned: {:?}", e);
+                    warn!("core returned: {:?}", e);
 		}
 		Err(e) = drv_pump => {
-		    warn!("monitor returned: {:?}", e);
+                    warn!("monitor returned: {:?}", e);
 		}
 		Err(e) = svr_httpd => {
-		    warn!("httpd returned: {:?}", e);
+                    warn!("httpd returned: {:?}", e);
 		}
-	    }
-	}
+            }
+        }
     }
     Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(e) = run().await {
+        eprintln!("ERROR: {:?}", e)
+    }
 }

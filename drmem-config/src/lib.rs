@@ -28,9 +28,11 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tracing::Level;
+use serde_derive::Deserialize;
 use toml::value;
-use serde_derive::{ Deserialize };
+use tracing::Level;
+
+use drmem_api::driver;
 
 #[cfg(feature = "redis-backend")]
 pub mod backend {
@@ -117,13 +119,11 @@ impl Default for Config {
     }
 }
 
-pub type DriverConfig = value::Table;
-
 #[derive(Deserialize)]
 pub struct Driver {
     pub name: String,
     pub prefix: Option<String>, // XXX: needs to be validated
-    pub cfg: Option<value::Table>,
+    pub cfg: Option<driver::Config>,
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
