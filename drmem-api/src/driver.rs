@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, Richard M Neswold, Jr.
+// Copyright (c) 2020-2022, Richard M Neswold, Jr.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
