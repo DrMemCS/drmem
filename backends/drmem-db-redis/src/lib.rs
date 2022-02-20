@@ -82,7 +82,6 @@ fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
 
 fn to_redis(val: &DeviceValue) -> Vec<u8> {
     match val {
-        DeviceValue::Nil => vec![],
         DeviceValue::Bool(false) => vec![b'F'],
         DeviceValue::Bool(true) => vec![b'T'],
 
@@ -177,7 +176,7 @@ fn from_value(v: &redis::Value) -> Result<DeviceValue> {
                 _ => Err(DrMemError::TypeError),
             }
         } else {
-            Ok(DeviceValue::Nil)
+	    Err(DrMemError::TypeError)
         }
     } else {
         Err(DrMemError::TypeError)
