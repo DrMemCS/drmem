@@ -107,7 +107,7 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
     /// and its associated value in the map.
 
     pub fn to_vec(&self) -> Vec<(&'static str, DeviceValue)> {
-        self.1.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        self.1.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
     pub fn set(&self, v: T) -> (String, DeviceValue) {
