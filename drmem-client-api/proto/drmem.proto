@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+service drmem {
+    rpc get_device_info(Devices) returns (stream DeviceInfo) {}
+    rpc query_device(DeviceFilter) returns (stream Devices) {}
+}
+
+message Devices {
+    repeated string name = 1;
+}
+
+message DeviceInfo {
+    string name = 1;
+    string units = 2;
+    string description = 3;
+}
+
+message DeviceFilter {
+    string pattern = 1;
+}
