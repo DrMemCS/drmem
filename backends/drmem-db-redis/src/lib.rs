@@ -398,9 +398,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_reject_invalid_forms() {
-        if let Ok(v) = from_value(&Value::Nil) {
-            panic!("Value::Nil incorrectly translated to {:?}", v);
-        }
         if let Ok(v) = from_value(&Value::Int(0)) {
             panic!("Value::Int incorrectly translated to {:?}", v);
         }
@@ -415,13 +412,6 @@ mod tests {
         }
     }
 
-    // Test correct decoding of DeviceValue::Nil values.
-
-    #[tokio::test]
-    async fn test_nil_decoder() {
-        assert_eq!(Ok(DeviceValue::Nil), from_value(&Value::Data(vec![])));
-    }
-
     // Test correct decoding of DeviceValue::Bool values.
 
     #[tokio::test]
@@ -434,69 +424,6 @@ mod tests {
             Ok(DeviceValue::Bool(true)),
             from_value(&Value::Data(vec!['T' as u8]))
         );
-    }
-
-    // Test correct decoding of DeviceValue::Int values.
-
-    #[tokio::test]
-    async fn test_int_decoder() {
-        let values: Vec<(i64, Vec<u8>)> = vec![
-            (
-                0,
-                vec![
-                    'I' as u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8,
-                    0x00u8, 0x00u8,
-                ],
-            ),
-            (
-                1,
-                vec![
-                    'I' as u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8,
-                    0x00u8, 0x01u8,
-                ],
-            ),
-            (
-                -1,
-                vec![
-                    'I' as u8, 0xffu8, 0xffu8, 0xffu8, 0xffu8, 0xffu8, 0xffu8,
-                    0xffu8, 0xffu8,
-                ],
-            ),
-            (
-                0x7fffffffffffffff,
-                vec![
-                    'I' as u8, 0x7fu8, 0xffu8, 0xffu8, 0xffu8, 0xffu8, 0xffu8,
-                    0xffu8, 0xffu8,
-                ],
-            ),
-            (
-                -0x8000000000000000,
-                vec![
-                    'I' as u8, 0x80u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x00u8,
-                    0x00u8, 0x00u8,
-                ],
-            ),
-            (
-                0x0123456789abcdef,
-                vec![
-                    'I' as u8, 0x01u8, 0x23u8, 0x45u8, 0x67u8, 0x89u8, 0xabu8,
-                    0xcdu8, 0xefu8,
-                ],
-            ),
-        ];
-
-        for (v, rv) in values.iter() {
-            let data = Value::Data(rv.to_vec());
-
-            assert_eq!(Ok(DeviceValue::Int(*v)), from_value(&data));
-        }
-    }
-
-    // Test correct encoding of DeviceValue::Nil values.
-
-    #[tokio::test]
-    async fn test_nil_encoder() {
-        assert_eq!(Vec::<u8>::new(), to_redis(&DeviceValue::Nil));
     }
 
     // Test correct encoding of DeviceValue::Bool values.
