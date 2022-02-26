@@ -222,17 +222,17 @@ impl RedisContext {
     ) -> Result<redis::aio::Connection> {
         use redis::{ConnectionAddr, ConnectionInfo, RedisConnectionInfo};
 
+        let addr = cfg.get_addr();
+
         let ci = ConnectionInfo {
-            addr: ConnectionAddr::Tcp(
-                String::from(cfg.get_addr()),
-                cfg.get_port(),
-            ),
+            addr: ConnectionAddr::Tcp(addr.ip().to_string(), addr.port()),
             redis: RedisConnectionInfo {
                 db: cfg.get_dbn(),
                 username: name,
                 password: pword,
             },
         };
+
         let client = redis::Client::open(ci).unwrap();
 
         xlat_result(client.get_tokio_connection().await)

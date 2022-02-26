@@ -34,14 +34,18 @@ use tracing::Level;
 
 use drmem_api::driver;
 
+// This module is defined when the REDIS backend is specified. It
+// provides configuration parameters that need to be provided in the
+// TOML file to help configure the REDIS support.
+
 #[cfg(feature = "redis-backend")]
 pub mod backend {
     use serde_derive::Deserialize;
+    use std::net::SocketAddr;
 
     #[derive(Deserialize)]
     pub struct Config {
-        pub addr: Option<String>,
-        pub port: Option<u16>,
+        pub addr: Option<SocketAddr>,
         pub dbn: Option<i64>,
     }
 
@@ -49,21 +53,12 @@ pub mod backend {
         pub const fn new() -> Config {
             Config {
                 addr: None,
-                port: None,
                 dbn: None,
             }
         }
 
-        pub fn get_addr(&'a self) -> &'a str {
-            if let Some(v) = &self.addr {
-                v.as_str()
-            } else {
-                "127.0.0.1"
-            }
-        }
-
-        pub fn get_port(&self) -> u16 {
-            self.port.unwrap_or(6379)
+        pub fn get_addr(&'a self) -> SocketAddr {
+            self.addr.unwrap_or("127.0.0.1:6379".parse().unwrap())
         }
 
         #[cfg(debug_assertions)]
@@ -227,7 +222,6 @@ fn dump_config(cfg: &Config) {
     {
         println!("Using REDIS for storage:");
         println!("    address: {}", &cfg.get_backend().get_addr());
-        println!("    port: {}", cfg.get_backend().get_port());
         println!("    db #: {}\n", cfg.get_backend().get_dbn());
     }
 
@@ -301,10 +295,6 @@ name = "none"
                         def_cfg.get_backend().get_addr()
                     );
                     assert_eq!(
-                        cfg.get_backend().get_port(),
-                        def_cfg.get_backend().get_port()
-                    );
-                    assert_eq!(
                         cfg.get_backend().get_dbn(),
                         def_cfg.get_backend().get_dbn()
                     );
@@ -322,35 +312,7 @@ name = "none"
         match toml::from_str::<Config>(
             r#"
 [backend]
-addr = "192.168.1.1"
-
-[[driver]]
-name = "none"
-"#,
-        ) {
-            Ok(cfg) => {
-                let def_cfg = Config::default();
-
-                #[cfg(feature = "redis-backend")]
-                {
-                    assert_eq!(cfg.get_backend().get_addr(), "192.168.1.1");
-                    assert_eq!(
-                        cfg.get_backend().get_port(),
-                        def_cfg.get_backend().get_port()
-                    );
-                    assert_eq!(
-                        cfg.get_backend().get_dbn(),
-                        def_cfg.get_backend().get_dbn()
-                    );
-                }
-            }
-            Err(e) => panic!("TOML parse error: {}", e),
-        }
-
-        match toml::from_str::<Config>(
-            r#"
-[backend]
-port = 7000
+addr = "192.168.1.1:6000"
 
 [[driver]]
 name = "none"
@@ -363,9 +325,8 @@ name = "none"
                 {
                     assert_eq!(
                         cfg.get_backend().get_addr(),
-                        def_cfg.get_backend().get_addr()
+                        "192.168.1.1:6000".parse().unwrap()
                     );
-                    assert_eq!(cfg.get_backend().get_port(), 7000);
                     assert_eq!(
                         cfg.get_backend().get_dbn(),
                         def_cfg.get_backend().get_dbn()
@@ -392,10 +353,6 @@ name = "none"
                     assert_eq!(
                         cfg.get_backend().get_addr(),
                         def_cfg.get_backend().get_addr()
-                    );
-                    assert_eq!(
-                        cfg.get_backend().get_port(),
-                        def_cfg.get_backend().get_port()
                     );
                     assert_eq!(cfg.get_backend().get_dbn(), 3);
                 }
