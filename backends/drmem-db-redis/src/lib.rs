@@ -110,6 +110,14 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
             buf.extend_from_slice(s);
             buf
         }
+
+        DeviceValue::Rgba(c) => {
+            let mut buf: Vec<u8> = Vec::with_capacity(5);
+
+            buf.push(b'C');
+            buf.extend_from_slice(&c.to_be_bytes());
+            buf
+        }
     }
 }
 
@@ -154,6 +162,17 @@ fn decode_string(buf: &[u8]) -> Result<DeviceValue> {
     Err(DrMemError::TypeError)
 }
 
+// Decodes an RGBA value from a 4-byte buffer.
+
+fn decode_color(buf: &[u8]) -> Result<DeviceValue> {
+    if buf.len() >= 4 {
+        let buf = buf[..4].try_into().unwrap();
+
+        return Ok(DeviceValue::Rgba(u32::from_be_bytes(buf)));
+    }
+    Err(DrMemError::TypeError)
+}
+
 // Returns a `DeviceValue` from a `redis::Value`. The only enumeration
 // we support is the `Value::Data` form since that's the one used to
 // return redis data.
@@ -170,13 +189,14 @@ fn from_value(v: &redis::Value) -> Result<DeviceValue> {
                 'I' => decode_integer(&buf[1..]),
                 'D' => decode_float(&buf[1..]),
                 'S' => decode_string(&buf[1..]),
+                'C' => decode_color(&buf[1..]),
 
                 // Any other character in the tag field is unknown and
                 // can't be decoded as a `DeviceValue`.
                 _ => Err(DrMemError::TypeError),
             }
         } else {
-	    Err(DrMemError::TypeError)
+            Err(DrMemError::TypeError)
         }
     } else {
         Err(DrMemError::TypeError)
@@ -487,39 +507,78 @@ mod tests {
         assert_eq!(vec!['T' as u8], to_redis(&DeviceValue::Bool(true)));
     }
 
+    const INT_TEST_CASES: &[(i64, &[u8])] = &[
+        (
+            0,
+            &['I' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        ),
+        (
+            1,
+            &['I' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01],
+        ),
+        (
+            -1,
+            &['I' as u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+        ),
+        (
+            0x7fffffffffffffff,
+            &['I' as u8, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+        ),
+        (
+            -0x8000000000000000,
+            &['I' as u8, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        ),
+        (
+            0x0123456789abcdef,
+            &['I' as u8, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef],
+        ),
+    ];
+
     // Test correct encoding of DeviceValue::Int values.
 
     #[tokio::test]
     async fn test_int_encoder() {
-        let values: Vec<(i64, Vec<u8>)> = vec![
-            (
-                0,
-                vec!['I' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            ),
-            (
-                1,
-                vec!['I' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01],
-            ),
-            (
-                -1,
-                vec!['I' as u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
-            ),
-            (
-                0x7fffffffffffffff,
-                vec!['I' as u8, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
-            ),
-            (
-                -0x8000000000000000,
-                vec!['I' as u8, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            ),
-            (
-                0x0123456789abcdef,
-                vec!['I' as u8, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef],
-            ),
-        ];
-
-        for (v, rv) in values.iter() {
+        for (v, rv) in INT_TEST_CASES {
             assert_eq!(*rv, to_redis(&DeviceValue::Int(*v)));
+        }
+    }
+
+    // Test correct decoding of DeviceValue::Int values.
+
+    #[tokio::test]
+    async fn test_int_decoder() {
+        for (v, rv) in INT_TEST_CASES {
+            let data = Value::Data(rv.to_vec());
+
+            assert_eq!(Ok(DeviceValue::Int(*v)), from_value(&data));
+        }
+    }
+
+    const RGBA_TEST_CASES: &[(u32, &[u8])] = &[
+        (0, &['C' as u8, 0x00, 0x00, 0x00, 0x00]),
+        (0xff, &['C' as u8, 0x00, 0x00, 0x00, 0xff]),
+        (0xff00, &['C' as u8, 0x00, 0x00, 0xff, 0x00]),
+        (0xff0000, &['C' as u8, 0x00, 0xff, 0x00, 0x00]),
+        (0xff000000, &['C' as u8, 0xff, 0x00, 0x00, 0x00]),
+    ];
+
+    // Test correct encoding of DeviceValue::Rgba values.
+
+    #[tokio::test]
+    async fn test_rgb_encoder() {
+        for (v, rv) in RGBA_TEST_CASES {
+            assert_eq!(*rv, to_redis(&DeviceValue::Rgba(*v)));
+        }
+    }
+
+    // Test correct decoding of DeviceValue::Rgba values.
+
+    #[tokio::test]
+    async fn test_rgb_decoder() {
+        for (v, rv) in RGBA_TEST_CASES {
+            let data = Value::Data(rv.to_vec());
+
+            assert_eq!(Ok(DeviceValue::Rgba(*v)), from_value(&data));
         }
     }
 }

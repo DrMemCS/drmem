@@ -134,6 +134,9 @@ pub enum DeviceValue {
     /// system takes too much time serializing string data, it could
     /// throw other portions of DrMem out of "soft real-time".
     Str(String),
+
+    /// Represents a color value.
+    Rgba(u32),
 }
 
 impl TryFrom<DeviceValue> for bool {
