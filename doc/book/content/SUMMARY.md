@@ -1,4 +1,4 @@
-- [Introduction](README.md)
+- [Introduction](INTRODUCTION.md)
 - Installing
   - Obtaining Source
   - Building
