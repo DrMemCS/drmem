@@ -38,6 +38,12 @@ use tracing::warn;
 
 mod core;
 
+// If the user specifies the 'grpc' feature, then pull in the module
+// that defines the gRPC server.
+
+#[cfg(grpc)]
+mod server_grpc;
+
 #[cfg(graphql)]
 mod httpd;
 
@@ -94,7 +100,7 @@ async fn run() -> Result<()> {
         let drv_pump = drv_pump.run();
         pin!(drv_pump);
 
-        #[cfg(not(graphql))]
+        #[cfg(all(not(graphql),grpc))]
         {
             tokio::select! {
 		Err(e) = core_task => {
@@ -105,7 +111,7 @@ async fn run() -> Result<()> {
 		}
             }
         }
-        #[cfg(graphql)]
+        #[cfg(all(graphql,not(grpc)))]
         {
             let svr_httpd = httpd::server();
             pin!(svr_httpd);

@@ -39,7 +39,7 @@ set of devices, is all you need.
 background with no user interaction, it is useful to have an interface
 that applications can use to provide dashboards, etc. for viewing and
 controlling DrMem devices. This is provided by a built-in HTTP
-server hosting a GraphQL interface.
+server hosting a gRPC interface.
 
 NOTE: This project provides a general purpose control system. Meeting
 timing constraints depends on how fast your system is and how many
