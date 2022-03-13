@@ -30,8 +30,11 @@
 
 //! Defines fundamental types used throughout the DrMem codebase.
 
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::convert::{From, TryFrom};
 use std::fmt;
+use std::str::FromStr;
 
 /// Enumerates all the errors that can be reported in DrMem. Authors
 /// for new drivers or storage backends should try to map their
@@ -60,6 +63,9 @@ pub enum DrMemError {
 
     /// A type mismatch is preventing the operation from continuing.
     TypeError,
+
+    /// An invalid value was provided.
+    InvArgument,
 
     /// Returned when a communication error occurred with the backend
     /// database. Each backend will have its own recommendations on
@@ -97,6 +103,7 @@ impl fmt::Display for DrMemError {
                 write!(f, "{} is missing peer", detail)
             }
             DrMemError::TypeError => write!(f, "incorrect type"),
+            DrMemError::InvArgument => write!(f, "bad value provided"),
             DrMemError::DbCommunicationError => {
                 write!(f, "db communication error")
             }
@@ -208,5 +215,121 @@ impl TryFrom<DeviceValue> for String {
 impl From<String> for DeviceValue {
     fn from(value: String) -> Self {
         DeviceValue::Str(value)
+    }
+}
+
+/// Holds a validated and canonicalized device name. The only ways to
+/// create a value of this type is to call `create()` or `parse<>()`,
+/// which will parse the input to make sure the device name is
+/// properly formed.
+
+#[derive(Debug, PartialEq)]
+pub struct DeviceSpec {
+    path: String,
+    name: String,
+    field: String,
+}
+
+impl DeviceSpec {
+    pub fn create(input: &str) -> Result<DeviceSpec, DrMemError> {
+        input.parse::<DeviceSpec>()
+    }
+}
+
+impl FromStr for DeviceSpec {
+    type Err = DrMemError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        lazy_static! {
+            // This regular expression parses a full device
+            // specification. It uses the "named grouping" feature to
+            // easily tag the matching sections.
+            //
+            // The first section matches any leading path:
+            //
+            //    (?P<path>(?:[\d[[:alpha:]]-]+:)*)
+            //
+            // The inner group matches zero or more segments with a
+            // trailing colon, where a segment is one or more
+            // alphanumeric or dash characters. The inner group is
+            // flagged to not be captured. The outer group, however,
+            // captures the entire path and assigns the name "path" to
+            // the group.
+            //
+            // The second section is required and represents the base
+            // name of the device:
+            //
+            //    (?P<name>[\d[[:alpha:]]-]+)
+            //
+            // The final section is the optional field name of the device:
+            //
+            //    (?:\.(?P<field>[[:alpha:]]+))?
+            //
+            // It looks for a leading '.' before capturing the field
+            // name itself.
+
+            static ref RE: Regex = Regex::new(r"^(?P<path>(?:[\d[[:alpha:]]-]+:)*)(?P<name>[\d[[:alpha:]]-]+)(?:\.(?P<field>[[:alpha:]]+))?$").unwrap();
+        }
+
+        if let Some(caps) = RE.captures(s) {
+            let field = caps.name("field").map_or("value", |m| m.as_str());
+
+            Ok(DeviceSpec {
+                path: String::from(&caps["path"]),
+                name: String::from(&caps["name"]),
+                field: String::from(field),
+            })
+        } else {
+            Err(DrMemError::InvArgument)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_device_spec() {
+        assert!(DeviceSpec::create("").is_err());
+        assert!(DeviceSpec::create(":").is_err());
+        assert!(DeviceSpec::create("a::a").is_err());
+        assert!(DeviceSpec::create("a.").is_err());
+        assert!(DeviceSpec::create("a.123").is_err());
+
+        assert_eq!(
+            DeviceSpec::create("path:device.field"),
+            Ok(DeviceSpec {
+                path: String::from("path:"),
+                name: String::from("device"),
+                field: String::from("field")
+            })
+        );
+        assert_eq!(
+            DeviceSpec::create("long:path:device.field"),
+            Ok(DeviceSpec {
+                path: String::from("long:path:"),
+                name: String::from("device"),
+                field: String::from("field")
+            })
+        );
+
+        assert_eq!(
+            DeviceSpec::create("device"),
+            Ok(DeviceSpec {
+                path: String::from(""),
+                name: String::from("device"),
+                field: String::from("value")
+            })
+        );
+
+        assert_eq!(
+            DeviceSpec::create("Device-123"),
+            Ok(DeviceSpec {
+                path: String::from(""),
+                name: String::from("Device-123"),
+                field: String::from("value")
+            })
+        );
     }
 }

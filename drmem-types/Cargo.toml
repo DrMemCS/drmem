@@ -15,3 +15,5 @@ keywords = ["control-system", "automation"]
 maintenance = { status = "actively-developed" }
 
 [dependencies]
+regex = "1"
+lazy_static = "1.4.0"
