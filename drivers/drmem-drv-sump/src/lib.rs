@@ -31,7 +31,7 @@
 use async_trait::async_trait;
 use drmem_api::{device::Device, driver, DbContext, Result};
 use drmem_db_redis::RedisContext;
-use drmem_types::{DeviceValue, DrMemError};
+use drmem_types::Error;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use tokio::{
     io::{self, AsyncReadExt},
@@ -226,12 +226,12 @@ impl Sump {
 
         let addr = match cfg.get("addr") {
             Some(addr) => addr,
-            None => return Err(DrMemError::BadConfig),
+            None => return Err(Error::BadConfig),
         };
 
         let port = match cfg.get("port") {
             Some(port) => port,
-            None => return Err(DrMemError::BadConfig),
+            None => return Err(Error::BadConfig),
         };
 
         // Define the devices managed by this driver.
@@ -267,7 +267,7 @@ impl Sump {
         let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
         let s = TcpStream::connect(addr)
             .await
-            .map_err(|_| DrMemError::MissingPeer(String::from("sump pump")))?;
+            .map_err(|_| Error::MissingPeer(String::from("sump pump")))?;
 
         // Unfortunately, we have to hang onto the xmt handle
 
@@ -343,7 +343,7 @@ impl driver::API for Sump {
                             self.d_state.set(false),
                         ])
                         .await?;
-                    break Err(DrMemError::OperationError);
+                    break Err(Error::OperationError);
                 }
             }
             debug!("state: {:?}", self.state);

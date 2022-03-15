@@ -29,14 +29,14 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use async_trait::async_trait;
-use drmem_types::{DeviceValue, DrMemError};
+use drmem_types::{DeviceValue, Error};
 
 pub mod device;
 
 /// A `Result` type where the error value is a value from
 /// `drmem_api::types::Error`.
 
-pub type Result<T> = std::result::Result<T, DrMemError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// The `DbContext` trait defines the API that a back-end needs to
 /// implement to provide storage for -- and access to -- the state of

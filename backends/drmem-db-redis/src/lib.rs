@@ -30,7 +30,7 @@
 
 use async_trait::async_trait;
 use drmem_api::{device::Device, DbContext, Result};
-use drmem_types::{DeviceValue, DrMemError};
+use drmem_types::{DeviceValue, Error};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use tracing::{debug, info, warn};
@@ -50,28 +50,28 @@ fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
             | redis::ErrorKind::CrossSlot
             | redis::ErrorKind::MasterDown
             | redis::ErrorKind::IoError => {
-                Err(DrMemError::DbCommunicationError)
+                Err(Error::DbCommunicationError)
             }
 
             redis::ErrorKind::AuthenticationFailed
             | redis::ErrorKind::InvalidClientConfig => {
-                Err(DrMemError::AuthenticationError)
+                Err(Error::AuthenticationError)
             }
 
-            redis::ErrorKind::TypeError => Err(DrMemError::TypeError),
+            redis::ErrorKind::TypeError => Err(Error::TypeError),
 
             redis::ErrorKind::ExecAbortError
             | redis::ErrorKind::BusyLoadingError
             | redis::ErrorKind::TryAgain
             | redis::ErrorKind::ClientError
             | redis::ErrorKind::ExtensionError
-            | redis::ErrorKind::ReadOnly => Err(DrMemError::OperationError),
+            | redis::ErrorKind::ReadOnly => Err(Error::OperationError),
 
             redis::ErrorKind::NoScriptError
             | redis::ErrorKind::Moved
-            | redis::ErrorKind::Ask => Err(DrMemError::NotFound),
+            | redis::ErrorKind::Ask => Err(Error::NotFound),
 
-            _ => Err(DrMemError::UnknownError),
+            _ => Err(Error::UnknownError),
         },
     }
 }
@@ -129,7 +129,7 @@ fn decode_integer(buf: &[u8]) -> Result<DeviceValue> {
 
         return Ok(DeviceValue::Int(i64::from_be_bytes(buf)));
     }
-    Err(DrMemError::TypeError)
+    Err(Error::TypeError)
 }
 
 // Decodes an `f64` from an 8-byte buffer.
@@ -140,7 +140,7 @@ fn decode_float(buf: &[u8]) -> Result<DeviceValue> {
 
         return Ok(DeviceValue::Flt(f64::from_be_bytes(buf)));
     }
-    Err(DrMemError::TypeError)
+    Err(Error::TypeError)
 }
 
 // Decodes a UTF-8 encoded string from a raw, u8 buffer.
@@ -155,11 +155,11 @@ fn decode_string(buf: &[u8]) -> Result<DeviceValue> {
 
             return match String::from_utf8(str_vec) {
                 Ok(s) => Ok(DeviceValue::Str(s)),
-                Err(_) => Err(DrMemError::TypeError),
+                Err(_) => Err(Error::TypeError),
             };
         }
     }
-    Err(DrMemError::TypeError)
+    Err(Error::TypeError)
 }
 
 // Decodes an RGBA value from a 4-byte buffer.
@@ -170,7 +170,7 @@ fn decode_color(buf: &[u8]) -> Result<DeviceValue> {
 
         return Ok(DeviceValue::Rgba(u32::from_be_bytes(buf)));
     }
-    Err(DrMemError::TypeError)
+    Err(Error::TypeError)
 }
 
 // Returns a `DeviceValue` from a `redis::Value`. The only enumeration
@@ -193,13 +193,13 @@ fn from_value(v: &redis::Value) -> Result<DeviceValue> {
 
                 // Any other character in the tag field is unknown and
                 // can't be decoded as a `DeviceValue`.
-                _ => Err(DrMemError::TypeError),
+                _ => Err(Error::TypeError),
             }
         } else {
-            Err(DrMemError::TypeError)
+            Err(Error::TypeError)
         }
     } else {
-        Err(DrMemError::TypeError)
+        Err(Error::TypeError)
     }
 }
 
@@ -310,7 +310,7 @@ impl RedisContext {
 
             Device::create_from_map(name, fields)
         } else {
-            Err(DrMemError::NotFound)
+            Err(Error::NotFound)
         }
     }
 }

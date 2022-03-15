@@ -47,7 +47,7 @@ use std::str::FromStr;
 /// the details.
 
 #[derive(Debug, PartialEq)]
-pub enum DrMemError {
+pub enum Error {
     /// Returned whenever a resource cannot be found.
     NotFound,
 
@@ -89,30 +89,30 @@ pub enum DrMemError {
     UnknownError,
 }
 
-impl std::error::Error for DrMemError {}
+impl std::error::Error for Error {}
 
-impl fmt::Display for DrMemError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            DrMemError::NotFound => write!(f, "item not found"),
-            DrMemError::InUse => write!(f, "item is in use"),
-            DrMemError::DeviceDefined(name) => {
+            Error::NotFound => write!(f, "item not found"),
+            Error::InUse => write!(f, "item is in use"),
+            Error::DeviceDefined(name) => {
                 write!(f, "device {} is already defined", &name)
             }
-            DrMemError::MissingPeer(detail) => {
+            Error::MissingPeer(detail) => {
                 write!(f, "{} is missing peer", detail)
             }
-            DrMemError::TypeError => write!(f, "incorrect type"),
-            DrMemError::InvArgument(s) => write!(f, "{}", s),
-            DrMemError::DbCommunicationError => {
+            Error::TypeError => write!(f, "incorrect type"),
+            Error::InvArgument(s) => write!(f, "{}", s),
+            Error::DbCommunicationError => {
                 write!(f, "db communication error")
             }
-            DrMemError::AuthenticationError => write!(f, "permission error"),
-            DrMemError::OperationError => {
+            Error::AuthenticationError => write!(f, "permission error"),
+            Error::OperationError => {
                 write!(f, "couldn't complete operation")
             }
-            DrMemError::BadConfig => write!(f, "bad configuration"),
-            DrMemError::UnknownError => write!(f, "unhandled error"),
+            Error::BadConfig => write!(f, "bad configuration"),
+            Error::UnknownError => write!(f, "unhandled error"),
         }
     }
 }
@@ -147,13 +147,13 @@ pub enum DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for bool {
-    type Error = DrMemError;
+    type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Bool(v) = value {
             Ok(v)
         } else {
-            Err(DrMemError::TypeError)
+            Err(Error::TypeError)
         }
     }
 }
@@ -165,13 +165,13 @@ impl From<bool> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for i64 {
-    type Error = DrMemError;
+    type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Int(v) = value {
             Ok(v)
         } else {
-            Err(DrMemError::TypeError)
+            Err(Error::TypeError)
         }
     }
 }
@@ -183,7 +183,7 @@ impl From<i64> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for i32 {
-    type Error = DrMemError;
+    type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Int(v) = value {
@@ -191,7 +191,7 @@ impl TryFrom<DeviceValue> for i32 {
 		return Ok(v)
 	    }
         }
-        Err(DrMemError::TypeError)
+        Err(Error::TypeError)
     }
 }
 
@@ -202,7 +202,7 @@ impl From<i32> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for u32 {
-    type Error = DrMemError;
+    type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Int(v) = value {
@@ -210,7 +210,7 @@ impl TryFrom<DeviceValue> for u32 {
 		return Ok(v)
 	    }
         }
-        Err(DrMemError::TypeError)
+        Err(Error::TypeError)
     }
 }
 
@@ -221,7 +221,7 @@ impl From<u32> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for i16 {
-    type Error = DrMemError;
+    type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Int(v) = value {
@@ -229,7 +229,7 @@ impl TryFrom<DeviceValue> for i16 {
 		return Ok(v)
 	    }
         }
-        Err(DrMemError::TypeError)
+        Err(Error::TypeError)
     }
 }
 
@@ -240,7 +240,7 @@ impl From<i16> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for u16 {
-    type Error = DrMemError;
+    type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Int(v) = value {
@@ -248,7 +248,7 @@ impl TryFrom<DeviceValue> for u16 {
 		return Ok(v)
 	    }
         }
-        Err(DrMemError::TypeError)
+        Err(Error::TypeError)
     }
 }
 
@@ -259,13 +259,13 @@ impl From<u16> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for f64 {
-    type Error = DrMemError;
+    type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Flt(v) = value {
             Ok(v)
         } else {
-            Err(DrMemError::TypeError)
+            Err(Error::TypeError)
         }
     }
 }
@@ -277,13 +277,13 @@ impl From<f64> for DeviceValue {
 }
 
 impl TryFrom<DeviceValue> for String {
-    type Error = DrMemError;
+    type Error = Error;
 
     fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
         if let DeviceValue::Str(v) = value {
             Ok(v)
         } else {
-            Err(DrMemError::TypeError)
+            Err(Error::TypeError)
         }
     }
 }
@@ -324,7 +324,7 @@ impl DeviceName {
     /// Creates an instance of `DeviceName`, if the provided string
     /// describes a well-formed device name.
 
-    pub fn create(s: &str) -> Result<DeviceName, DrMemError> {
+    pub fn create(s: &str) -> Result<DeviceName, Error> {
         lazy_static! {
             // This regular expression parses a device name. It uses
             // the "named grouping" feature to easily tag the matching
@@ -366,7 +366,7 @@ impl DeviceName {
                 name: String::from(&caps["name"]),
             })
         } else {
-            Err(DrMemError::InvArgument("invalid device path/name"))
+            Err(Error::InvArgument("invalid device path/name"))
         }
     }
 
@@ -392,7 +392,7 @@ impl fmt::Display for DeviceName {
 }
 
 impl FromStr for DeviceName {
-    type Err = DrMemError;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         DeviceName::create(s)
@@ -420,21 +420,21 @@ pub struct DeviceSpec {
 }
 
 impl DeviceSpec {
-    fn xlat_field(s: &str) -> Result<DeviceField, DrMemError> {
+    fn xlat_field(s: &str) -> Result<DeviceField, Error> {
         match s {
             "value" => Ok(DeviceField::Value),
             "unit" => Ok(DeviceField::Unit),
             "detail" => Ok(DeviceField::Detail),
             "summary" => Ok(DeviceField::Summary),
             "location" => Ok(DeviceField::Location),
-            _ => Err(DrMemError::InvArgument("invalid field name")),
+            _ => Err(Error::InvArgument("invalid field name")),
         }
     }
 
     /// Creates an instance of `DeviceSpec` if the provided string
     /// describes a well-formed device specification.
 
-    pub fn create(s: &str) -> Result<DeviceSpec, DrMemError> {
+    pub fn create(s: &str) -> Result<DeviceSpec, Error> {
         lazy_static! {
             // This regular expression parses a full device
             // specification. It uses the "named grouping" feature to
@@ -468,7 +468,7 @@ impl DeviceSpec {
                 });
             }
         }
-        Err(DrMemError::InvArgument("invalid device specification"))
+        Err(Error::InvArgument("invalid device specification"))
     }
 
     /// Returns the portion of the specification containing the path
@@ -486,7 +486,7 @@ impl DeviceSpec {
 }
 
 impl FromStr for DeviceSpec {
-    type Err = DrMemError;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         DeviceSpec::create(s)

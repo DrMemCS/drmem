@@ -29,7 +29,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use crate::Result;
-use drmem_types::{DeviceValue, DrMemError};
+use drmem_types::{DeviceValue, Error};
 use std::{collections::HashMap, marker::PhantomData};
 
 /// A `Device` type provides a view into the database for a single
@@ -82,8 +82,8 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
                     DeviceValue::Str(val.clone()),
                 );
             }
-            Some(_) => return Err(DrMemError::TypeError),
-            None => return Err(DrMemError::NotFound),
+            Some(_) => return Err(Error::TypeError),
+            None => return Err(Error::NotFound),
         }
 
         // Verify there is no "units" field or, if it exists, it's a
@@ -96,7 +96,7 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
                     DeviceValue::Str(val.clone()),
                 );
             }
-            Some(_) => return Err(DrMemError::TypeError),
+            Some(_) => return Err(Error::TypeError),
             None => (),
         }
 

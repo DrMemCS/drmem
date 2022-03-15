@@ -29,7 +29,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use drmem_api::{driver, Result};
-use drmem_types::DrMemError;
+use drmem_types::Error;
 use std::collections::{hash_map, HashMap};
 use tokio::{
     select,
@@ -103,7 +103,7 @@ impl State {
         dev_name: &str, rpy_chan: oneshot::Sender<Result<T>>, val: Option<T>,
     ) {
         let result = val
-            .ok_or_else(|| DrMemError::DeviceDefined(String::from(dev_name)));
+            .ok_or_else(|| Error::DeviceDefined(String::from(dev_name)));
 
         if rpy_chan.send(result).is_err() {
             warn!("driver exited before a reply could be sent")

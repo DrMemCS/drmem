@@ -32,7 +32,7 @@
 //! interact with the core of DrMem.
 
 use async_trait::async_trait;
-use drmem_types::{DeviceValue, DrMemError};
+use drmem_types::{DeviceValue, Error};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use toml::value;
 
@@ -153,7 +153,7 @@ impl RequestChan {
         // If either communication direction failed, return an error
         // indicating we can't talk to core.
 
-        Err(DrMemError::MissingPeer(String::from("core")))
+        Err(Error::MissingPeer(String::from("core")))
     }
 
     /// Registers a read-write device with the framework. `name` is the
@@ -191,7 +191,7 @@ impl RequestChan {
                 return v;
             }
         }
-        Err(DrMemError::MissingPeer(String::from("core")))
+        Err(Error::MissingPeer(String::from("core")))
     }
 }
 
