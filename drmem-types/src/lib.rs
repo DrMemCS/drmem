@@ -65,7 +65,7 @@ pub enum DrMemError {
     TypeError,
 
     /// An invalid value was provided.
-    InvArgument,
+    InvArgument(&'static str),
 
     /// Returned when a communication error occurred with the backend
     /// database. Each backend will have its own recommendations on
@@ -103,7 +103,7 @@ impl fmt::Display for DrMemError {
                 write!(f, "{} is missing peer", detail)
             }
             DrMemError::TypeError => write!(f, "incorrect type"),
-            DrMemError::InvArgument => write!(f, "bad value provided"),
+            DrMemError::InvArgument(s) => write!(f, "{}", s),
             DrMemError::DbCommunicationError => {
                 write!(f, "db communication error")
             }
@@ -123,7 +123,7 @@ impl fmt::Display for DrMemError {
 #[derive(Clone, Debug, PartialEq)]
 pub enum DeviceValue {
     /// For devices that return/accept a simple true/false, on/off,
-    /// etc. state.
+    /// etc., state.
     Bool(bool),
 
     /// For devices that return/accept an integer value. It is stored
@@ -179,6 +179,82 @@ impl TryFrom<DeviceValue> for i64 {
 impl From<i64> for DeviceValue {
     fn from(value: i64) -> Self {
         DeviceValue::Int(value)
+    }
+}
+
+impl TryFrom<DeviceValue> for i32 {
+    type Error = DrMemError;
+
+    fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
+        if let DeviceValue::Int(v) = value {
+	    if let Ok(v) = i32::try_from(v) {
+		return Ok(v)
+	    }
+        }
+        Err(DrMemError::TypeError)
+    }
+}
+
+impl From<i32> for DeviceValue {
+    fn from(value: i32) -> Self {
+        DeviceValue::Int(i64::from(value))
+    }
+}
+
+impl TryFrom<DeviceValue> for u32 {
+    type Error = DrMemError;
+
+    fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
+        if let DeviceValue::Int(v) = value {
+	    if let Ok(v) = u32::try_from(v) {
+		return Ok(v)
+	    }
+        }
+        Err(DrMemError::TypeError)
+    }
+}
+
+impl From<u32> for DeviceValue {
+    fn from(value: u32) -> Self {
+        DeviceValue::Int(i64::from(value))
+    }
+}
+
+impl TryFrom<DeviceValue> for i16 {
+    type Error = DrMemError;
+
+    fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
+        if let DeviceValue::Int(v) = value {
+	    if let Ok(v) = i16::try_from(v) {
+		return Ok(v)
+	    }
+        }
+        Err(DrMemError::TypeError)
+    }
+}
+
+impl From<i16> for DeviceValue {
+    fn from(value: i16) -> Self {
+        DeviceValue::Int(i64::from(value))
+    }
+}
+
+impl TryFrom<DeviceValue> for u16 {
+    type Error = DrMemError;
+
+    fn try_from(value: DeviceValue) -> Result<Self, Self::Error> {
+        if let DeviceValue::Int(v) = value {
+	    if let Ok(v) = u16::try_from(v) {
+		return Ok(v)
+	    }
+        }
+        Err(DrMemError::TypeError)
+    }
+}
+
+impl From<u16> for DeviceValue {
+    fn from(value: u16) -> Self {
+        DeviceValue::Int(i64::from(value))
     }
 }
 
@@ -420,6 +496,111 @@ impl FromStr for DeviceSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_device_values_from() {
+	assert_eq!(DeviceValue::Bool(true), DeviceValue::from(true));
+	assert_eq!(DeviceValue::Bool(false), DeviceValue::from(false));
+
+	assert_eq!(DeviceValue::Int(0), DeviceValue::from(0i64));
+	assert_eq!(DeviceValue::Int(-1), DeviceValue::from(-1i32));
+	assert_eq!(DeviceValue::Int(2), DeviceValue::from(2u32));
+	assert_eq!(DeviceValue::Int(-3), DeviceValue::from(-3i16));
+	assert_eq!(DeviceValue::Int(4), DeviceValue::from(4u16));
+
+	assert_eq!(DeviceValue::Flt(5.0), DeviceValue::from(5.0f64));
+
+	assert_eq!(
+	    DeviceValue::Str(String::from("hello")),
+	    DeviceValue::from(String::from("hello"))
+	);
+    }
+
+    #[test]
+    fn test_device_values_tryfrom() {
+
+	// Check that we can convert bool values.
+
+	assert_eq!(bool::try_from(DeviceValue::Bool(true)), Ok(true));
+	assert!(bool::try_from(DeviceValue::Int(0)).is_err());
+	assert!(bool::try_from(DeviceValue::Flt(0.0)).is_err());
+	assert!(
+	    bool::try_from(DeviceValue::Str(String::from("hello"))).is_err()
+	);
+
+	// Check that we can convert i64 values.
+
+	assert!(i64::try_from(DeviceValue::Bool(true)).is_err());
+	assert_eq!(i64::try_from(DeviceValue::Int(0)), Ok(0i64));
+	assert!(i64::try_from(DeviceValue::Flt(0.0)).is_err());
+	assert!(
+	    i64::try_from(DeviceValue::Str(String::from("hello"))).is_err()
+	);
+
+	// Check that we can convert u32 values.
+
+	assert!(i32::try_from(DeviceValue::Bool(true)).is_err());
+	assert_eq!(
+	    i32::try_from(DeviceValue::Int(0x7fffffffi64)),
+	    Ok(0x7fffffffi32)
+	);
+	assert_eq!(
+	    i32::try_from(DeviceValue::Int(-0x80000000i64)),
+	    Ok(-0x80000000i32)
+	);
+	assert!(i32::try_from(DeviceValue::Int(0x80000000i64)).is_err());
+	assert!(
+	    i32::try_from(DeviceValue::Int(-0x80000000i64 - 1i64)).is_err()
+	);
+	assert!(i32::try_from(DeviceValue::Flt(0.0)).is_err());
+	assert!(
+	    i32::try_from(DeviceValue::Str(String::from("hello"))).is_err()
+	);
+
+	// Check that we can convert u32 values.
+
+	assert!(u32::try_from(DeviceValue::Bool(true)).is_err());
+	assert_eq!(
+	    u32::try_from(DeviceValue::Int(0xffffffffi64)),
+	    Ok(0xffffffffu32)
+	);
+	assert_eq!(u32::try_from(DeviceValue::Int(0i64)), Ok(0u32));
+	assert!(u32::try_from(DeviceValue::Int(0x100000000i64)).is_err());
+	assert!(u32::try_from(DeviceValue::Int(-1i64)).is_err());
+	assert!(u32::try_from(DeviceValue::Flt(0.0)).is_err());
+	assert!(
+	    u32::try_from(DeviceValue::Str(String::from("hello"))).is_err()
+	);
+
+	// Check that we can convert i16 values.
+
+	assert!(i16::try_from(DeviceValue::Bool(true)).is_err());
+	assert_eq!(i16::try_from(DeviceValue::Int(0x7fffi64)), Ok(0x7fffi16));
+	assert_eq!(
+	    i16::try_from(DeviceValue::Int(-0x8000i64)),
+	    Ok(-0x8000i16)
+	);
+	assert!(i16::try_from(DeviceValue::Int(0x8000i64)).is_err());
+	assert!(
+	    i16::try_from(DeviceValue::Int(-0x8000i64 - 1i64)).is_err()
+	);
+	assert!(i16::try_from(DeviceValue::Flt(0.0)).is_err());
+	assert!(
+	    i16::try_from(DeviceValue::Str(String::from("hello"))).is_err()
+	);
+
+	// Check that we can convert u16 values.
+
+	assert!(u16::try_from(DeviceValue::Bool(true)).is_err());
+	assert_eq!(u16::try_from(DeviceValue::Int(0xffffi64)), Ok(0xffffu16));
+	assert_eq!(u16::try_from(DeviceValue::Int(0i64)), Ok(0u16));
+	assert!(u16::try_from(DeviceValue::Int(0x10000i64)).is_err());
+	assert!(u16::try_from(DeviceValue::Int(-1i64)).is_err());
+	assert!(u16::try_from(DeviceValue::Flt(0.0)).is_err());
+	assert!(
+	    u16::try_from(DeviceValue::Str(String::from("hello"))).is_err()
+	);
+    }
 
     #[test]
     fn test_device_name() {
