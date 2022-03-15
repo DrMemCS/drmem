@@ -29,18 +29,18 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use crate::Result;
-use drmem_types::{DeviceValue, Error};
+use drmem_types::{device::Value, Error};
 use std::{collections::HashMap, marker::PhantomData};
 
 /// A `Device` type provides a view into the database for a single
 /// device. It caches meta information and standardizes fields for
 /// devices, as well.
 
-type DeviceInfo = HashMap<&'static str, DeviceValue>;
+type DeviceInfo = HashMap<&'static str, Value>;
 
 pub struct Device<T>(String, DeviceInfo, PhantomData<T>);
 
-impl<T: Into<DeviceValue> + Send> Device<T> {
+impl<T: Into<Value> + Send> Device<T> {
     // Define constant string slices that will be shared by every device's
     // HashMap.
 
@@ -54,10 +54,10 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
     pub fn create(name: &str, summary: String, units: Option<String>) -> Self {
         let mut map = HashMap::new();
 
-        map.insert(Device::<T>::KEY_SUMMARY, DeviceValue::Str(summary));
+        map.insert(Device::<T>::KEY_SUMMARY, Value::Str(summary));
 
         if let Some(u) = units {
-            map.insert(Device::<T>::KEY_UNITS, DeviceValue::Str(u));
+            map.insert(Device::<T>::KEY_UNITS, Value::Str(u));
         }
         Device(String::from(name), map, PhantomData)
     }
@@ -67,7 +67,7 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
     /// proper structure.
 
     pub fn create_from_map(
-        name: &str, map: HashMap<String, DeviceValue>,
+        name: &str, map: HashMap<String, Value>,
     ) -> Result<Self> {
         let mut result = DeviceInfo::new();
 
@@ -76,10 +76,10 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
         // but this code doesn't enforce it.
 
         match map.get(Device::<T>::KEY_SUMMARY) {
-            Some(DeviceValue::Str(val)) => {
+            Some(Value::Str(val)) => {
                 let _ = result.insert(
                     Device::<T>::KEY_SUMMARY,
-                    DeviceValue::Str(val.clone()),
+                    Value::Str(val.clone()),
                 );
             }
             Some(_) => return Err(Error::TypeError),
@@ -90,10 +90,10 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
         // string value.
 
         match map.get(Device::<T>::KEY_UNITS) {
-            Some(DeviceValue::Str(val)) => {
+            Some(Value::Str(val)) => {
                 let _ = result.insert(
                     Device::<T>::KEY_UNITS,
-                    DeviceValue::Str(val.clone()),
+                    Value::Str(val.clone()),
                 );
             }
             Some(_) => return Err(Error::TypeError),
@@ -106,11 +106,11 @@ impl<T: Into<DeviceValue> + Send> Device<T> {
     /// Returns a vector of pairs where each pair consists of a key
     /// and its associated value in the map.
 
-    pub fn to_vec(&self) -> Vec<(&'static str, DeviceValue)> {
+    pub fn to_vec(&self) -> Vec<(&'static str, Value)> {
         self.1.iter().map(|(k, v)| (*k, v.clone())).collect()
     }
 
-    pub fn set(&self, v: T) -> (String, DeviceValue) {
+    pub fn set(&self, v: T) -> (String, Value) {
         (self.0.clone(), v.into())
     }
 }

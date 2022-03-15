@@ -30,7 +30,7 @@
 
 use async_trait::async_trait;
 use drmem_api::{device::Device, DbContext, Result};
-use drmem_types::{DeviceValue, Error};
+use drmem_types::{device::Value, Error};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use tracing::{debug, info, warn};
@@ -76,16 +76,16 @@ fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
     }
 }
 
-// Encodes a `DeviceValue` into a binary which gets stored in
-// redis. This encoding lets us store type information in redis so
-// there's no rounding errors or misinterpretation of the data.
+// Encodes a `Value` into a binary which gets stored in redis. This
+// encoding lets us store type information in redis so there's no
+// rounding errors or misinterpretation of the data.
 
-fn to_redis(val: &DeviceValue) -> Vec<u8> {
+fn to_redis(val: &Value) -> Vec<u8> {
     match val {
-        DeviceValue::Bool(false) => vec![b'F'],
-        DeviceValue::Bool(true) => vec![b'T'],
+        Value::Bool(false) => vec![b'F'],
+        Value::Bool(true) => vec![b'T'],
 
-        DeviceValue::Int(v) => {
+        Value::Int(v) => {
             let mut buf: Vec<u8> = Vec::with_capacity(9);
 
             buf.push(b'I');
@@ -93,7 +93,7 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
             buf
         }
 
-        DeviceValue::Flt(v) => {
+        Value::Flt(v) => {
             let mut buf: Vec<u8> = Vec::with_capacity(9);
 
             buf.push(b'D');
@@ -101,7 +101,7 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
             buf
         }
 
-        DeviceValue::Str(s) => {
+        Value::Str(s) => {
             let s = s.as_bytes();
             let mut buf: Vec<u8> = Vec::with_capacity(5 + s.len());
 
@@ -111,7 +111,7 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
             buf
         }
 
-        DeviceValue::Rgba(c) => {
+        Value::Rgba(c) => {
             let mut buf: Vec<u8> = Vec::with_capacity(5);
 
             buf.push(b'C');
@@ -123,29 +123,29 @@ fn to_redis(val: &DeviceValue) -> Vec<u8> {
 
 // Decodes an `i64` from an 8-byte buffer.
 
-fn decode_integer(buf: &[u8]) -> Result<DeviceValue> {
+fn decode_integer(buf: &[u8]) -> Result<Value> {
     if buf.len() >= 8 {
         let buf = buf[..8].try_into().unwrap();
 
-        return Ok(DeviceValue::Int(i64::from_be_bytes(buf)));
+        return Ok(Value::Int(i64::from_be_bytes(buf)));
     }
     Err(Error::TypeError)
 }
 
 // Decodes an `f64` from an 8-byte buffer.
 
-fn decode_float(buf: &[u8]) -> Result<DeviceValue> {
+fn decode_float(buf: &[u8]) -> Result<Value> {
     if buf.len() >= 8 {
         let buf = buf[..8].try_into().unwrap();
 
-        return Ok(DeviceValue::Flt(f64::from_be_bytes(buf)));
+        return Ok(Value::Flt(f64::from_be_bytes(buf)));
     }
     Err(Error::TypeError)
 }
 
 // Decodes a UTF-8 encoded string from a raw, u8 buffer.
 
-fn decode_string(buf: &[u8]) -> Result<DeviceValue> {
+fn decode_string(buf: &[u8]) -> Result<Value> {
     if buf.len() >= 4 {
         let len_buf = buf[..4].try_into().unwrap();
         let len = u32::from_be_bytes(len_buf) as usize;
@@ -154,7 +154,7 @@ fn decode_string(buf: &[u8]) -> Result<DeviceValue> {
             let str_vec = buf[4..4 + len].to_vec();
 
             return match String::from_utf8(str_vec) {
-                Ok(s) => Ok(DeviceValue::Str(s)),
+                Ok(s) => Ok(Value::Str(s)),
                 Err(_) => Err(Error::TypeError),
             };
         }
@@ -164,35 +164,35 @@ fn decode_string(buf: &[u8]) -> Result<DeviceValue> {
 
 // Decodes an RGBA value from a 4-byte buffer.
 
-fn decode_color(buf: &[u8]) -> Result<DeviceValue> {
+fn decode_color(buf: &[u8]) -> Result<Value> {
     if buf.len() >= 4 {
         let buf = buf[..4].try_into().unwrap();
 
-        return Ok(DeviceValue::Rgba(u32::from_be_bytes(buf)));
+        return Ok(Value::Rgba(u32::from_be_bytes(buf)));
     }
     Err(Error::TypeError)
 }
 
-// Returns a `DeviceValue` from a `redis::Value`. The only enumeration
-// we support is the `Value::Data` form since that's the one used to
+// Returns a `Value` from a `redis::Value`. The only enumeration we
+// support is the `Value::Data` form since that's the one used to
 // return redis data.
 
-fn from_value(v: &redis::Value) -> Result<DeviceValue> {
+fn from_value(v: &redis::Value) -> Result<Value> {
     if let redis::Value::Data(buf) = v {
         // The buffer has to have at least one character in order to
         // be decoded.
 
         if !buf.is_empty() {
             match buf[0] as char {
-                'F' => Ok(DeviceValue::Bool(false)),
-                'T' => Ok(DeviceValue::Bool(true)),
+                'F' => Ok(Value::Bool(false)),
+                'T' => Ok(Value::Bool(true)),
                 'I' => decode_integer(&buf[1..]),
                 'D' => decode_float(&buf[1..]),
                 'S' => decode_string(&buf[1..]),
                 'C' => decode_color(&buf[1..]),
 
                 // Any other character in the tag field is unknown and
-                // can't be decoded as a `DeviceValue`.
+                // can't be decoded as a `Value`.
                 _ => Err(Error::TypeError),
             }
         } else {
@@ -271,7 +271,7 @@ impl RedisContext {
     // Does some sanity checks on a device to see if it appears to be
     // valid.
 
-    async fn get_device<T: Into<DeviceValue> + Send>(
+    async fn get_device<T: Into<Value> + Send>(
         &mut self, name: &str,
     ) -> Result<Device<T>> {
         let info_key = self.info_key(name);
@@ -293,9 +293,9 @@ impl RedisContext {
             )?;
 
             // Convert the HaspMap<String, redis::Value> into a
-            // HashMap<String, DeviceValue>. As it converts each
-            // entry, it checks to see if the associated redis::Value
-            // can be translated. If not, it is ignored.
+            // HashMap<String, Value>. As it converts each entry, it
+            // checks to see if the associated redis::Value can be
+            // translated. If not, it is ignored.
 
             let fields = result
                 .drain()
@@ -317,7 +317,7 @@ impl RedisContext {
 
 #[async_trait]
 impl DbContext for RedisContext {
-    async fn define_device<T: Into<DeviceValue> + Send>(
+    async fn define_device<T: Into<Value> + Send>(
         &mut self, name: &str, summary: &str, units: Option<String>,
     ) -> Result<Device<T>> {
         let dev_name = format!("{}:{}", &self.base, &name);
@@ -365,7 +365,7 @@ impl DbContext for RedisContext {
     }
 
     async fn write_values(
-        &mut self, values: &[(String, DeviceValue)],
+        &mut self, values: &[(String, Value)],
     ) -> Result<()> {
         let mut pipe = redis::pipe();
         let mut cmd = pipe.atomic();
@@ -412,26 +412,26 @@ mod tests {
         }
     }
 
-    // Test correct decoding of DeviceValue::Bool values.
+    // Test correct decoding of Value::Bool values.
 
     #[tokio::test]
     async fn test_bool_decoder() {
         assert_eq!(
-            Ok(DeviceValue::Bool(false)),
+            Ok(Value::Bool(false)),
             from_value(&Value::Data(vec!['F' as u8]))
         );
         assert_eq!(
-            Ok(DeviceValue::Bool(true)),
+            Ok(Value::Bool(true)),
             from_value(&Value::Data(vec!['T' as u8]))
         );
     }
 
-    // Test correct encoding of DeviceValue::Bool values.
+    // Test correct encoding of Value::Bool values.
 
     #[tokio::test]
     async fn test_bool_encoder() {
-        assert_eq!(vec!['F' as u8], to_redis(&DeviceValue::Bool(false)));
-        assert_eq!(vec!['T' as u8], to_redis(&DeviceValue::Bool(true)));
+        assert_eq!(vec!['F' as u8], to_redis(&Value::Bool(false)));
+        assert_eq!(vec!['T' as u8], to_redis(&Value::Bool(true)));
     }
 
     const INT_TEST_CASES: &[(i64, &[u8])] = &[
@@ -461,23 +461,23 @@ mod tests {
         ),
     ];
 
-    // Test correct encoding of DeviceValue::Int values.
+    // Test correct encoding of Value::Int values.
 
     #[tokio::test]
     async fn test_int_encoder() {
         for (v, rv) in INT_TEST_CASES {
-            assert_eq!(*rv, to_redis(&DeviceValue::Int(*v)));
+            assert_eq!(*rv, to_redis(&Value::Int(*v)));
         }
     }
 
-    // Test correct decoding of DeviceValue::Int values.
+    // Test correct decoding of Value::Int values.
 
     #[tokio::test]
     async fn test_int_decoder() {
         for (v, rv) in INT_TEST_CASES {
             let data = Value::Data(rv.to_vec());
 
-            assert_eq!(Ok(DeviceValue::Int(*v)), from_value(&data));
+            assert_eq!(Ok(Value::Int(*v)), from_value(&data));
         }
     }
 
@@ -489,23 +489,23 @@ mod tests {
         (0xff000000, &['C' as u8, 0xff, 0x00, 0x00, 0x00]),
     ];
 
-    // Test correct encoding of DeviceValue::Rgba values.
+    // Test correct encoding of Value::Rgba values.
 
     #[tokio::test]
     async fn test_rgb_encoder() {
         for (v, rv) in RGBA_TEST_CASES {
-            assert_eq!(*rv, to_redis(&DeviceValue::Rgba(*v)));
+            assert_eq!(*rv, to_redis(&Value::Rgba(*v)));
         }
     }
 
-    // Test correct decoding of DeviceValue::Rgba values.
+    // Test correct decoding of Value::Rgba values.
 
     #[tokio::test]
     async fn test_rgb_decoder() {
         for (v, rv) in RGBA_TEST_CASES {
             let data = Value::Data(rv.to_vec());
 
-            assert_eq!(Ok(DeviceValue::Rgba(*v)), from_value(&data));
+            assert_eq!(Ok(Value::Rgba(*v)), from_value(&data));
         }
     }
 }

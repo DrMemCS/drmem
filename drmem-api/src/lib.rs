@@ -29,7 +29,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use async_trait::async_trait;
-use drmem_types::{DeviceValue, Error};
+use drmem_types::{device::Value, Error};
 
 pub mod device;
 
@@ -50,7 +50,7 @@ pub trait DbContext {
     /// description of the device. `units` is an optional units
     /// field. Some devices (like boolean or string devices) don't
     /// require engineering units.
-    async fn define_device<T: Into<DeviceValue> + Send>(
+    async fn define_device<T: Into<Value> + Send>(
         &mut self, name: &str, summary: &str, units: Option<String>,
     ) -> Result<device::Device<T>>;
 
@@ -65,7 +65,7 @@ pub trait DbContext {
     /// the database so if all devices are changed in a single call,
     /// clients will see a consistent change.
     async fn write_values(
-        &mut self, values: &[(String, DeviceValue)],
+        &mut self, values: &[(String, Value)],
     ) -> Result<()>;
 }
 

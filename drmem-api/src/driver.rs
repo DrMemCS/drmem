@@ -32,16 +32,16 @@
 //! interact with the core of DrMem.
 
 use async_trait::async_trait;
-use drmem_types::{DeviceValue, Error};
+use drmem_types::{device::Value, Error};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use toml::value;
 
 use super::Result;
 
 pub type Config = value::Table;
-pub type TxDeviceValue = broadcast::Sender<DeviceValue>;
-pub type TxDeviceSetting = mpsc::Sender<DeviceValue>;
-pub type RxDeviceSetting = mpsc::Receiver<DeviceValue>;
+pub type TxDeviceValue = broadcast::Sender<Value>;
+pub type TxDeviceSetting = mpsc::Sender<Value>;
+pub type RxDeviceSetting = mpsc::Receiver<Value>;
 
 /// Defines the requests that can be sent to core.
 #[derive(Debug)]
@@ -71,7 +71,7 @@ pub type Reading<T> = Box<
         T,
     ) -> std::result::Result<
         usize,
-        broadcast::error::SendError<DeviceValue>,
+        broadcast::error::SendError<Value>,
     >,
 >;
 
@@ -110,7 +110,7 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device<T: Into<DeviceValue>>(
+    pub async fn add_ro_device<T: Into<Value>>(
         &self, name: &str,
     ) -> super::Result<Reading<T>> {
         // Create a location for the reply.
@@ -175,7 +175,7 @@ impl RequestChan {
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device(
         &self, name: &str,
-    ) -> Result<(broadcast::Sender<DeviceValue>, mpsc::Receiver<DeviceValue>)>
+    ) -> Result<(broadcast::Sender<Value>, mpsc::Receiver<Value>)>
     {
         let (tx, rx) = oneshot::channel();
         let result = self
