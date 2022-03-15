@@ -33,14 +33,13 @@
 use std::fmt;
 
 /// Enumerates all the errors that can be reported in DrMem. Authors
-/// for new drivers or storage backends should try to map their
-/// errors into one of these values. If no current value is
-/// appropriate, a new one could be added (requiring a new release of
-/// this crate) but make sure the new error code is generic enough
-/// that it may be useful for other drivers or backends. For instance,
-/// don't add an error value that is specific to Redis. Add a more
-/// general value and use the associated description string to explain
-/// the details.
+/// for new drivers or storage backends should try to map their errors
+/// into one of these values. If no current value is appropriate, a
+/// new one could be added (requiring a new release of this crate) but
+/// make sure the new error code is generic enough that it may be
+/// useful for other drivers or backends. For instance, don't add an
+/// error value that is specific to Redis. Add a more general value
+/// and use the associated description string to explain the details.
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
