@@ -32,7 +32,6 @@
 
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::convert::From;
 use std::fmt;
 use std::str::FromStr;
 
@@ -119,111 +118,6 @@ impl fmt::Display for Error {
 
 pub mod device;
 
-/// Holds a validated device name. A device name consists of a path
-/// and a name where each portion of the name is separated with a
-/// colon. Each segment of the path or the name is composed of alpha-
-/// numeric and the dash characters. The dash cannot be the first or
-/// last character, however.
-///
-/// More formally:
-///
-/// ```ignore
-/// DEVICE-NAME = PATH NAME
-/// PATH = (SEGMENT ':')+
-/// NAME = SEGMENT
-/// SEGMENT = [0-9a-zA-Z] ( [0-9a-zA-Z-]* [0-9a-zA-Z] )?
-/// ```
-///
-/// All device names will have a path and a name. Although
-/// superficially similar, device names are not like file system
-/// names. Specifically, there's no concept of moving up or down
-/// paths. The paths are to help organize device.
-
-#[derive(Debug, PartialEq)]
-pub struct DeviceName {
-    path: String,
-    name: String,
-}
-
-impl DeviceName {
-    /// Creates an instance of `DeviceName`, if the provided string
-    /// describes a well-formed device name.
-
-    pub fn create(s: &str) -> Result<DeviceName, Error> {
-        lazy_static! {
-            // This regular expression parses a device name. It uses
-            // the "named grouping" feature to easily tag the matching
-            // sections.
-            //
-            // The first section matches any leading path:
-            //
-            //    (?P<path>(?:[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?:)+)
-            //
-            // which can be written more clearly as
-            //
-            //    ALNUM = [0-9a-zA-Z]
-            //    SEGMENT = ALNUM ((ALNUM | '-')* ALNUM)?
-            //
-            //    path = (SEGMENT ':')+
-            //
-            // The difference being that [[:alpha:]] recognizes
-            // Unicode letters instead of just the ASCII "a-zA-Z"
-            // letters.
-            //
-            // The second section represents the base name of the
-            // device:
-            //
-            //    (?P<name>[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?)
-            //
-            // which is just SEGMENT from above.
-
-            static ref RE: Regex = Regex::new(r"^(?P<path>(?:[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?:)+)(?P<name>[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?)$").unwrap();
-        }
-
-	// The Regex expression is anchored to the start and end of
-	// the string and both halves to which we're matching are not
-	// optional. So if it returns `Some()`, we have "path" and
-	// "name" entries.
-
-        if let Some(caps) = RE.captures(s) {
-            Ok(DeviceName {
-                path: String::from(&caps["path"]),
-                name: String::from(&caps["name"]),
-            })
-        } else {
-            Err(Error::InvArgument("invalid device path/name"))
-        }
-    }
-
-    /// Returns the path of the device name without the trailing ':'.
-
-    pub fn get_path(&self) -> &str {
-	let len = self.path.len();
-
-	&self.path[..len - 1]
-    }
-
-    /// Returns the base name of the device.
-
-    pub fn get_name(&self) -> &str {
-	&self.name
-    }
-}
-
-impl fmt::Display for DeviceName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", &self.path, &self.name)
-    }
-}
-
-impl FromStr for DeviceName {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        DeviceName::create(s)
-    }
-}
-
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum DeviceField {
     Value,
@@ -240,7 +134,7 @@ pub enum DeviceField {
 
 #[derive(Debug, PartialEq)]
 pub struct DeviceSpec {
-    device: DeviceName,
+    device: device::Name,
     field: DeviceField,
 }
 
@@ -267,7 +161,7 @@ impl DeviceSpec {
             //
             // The first part is the device name. The regular
             // expression matches all the characters before the
-            // '.' which get passed to the `DeviceName` parser.
+            // '.' which get passed to the `device::Name` parser.
             //
             // The second section is the optional field name of the
             // device:
@@ -284,7 +178,7 @@ impl DeviceSpec {
 
         if let Some(caps) = RE.captures(s) {
             if let Some(dev_name) = caps.name("dev_name") {
-                let dev_name = dev_name.as_str().parse::<DeviceName>()?;
+                let dev_name = dev_name.as_str().parse::<device::Name>()?;
                 let field = caps.name("field").map_or("value", |m| m.as_str());
 
                 return Ok(DeviceSpec {
@@ -299,7 +193,7 @@ impl DeviceSpec {
     /// Returns the portion of the specification containing the path
     /// and base name of the device.
 
-    pub fn get_device_name(&self) -> &DeviceName {
+    pub fn get_device_name(&self) -> &device::Name {
 	&self.device
     }
 
@@ -323,60 +217,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_device_name() {
-        assert!("".parse::<DeviceName>().is_err());
-        assert!(":".parse::<DeviceName>().is_err());
-        assert!("a".parse::<DeviceName>().is_err());
-        assert!(":a".parse::<DeviceName>().is_err());
-        assert!("a:".parse::<DeviceName>().is_err());
-        assert!("a::a".parse::<DeviceName>().is_err());
-
-        assert!("p:a.".parse::<DeviceName>().is_err());
-        assert!("p:a.a".parse::<DeviceName>().is_err());
-        assert!("p.a:a".parse::<DeviceName>().is_err());
-        assert!("p:a-".parse::<DeviceName>().is_err());
-        assert!("p:-a".parse::<DeviceName>().is_err());
-        assert!("p-:a".parse::<DeviceName>().is_err());
-        assert!("-p:a".parse::<DeviceName>().is_err());
-
-        assert_eq!(
-            "p:abc".parse::<DeviceName>().unwrap(),
-            DeviceName {
-                path: String::from("p:"),
-                name: String::from("abc"),
-            }
-        );
-        assert_eq!(
-            "p:abc1".parse::<DeviceName>().unwrap(),
-            DeviceName {
-                path: String::from("p:"),
-                name: String::from("abc1"),
-            }
-        );
-        assert_eq!(
-            "p:abc-1".parse::<DeviceName>().unwrap(),
-            DeviceName {
-                path: String::from("p:"),
-                name: String::from("abc-1"),
-            }
-        );
-        assert_eq!(
-            "p-1:p-2:abc".parse::<DeviceName>().unwrap(),
-            DeviceName {
-                path: String::from("p-1:p-2:"),
-                name: String::from("abc"),
-            }
-        );
-
-	let dn = "p-1:p-2:abc".parse::<DeviceName>().unwrap();
-
-        assert_eq!(dn.get_path(), "p-1:p-2");
-        assert_eq!(dn.get_name(), "abc");
-
-	assert_eq!(format!("{}", dn), "p-1:p-2:abc");
-    }
-
-    #[test]
     fn test_device_spec() {
         assert!("p:".parse::<DeviceSpec>().is_err());
         assert!("p:.".parse::<DeviceSpec>().is_err());
@@ -385,86 +225,44 @@ mod tests {
         assert!("p:a.123".parse::<DeviceSpec>().is_err());
         assert!("p:a.a.a".parse::<DeviceSpec>().is_err());
 
-        assert_eq!(
-            "p-1:device".parse::<DeviceSpec>().unwrap(),
-            DeviceSpec {
-                device: DeviceName {
-                    path: String::from("p-1:"),
-                    name: String::from("device"),
-                },
-                field: DeviceField::Value
-            }
-        );
-        assert_eq!(
-            "p:device.unit".parse::<DeviceSpec>().unwrap(),
-            DeviceSpec {
-                device: DeviceName {
-                    path: String::from("p:"),
-                    name: String::from("device"),
-                },
-                field: DeviceField::Unit
-            }
-        );
-        assert_eq!(
-            "path:device.value".parse::<DeviceSpec>().unwrap(),
-            DeviceSpec {
-                device: DeviceName {
-                    path: String::from("path:"),
-                    name: String::from("device"),
-                },
-                field: DeviceField::Value
-            }
-        );
-        assert_eq!(
-            "long:path:device.unit".parse::<DeviceSpec>().unwrap(),
-            DeviceSpec {
-                device: DeviceName {
-                    path: String::from("long:path:"),
-                    name: String::from("device"),
-                },
-                field: DeviceField::Unit
-            }
-        );
-        assert_eq!(
-            "long:path:device.detail".parse::<DeviceSpec>().unwrap(),
-            DeviceSpec {
-                device: DeviceName {
-                    path: String::from("long:path:"),
-                    name: String::from("device"),
-                },
-                field: DeviceField::Detail
-            }
-        );
-        assert_eq!(
-            "long:path:device.location".parse::<DeviceSpec>().unwrap(),
-            DeviceSpec {
-                device: DeviceName {
-                    path: String::from("long:path:"),
-                    name: String::from("device"),
-                },
-                field: DeviceField::Location
-            }
-        );
-        assert_eq!(
-            "long:path:device.summary".parse::<DeviceSpec>().unwrap(),
-            DeviceSpec {
-                device: DeviceName {
-                    path: String::from("long:path:"),
-                    name: String::from("device"),
-                },
-                field: DeviceField::Summary
-            }
-        );
+	let v = "p-1:device".parse::<DeviceSpec>().unwrap();
 
-        assert_eq!(
-            "p:Device-123".parse::<DeviceSpec>().unwrap(),
-            DeviceSpec {
-                device: DeviceName {
-                    path: String::from("p:"),
-                    name: String::from("Device-123"),
-                },
-                field: DeviceField::Value
-            }
-        );
+        assert_eq!(v.get_device_name().to_string(), "p-1:device");
+	assert_eq!(v.get_field(), DeviceField::Value);
+
+	let v = "p:device.unit".parse::<DeviceSpec>().unwrap();
+
+        assert_eq!(v.get_device_name().to_string(), "p:device");
+	assert_eq!(v.get_field(), DeviceField::Unit);
+
+	let v = "path:device.value".parse::<DeviceSpec>().unwrap();
+
+        assert_eq!(v.get_device_name().to_string(), "path:device");
+	assert_eq!(v.get_field(), DeviceField::Value);
+
+	let v = "long:path:device.unit".parse::<DeviceSpec>().unwrap();
+
+        assert_eq!(v.get_device_name().to_string(), "long:path:device");
+	assert_eq!(v.get_field(), DeviceField::Unit);
+
+	let v = "long:path:device.detail".parse::<DeviceSpec>().unwrap();
+
+        assert_eq!(v.get_device_name().to_string(), "long:path:device");
+	assert_eq!(v.get_field(), DeviceField::Detail);
+
+	let v = "long:path:device.location".parse::<DeviceSpec>().unwrap();
+
+        assert_eq!(v.get_device_name().to_string(), "long:path:device");
+	assert_eq!(v.get_field(), DeviceField::Location);
+
+	let v = "long:path:device.summary".parse::<DeviceSpec>().unwrap();
+
+        assert_eq!(v.get_device_name().to_string(), "long:path:device");
+	assert_eq!(v.get_field(), DeviceField::Summary);
+
+	let v = "p:Device-123".parse::<DeviceSpec>().unwrap();
+
+        assert_eq!(v.get_device_name().to_string(), "p:Device-123");
+	assert_eq!(v.get_field(), DeviceField::Value);
     }
 }
