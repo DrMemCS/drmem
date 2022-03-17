@@ -36,9 +36,9 @@ impl TryFrom<Value> for bool {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Bool(v) = value {
-	    Ok(v)
+            Ok(v)
         } else {
-	    Err(Error::TypeError)
+            Err(Error::TypeError)
         }
     }
 }
@@ -54,9 +54,9 @@ impl TryFrom<Value> for i64 {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Int(v) = value {
-	    Ok(v)
+            Ok(v)
         } else {
-	    Err(Error::TypeError)
+            Err(Error::TypeError)
         }
     }
 }
@@ -72,9 +72,9 @@ impl TryFrom<Value> for i32 {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Int(v) = value {
-	    if let Ok(v) = i32::try_from(v) {
+            if let Ok(v) = i32::try_from(v) {
                 return Ok(v);
-	    }
+            }
         }
         Err(Error::TypeError)
     }
@@ -91,9 +91,9 @@ impl TryFrom<Value> for u32 {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Int(v) = value {
-	    if let Ok(v) = u32::try_from(v) {
+            if let Ok(v) = u32::try_from(v) {
                 return Ok(v);
-	    }
+            }
         }
         Err(Error::TypeError)
     }
@@ -110,9 +110,9 @@ impl TryFrom<Value> for i16 {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Int(v) = value {
-	    if let Ok(v) = i16::try_from(v) {
+            if let Ok(v) = i16::try_from(v) {
                 return Ok(v);
-	    }
+            }
         }
         Err(Error::TypeError)
     }
@@ -129,9 +129,9 @@ impl TryFrom<Value> for u16 {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Int(v) = value {
-	    if let Ok(v) = u16::try_from(v) {
+            if let Ok(v) = u16::try_from(v) {
                 return Ok(v);
-	    }
+            }
         }
         Err(Error::TypeError)
     }
@@ -148,9 +148,9 @@ impl TryFrom<Value> for f64 {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Flt(v) = value {
-	    Ok(v)
+            Ok(v)
         } else {
-	    Err(Error::TypeError)
+            Err(Error::TypeError)
         }
     }
 }
@@ -166,9 +166,9 @@ impl TryFrom<Value> for String {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Str(v) = value {
-	    Ok(v)
+            Ok(v)
         } else {
-	    Err(Error::TypeError)
+            Err(Error::TypeError)
         }
     }
 }
@@ -179,11 +179,10 @@ impl From<String> for Value {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use std::convert::TryFrom;
     use super::*;
+    use std::convert::TryFrom;
 
     #[test]
     fn test_device_values_from() {

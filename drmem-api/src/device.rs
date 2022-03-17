@@ -47,10 +47,8 @@ impl<T: Into<Value> + Send> Device<T> {
 
         match map.get(Device::<T>::KEY_SUMMARY) {
             Some(Value::Str(val)) => {
-                let _ = result.insert(
-                    Device::<T>::KEY_SUMMARY,
-                    Value::Str(val.clone()),
-                );
+                let _ = result
+                    .insert(Device::<T>::KEY_SUMMARY, Value::Str(val.clone()));
             }
             Some(_) => return Err(Error::TypeError),
             None => return Err(Error::NotFound),
@@ -61,10 +59,8 @@ impl<T: Into<Value> + Send> Device<T> {
 
         match map.get(Device::<T>::KEY_UNITS) {
             Some(Value::Str(val)) => {
-                let _ = result.insert(
-                    Device::<T>::KEY_UNITS,
-                    Value::Str(val.clone()),
-                );
+                let _ = result
+                    .insert(Device::<T>::KEY_UNITS, Value::Str(val.clone()));
             }
             Some(_) => return Err(Error::TypeError),
             None => (),

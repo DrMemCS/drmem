@@ -32,17 +32,14 @@ pub enum Request {
     /// a read-handle to acccept incoming setting to the device.
     AddReadWriteDevice {
         dev_name: String,
-        rpy_chan: oneshot::Sender<Result<(TxDeviceValue, RxDeviceSetting)>>,
+        rpy_chan: oneshot::Sender<
+            Result<(TxDeviceValue, RxDeviceSetting, Option<Value>)>,
+        >,
     },
 }
 
 pub type Reading<T> = Box<
-    dyn Fn(
-        T,
-    ) -> std::result::Result<
-        usize,
-        broadcast::error::SendError<Value>,
-    >,
+    dyn Fn(T) -> std::result::Result<usize, broadcast::error::SendError<Value>>,
 >;
 
 /// A handle which is used to communicate with the core of DrMem.
@@ -145,8 +142,11 @@ impl RequestChan {
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device(
         &self, name: &str,
-    ) -> Result<(broadcast::Sender<Value>, mpsc::Receiver<Value>)>
-    {
+    ) -> Result<(
+        broadcast::Sender<Value>,
+        mpsc::Receiver<Value>,
+        Option<Value>,
+    )> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan

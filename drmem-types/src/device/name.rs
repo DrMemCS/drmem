@@ -1,8 +1,8 @@
+use crate::Error;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::fmt;
 use std::str::FromStr;
-use regex::Regex;
-use lazy_static::lazy_static;
-use crate::Error;
 
 /// Holds a validated device name. A device name consists of a path
 /// and a name where each portion of the name is separated with a
@@ -71,12 +71,12 @@ impl Name {
         // "path" and "name" entries.
 
         if let Some(caps) = RE.captures(s) {
-	    Ok(Name {
+            Ok(Name {
                 path: String::from(&caps["path"]),
                 name: String::from(&caps["name"]),
-	    })
+            })
         } else {
-	    Err(Error::InvArgument("invalid device path/name"))
+            Err(Error::InvArgument("invalid device path/name"))
         }
     }
 
@@ -131,32 +131,32 @@ mod tests {
         assert!("-p:a".parse::<Name>().is_err());
 
         assert_eq!(
-	    "p:abc".parse::<Name>().unwrap(),
-	    Name {
+            "p:abc".parse::<Name>().unwrap(),
+            Name {
                 path: String::from("p:"),
                 name: String::from("abc"),
-	    }
+            }
         );
         assert_eq!(
-	    "p:abc1".parse::<Name>().unwrap(),
-	    Name {
+            "p:abc1".parse::<Name>().unwrap(),
+            Name {
                 path: String::from("p:"),
                 name: String::from("abc1"),
-	    }
+            }
         );
         assert_eq!(
-	    "p:abc-1".parse::<Name>().unwrap(),
-	    Name {
+            "p:abc-1".parse::<Name>().unwrap(),
+            Name {
                 path: String::from("p:"),
                 name: String::from("abc-1"),
-	    }
+            }
         );
         assert_eq!(
-	    "p-1:p-2:abc".parse::<Name>().unwrap(),
-	    Name {
+            "p-1:p-2:abc".parse::<Name>().unwrap(),
+            Name {
                 path: String::from("p-1:p-2:"),
                 name: String::from("abc"),
-	    }
+            }
         );
 
         let dn = "p-1:p-2:abc".parse::<Name>().unwrap();

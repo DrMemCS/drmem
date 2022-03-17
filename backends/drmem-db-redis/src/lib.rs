@@ -26,9 +26,7 @@ fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
             | redis::ErrorKind::ClusterDown
             | redis::ErrorKind::CrossSlot
             | redis::ErrorKind::MasterDown
-            | redis::ErrorKind::IoError => {
-                Err(Error::DbCommunicationError)
-            }
+            | redis::ErrorKind::IoError => Err(Error::DbCommunicationError),
 
             redis::ErrorKind::AuthenticationFailed
             | redis::ErrorKind::InvalidClientConfig => {
@@ -341,9 +339,7 @@ impl DbContext for RedisContext {
         }
     }
 
-    async fn write_values(
-        &mut self, values: &[(String, Value)],
-    ) -> Result<()> {
+    async fn write_values(&mut self, values: &[(String, Value)]) -> Result<()> {
         let mut pipe = redis::pipe();
         let mut cmd = pipe.atomic();
 

@@ -27,12 +27,12 @@ pub struct Item {
 impl Item {
     fn xlat_field(s: &str) -> Result<Field, Error> {
         match s {
-	    "value" => Ok(Field::Value),
-	    "unit" => Ok(Field::Unit),
-	    "detail" => Ok(Field::Detail),
-	    "summary" => Ok(Field::Summary),
-	    "location" => Ok(Field::Location),
-	    _ => Err(Error::InvArgument("invalid field name")),
+            "value" => Ok(Field::Value),
+            "unit" => Ok(Field::Unit),
+            "detail" => Ok(Field::Detail),
+            "summary" => Ok(Field::Summary),
+            "location" => Ok(Field::Location),
+            _ => Err(Error::InvArgument("invalid field name")),
         }
     }
 
@@ -63,15 +63,15 @@ impl Item {
         }
 
         if let Some(caps) = RE.captures(s) {
-	    if let Some(dev_name) = caps.name("dev_name") {
+            if let Some(dev_name) = caps.name("dev_name") {
                 let dev_name = dev_name.as_str().parse::<Name>()?;
                 let field = caps.name("field").map_or("value", |m| m.as_str());
 
                 return Ok(Item {
-		    device: dev_name,
-		    field: Item::xlat_field(field)?,
+                    device: dev_name,
+                    field: Item::xlat_field(field)?,
                 });
-	    }
+            }
         }
         Err(Error::InvArgument("invalid device specification"))
     }

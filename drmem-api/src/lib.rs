@@ -34,9 +34,7 @@ pub trait DbContext {
     /// devices. Each call to this function makes an atomic change to
     /// the database so if all devices are changed in a single call,
     /// clients will see a consistent change.
-    async fn write_values(
-        &mut self, values: &[(String, Value)],
-    ) -> Result<()>;
+    async fn write_values(&mut self, values: &[(String, Value)]) -> Result<()>;
 }
 
 pub mod client {

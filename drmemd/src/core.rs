@@ -72,8 +72,8 @@ impl State {
     fn send_reply<T>(
         dev_name: &str, rpy_chan: oneshot::Sender<Result<T>>, val: Option<T>,
     ) {
-        let result = val
-            .ok_or_else(|| Error::DeviceDefined(String::from(dev_name)));
+        let result =
+            val.ok_or_else(|| Error::DeviceDefined(String::from(dev_name)));
 
         if rpy_chan.send(result).is_err() {
             warn!("driver exited before a reply could be sent")
