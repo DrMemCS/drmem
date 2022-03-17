@@ -10,6 +10,13 @@ use tracing::{debug, info, warn};
 // and, instead map it into a more general "backend" error. We
 // propagate the associated message so, hopefully, that's enough to
 // rebuild the context of the error.
+//
+// This is a job for `impl From<RedisError> for Error`, but it won't
+// work here because neither of those types are defined in this
+// module. We'd have to put the trait implementation in the
+// `drmem-api` crate which, then, requires all projects to build the
+// `redis` crate. Since we only need to do the translationin this
+// module, this function will be the translater.
 
 fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
     match res {
