@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use drmem_api::{device::Device, DbContext, Result};
-use drmem_types::{device::Value, Error};
+use drmem_api::{types::{device::Value, Error}, device::Device, Store, Result, driver::{ReportReading, RxDeviceSetting}};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use tracing::{debug, info, warn};
@@ -179,7 +178,7 @@ fn from_value(v: &redis::Value) -> Result<Value> {
 }
 
 /// Defines a context that uses redis for the back-end storage.
-pub struct RedisContext {
+pub struct RedisStore {
     /// The base name used by the instance of the driver. Defining
     /// `Device` instances will add the last segment to the name.
     base: String,
@@ -188,7 +187,7 @@ pub struct RedisContext {
     db_con: redis::aio::Connection,
 }
 
-impl RedisContext {
+impl RedisStore {
     // Creates a connection to redis.
 
     async fn make_connection(
@@ -222,9 +221,9 @@ impl RedisContext {
         base_name: &str, cfg: &drmem_config::backend::Config,
         name: Option<String>, pword: Option<String>,
     ) -> Result<Self> {
-        let db_con = RedisContext::make_connection(cfg, name, pword).await?;
+        let db_con = RedisStore::make_connection(cfg, name, pword).await?;
 
-        Ok(RedisContext {
+        Ok(RedisStore {
             base: String::from(base_name),
             db_con,
         })
@@ -291,22 +290,25 @@ impl RedisContext {
 }
 
 #[async_trait]
-impl DbContext for RedisContext {
-    async fn define_device<T: Into<Value> + Send>(
-        &mut self, name: &str, summary: &str, units: Option<String>,
-    ) -> Result<Device<T>> {
+impl Store for RedisStore {
+
+    /// Registers a device in the redis backend.
+
+    async fn register_read_only_device(
+        &mut self, name: &str,
+    ) -> Result<ReportReading> {
         let dev_name = format!("{}:{}", &self.base, &name);
 
         debug!("defining '{}'", &dev_name);
 
-        match self.get_device::<T>(name).await {
+        match self.get_device(name).await {
             Ok(v) => Ok(v),
             Err(e) => {
                 warn!("'{}' isn't defined properly -- {:?}", &dev_name, e);
 
                 let hist_key = self.history_key(name);
                 let info_key = self.info_key(name);
-                let dev = Device::create(name, String::from(summary), units);
+                let dev = Device::create(name, String::from("summary"), Some(String::from("units")));
 
                 let temp = dev.to_vec();
                 let fields: Vec<(String, Vec<u8>)> = temp
@@ -339,20 +341,23 @@ impl DbContext for RedisContext {
         }
     }
 
-    async fn write_values(&mut self, values: &[(String, Value)]) -> Result<()> {
-        let mut pipe = redis::pipe();
-        let mut cmd = pipe.atomic();
+    async fn register_read_write_device(
+        &mut self, name: &str,
+    ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
+        //let mut pipe = redis::pipe();
+        //let mut cmd = pipe.atomic();
 
-        for (dev, val) in values {
-            let key = self.history_key(dev);
+        //for (dev, val) in values {
+        //    let key = self.history_key(dev);
 
-            cmd = cmd.xadd(key, "*", &[("value", to_redis(val))]);
+        //    cmd = cmd.xadd(key, "*", &[("value", to_redis(val))]);
 
             // TODO: need to check alarm limits -- and add the command
             // to announce it -- as the command is built-up.
-        }
+        //}
 
-        xlat_result(cmd.query_async(&mut self.db_con).await)
+        //xlat_result(cmd.query_async(&mut self.db_con).await)
+	unimplemented!()
     }
 }
 

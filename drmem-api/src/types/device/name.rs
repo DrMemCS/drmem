@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::types::Error;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::fmt;
@@ -22,7 +22,7 @@ use std::str::FromStr;
 /// All device names will have a path and a name. Although
 /// superficially similar, device names are not like file system
 /// names. Specifically, there's no concept of moving up or down
-/// paths. The paths are to help organize device.
+/// paths. The paths are to help organize devices.
 
 #[derive(Debug, PartialEq)]
 pub struct Name {
@@ -36,33 +36,33 @@ impl Name {
 
     pub fn create(s: &str) -> Result<Name, Error> {
         lazy_static! {
-	    // This regular expression parses a device name. It
-	    // uses the "named grouping" feature to easily tag the
-	    // matching sections.
-	    //
-	    // The first section matches any leading path:
-	    //
-	    //    (?P<path>(?:[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?:)+)
-	    //
-	    // which can be written more clearly as
-	    //
-	    //    ALNUM = [0-9a-zA-Z]
-	    //    SEGMENT = ALNUM ((ALNUM | '-')* ALNUM)?
-	    //
-	    //    path = (SEGMENT ':')+
-	    //
-	    // The difference being that [[:alpha:]] recognizes
-	    // Unicode letters instead of just the ASCII "a-zA-Z"
-	    // letters.
-	    //
-	    // The second section represents the base name of the
-	    // device:
-	    //
-	    //    (?P<name>[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?)
-	    //
-	    // which is just SEGMENT from above.
+        // This regular expression parses a device name. It
+        // uses the "named grouping" feature to easily tag the
+        // matching sections.
+        //
+        // The first section matches any leading path:
+        //
+        //    (?P<path>(?:[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?:)+)
+        //
+        // which can be written more clearly as
+        //
+        //    ALNUM = [0-9a-zA-Z]
+        //    SEGMENT = ALNUM ((ALNUM | '-')* ALNUM)?
+        //
+        //    path = (SEGMENT ':')+
+        //
+        // The difference being that [[:alpha:]] recognizes
+        // Unicode letters instead of just the ASCII "a-zA-Z"
+        // letters.
+        //
+        // The second section represents the base name of the
+        // device:
+        //
+        //    (?P<name>[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?)
+        //
+        // which is just SEGMENT from above.
 
-	    static ref RE: Regex = Regex::new(r"^(?P<path>(?:[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?:)+)(?P<name>[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?)$").unwrap();
+        static ref RE: Regex = Regex::new(r"^(?P<path>(?:[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?:)+)(?P<name>[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?)$").unwrap();
         }
 
         // The Regex expression is anchored to the start and end

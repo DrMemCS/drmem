@@ -15,8 +15,6 @@ Part II : Using DrMem
 - [Storage Choices](BACKENDS.md)
   - Simple Storage
   - Redis Storage
-  - SQLite Storage
-  - PostgreSQL
 - [Configuration](CONFIGURATION.md)
 - [Reactive Engine](REACTIVE_ENGINE.md)
 

@@ -1,9 +1,9 @@
 [package]
-name = "drmem-api"
-version = "0.1.0"
+name = "drmem-db-simple"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
+version = "0.1.0"
 edition = "2021"
-description = "Traits and types used internally by the DrMem control system"
+description = "Simple backend for DrMem control system"
 homepage = "https://github.com/rneswold/drmem"
 repository = "https://github.com/rneswold/drmem"
 license = "BSD-3-Clause"
@@ -15,8 +15,11 @@ keywords = ["control-system", "automation"]
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-toml = "0.5.6"
 async-trait = "0.1"
+drmem-api = { path = "../../drmem-api", version = "0.1" }
 tokio = { version = "1", features = ["sync"] }
-regex = "1"
-lazy_static = "1.4"
+
+[dependencies.drmem-config]
+path = "../../drmem-config"
+version = "0.1"
+features = ["simple-backend"]

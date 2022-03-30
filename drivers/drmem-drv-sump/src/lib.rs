@@ -1,7 +1,5 @@
 use async_trait::async_trait;
-use drmem_api::{device::Device, driver, DbContext, Result};
-use drmem_db_redis::RedisContext;
-use drmem_types::Error;
+use drmem_api::{driver, types::Error, Result};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use tokio::{
     io::{self, AsyncReadExt},
@@ -178,76 +176,53 @@ impl State {
 
 pub struct Sump {
     rx: OwnedReadHalf,
-    tx: OwnedWriteHalf,
+    _tx: OwnedWriteHalf,
     state: State,
-    d_service: Device<bool>,
-    d_state: Device<bool>,
-    d_duty: Device<f64>,
-    d_inflow: Device<f64>,
-    ctxt: RedisContext,
+    d_service: driver::ReportReading,
+    d_state: driver::ReportReading,
+    d_duty: driver::ReportReading,
+    d_inflow: driver::ReportReading,
 }
 
 impl Sump {
     pub async fn new(
-        mut ctxt: RedisContext, cfg: &driver::Config,
-        req_core: driver::RequestChan,
+        cfg: &driver::Config, core: driver::RequestChan,
     ) -> Result<Self> {
         // Validate the configuration.
 
-        let addr = match cfg.get("addr") {
+        let _addr = match cfg.get("addr") {
             Some(addr) => addr,
             None => return Err(Error::BadConfig),
         };
 
-        let port = match cfg.get("port") {
+        let _port = match cfg.get("port") {
             Some(port) => port,
             None => return Err(Error::BadConfig),
         };
 
         // Define the devices managed by this driver.
 
-        let d_service: Device<bool> = ctxt
-            .define_device(
-                "service",
-                "status of connection to sump pump module",
-                None,
-            )
-            .await?;
-
-        let d_state: Device<bool> = ctxt
-            .define_device("state", "active state of sump pump", None)
-            .await?;
-
-        let d_duty: Device<f64> = ctxt
-            .define_device(
-                "duty",
-                "sump pump on-time percentage during last cycle",
-                Some(String::from("%")),
-            )
-            .await?;
-
-        let d_inflow: Device<f64> = ctxt
-            .define_device(
-                "in-flow",
-                "sump pit fill rate during last cycle",
-                Some(String::from("gpm")),
-            )
-            .await?;
+        let d_service = core.add_ro_device("service").await?;
+        let d_state = core.add_ro_device("state").await?;
+        let d_duty = core.add_ro_device("duty").await?;
+        let d_inflow = core.add_ro_device("in-flow").await?;
 
         let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
         let s = TcpStream::connect(addr)
             .await
             .map_err(|_| Error::MissingPeer(String::from("sump pump")))?;
 
-        // Unfortunately, we have to hang onto the xmt handle
+        // Unfortunately, we have to hang onto the xmt handle. The
+        // peer process monitors the state of the socket and if we
+        // close our send handle, it thinks we went away and closes
+        // the other end.
 
         let (rx, tx) = s.into_split();
 
         Ok(Sump {
             rx,
-            tx,
+            _tx: tx,
             state: State::Unknown,
-            ctxt,
             d_service,
             d_state,
             d_duty,
@@ -270,24 +245,22 @@ impl Sump {
 #[async_trait]
 impl driver::API for Sump {
     fn create(
-        cfg: driver::Config, drc: driver::RequestChan,
+        _cfg: driver::Config, _drc: driver::RequestChan,
     ) -> Result<Box<dyn driver::API>>
     where
         Self: Sized,
     {
-        unimplemented!()
+        todo!()
     }
 
     async fn run(mut self) -> Result<()> {
-        self.ctxt.write_values(&[self.d_service.set(true)]).await?;
+        (self.d_service)(true.into())?;
 
         loop {
             match self.get_reading().await {
                 Ok((stamp, true)) => {
                     if self.state.on_event(stamp) {
-                        self.ctxt
-                            .write_values(&[self.d_state.set(true)])
-                            .await?;
+                        (self.d_state)(true.into())?;
                     }
                 }
 
@@ -295,24 +268,16 @@ impl driver::API for Sump {
                     if let Some((duty, in_flow)) = self.state.off_event(stamp) {
                         info!("duty: {}%, in flow: {} gpm", duty, in_flow);
 
-                        self.ctxt
-                            .write_values(&[
-                                self.d_state.set(false),
-                                self.d_duty.set(duty),
-                                self.d_inflow.set(in_flow),
-                            ])
-                            .await?;
+                        (self.d_state)(false.into())?;
+                        (self.d_duty)(duty.into())?;
+                        (self.d_inflow)(in_flow.into())?;
                     }
                 }
 
                 Err(e) => {
                     error!("couldn't read sump state -- {:?}", e);
-                    self.ctxt
-                        .write_values(&[
-                            self.d_service.set(false),
-                            self.d_state.set(false),
-                        ])
-                        .await?;
+                    (self.d_service)(false.into())?;
+                    (self.d_state)(false.into())?;
                     break Err(Error::OperationError);
                 }
             }

@@ -3,19 +3,23 @@ use drmem_api::{
     Result,
 };
 use drmem_config::Config;
-use tokio::pin;
-use tracing::warn;
+use futures::future;
+use tracing::error;
+use tokio::task::JoinHandle;
 
 mod core;
 
 // If the user specifies the 'grpc' feature, then pull in the module
 // that defines the gRPC server.
 
-#[cfg(grpc)]
-mod server_grpc;
+#[cfg(feature = "grpc")]
+mod grpc;
 
-#[cfg(graphql)]
-mod httpd;
+// If the user specifies the 'graphql' feature, then pull in the module
+// that defines the GraphQL server.
+
+#[cfg(feature = "graphql")]
+mod graphql;
 
 // Initializes the `drmemd` application. It determines the
 // configuration and sets up the logger. It returns `Some(Config)`
@@ -43,61 +47,38 @@ async fn init_app() -> Option<Config> {
     }
 }
 
+async fn wrap_task(handle: JoinHandle<Result<()>>) -> Result<()> {
+    match handle.await {
+	Err(e) if e.is_panic() => error!("terminated due to panic"),
+	Err(_) => error!("terminated due to cancellation"),
+	Ok(Err(e)) => error!("task returned error -- {}", &e),
+	Ok(Ok(_)) => ()
+    }
+    Ok(())
+}
+
 // Runs the main body of the application. This top-level task reads
 // the config, starts the drivers, and monitors their health.
 
 async fn run() -> Result<()> {
-    if let Some(cfg) = init_app().await {
+    if let Some(_cfg) = init_app().await {
         // Start the core task. It returns a handle to a channel with
         // which to make requests. It also returns the task handle.
 
-        let (tx_drv_req, core_task) = core::start();
-
-        let ctxt = drmem_db_redis::RedisContext::new(
-            "sump",
-            cfg.get_backend(),
-            None,
-            None,
-        )
-        .await?;
+        let (tx_drv_req, core_task) = core::start().await?;
 
         let drv_pump = drmem_drv_sump::Sump::new(
-            ctxt,
             &driver::Config::new(),
             driver::RequestChan::new("basement:sump", &tx_drv_req),
         )
         .await?;
-        let drv_pump = drv_pump.run();
-        pin!(drv_pump);
 
-        #[cfg(all(not(graphql),grpc))]
-        {
-            tokio::select! {
-		Err(e) = core_task => {
-                    warn!("core returned: {:?}", e);
-		}
-		Err(e) = drv_pump => {
-                    warn!("monitor returned: {:?}", e);
-		}
-            }
-        }
-        #[cfg(all(graphql,not(grpc)))]
-        {
-            let svr_httpd = httpd::server();
-            pin!(svr_httpd);
-
-            tokio::select! {
-		Err(e) = core_task => {
-                    warn!("core returned: {:?}", e);
-		}
-		Err(e) = drv_pump => {
-                    warn!("monitor returned: {:?}", e);
-		}
-		Err(e) = svr_httpd => {
-                    warn!("httpd returned: {:?}", e);
-		}
-            }
-        }
+	let _ = future::join_all(vec![
+	    wrap_task(core_task),
+            #[cfg(feature = "graphql")]
+	    wrap_task(tokio::spawn(graphql::server())),
+	    wrap_task(tokio::spawn(drv_pump.run()))
+	]);
     }
     Ok(())
 }

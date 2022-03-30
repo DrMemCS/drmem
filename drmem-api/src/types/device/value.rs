@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::types::Error;
 use std::convert::TryFrom;
 
 /// Defines fundamental types that can be associated with a device.
@@ -26,9 +26,6 @@ pub enum Value {
     /// system takes too much time serializing string data, it could
     /// throw other portions of DrMem out of "soft real-time".
     Str(String),
-
-    /// Represents a color value.
-    Rgba(u32),
 }
 
 impl TryFrom<Value> for bool {

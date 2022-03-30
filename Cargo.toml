@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "drmem-types",
     "drmem-api",
     "drmem-config",
     "drivers/*",
-    "backends/*",
+    "backends/drmem-db-simple",
     "drmemd"
 ]
+exclude = ["backends/drmem-db-redis"]
 
 # Profiles used by all binaries and packages.
 
@@ -15,3 +15,4 @@ opt-level = 3
 debug = false
 lto = "thin"
 debug-assertions = false
+strip = "debuginfo"

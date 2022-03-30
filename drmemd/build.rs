@@ -1,23 +1,29 @@
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let idl_src = &["proto/drmem.proto"];
-    let dirs = &["proto"];
+    #[cfg(features = "grpc")]
+    {
+        let idl_src = &["proto/drmem.proto"];
+        let dirs = &["proto"];
 
-    // Only build the server bindings. The DrMem project doesn't
-    // include any client applications. If one wants to write a
-    // client, they can take the `.proto` file and generate the
-    // appropriate bindings.
+        println!("cargo:rerun-if-changed=build.rs");
 
-    tonic_build::configure()
-        .build_server(true)
-        .protoc_arg("--experimental_allow_proto3_optional")
-        .compile(idl_src, dirs)?;
+        // Only build the server bindings. The DrMem project doesn't
+        // include any client applications. If one wants to write a
+        // client, they can take the `.proto` file and generate the
+        // appropriate bindings.
 
-    // recompile protobufs only if any of the proto files changes.
+        tonic_build::configure()
+            .build_client(false)
+            .build_server(true)
+            .protoc_arg("--experimental_allow_proto3_optional")
+            .compile(idl_src, dirs)?;
 
-    for file in idl_src {
-        println!("cargo:rerun-if-changed={}", file);
+        // recompile protobufs only if any of the proto files changes.
+
+        for file in idl_src {
+            println!("cargo:rerun-if-changed={}", file);
+        }
     }
 
     Ok(())

@@ -1,5 +1,5 @@
+use crate::types::{device::Value, Error};
 use crate::Result;
-use drmem_types::{device::Value, Error};
 use std::{collections::HashMap, marker::PhantomData};
 
 /// A `Device` type provides a view into the database for a single
@@ -32,9 +32,8 @@ impl<T: Into<Value> + Send> Device<T> {
         Device(String::from(name), map, PhantomData)
     }
 
-    /// Creates a `Device` type from a hash map of key/values
-    /// (presumably obtained from redis.) The fields are checked for
-    /// proper structure.
+    /// Creates a `Device` type from a hash map of key/values. The
+    /// fields are checked for proper structure.
 
     pub fn create_from_map(
         name: &str, map: HashMap<String, Value>,

@@ -1,5 +1,5 @@
 use super::*;
-use crate::Error;
+use crate::types::Error;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::str::FromStr;
@@ -41,25 +41,25 @@ impl Item {
 
     pub fn create(s: &str) -> Result<Item, Error> {
         lazy_static! {
-	    // This regular expression parses a full device
-	    // specification. It uses the "named grouping" feature to
-	    // tag the matching sections.
-	    //
-	    // The first part is the device name. The regular
-	    // expression matches all the characters before the '.'
-	    // which get passed to the `Name` parser.
-	    //
-	    // The second section is the optional field name of the
-	    // device:
-	    //
-	    //    (?:\.(?P<field>[[:alpha:]]+))?
-	    //
-	    // It looks for a leading '.' before capturing the field
-	    // name itself.
+            // This regular expression parses a full device
+            // specification. It uses the "named grouping" feature to
+            // tag the matching sections.
+            //
+            // The first part is the device name. The regular
+            // expression matches all the characters before the '.'
+            // which get passed to the `Name` parser.
+            //
+            // The second section is the optional field name of the
+            // device:
+            //
+            //    (?:\.(?P<field>[[:alpha:]]+))?
+            //
+            // It looks for a leading '.' before capturing the field
+            // name itself.
 
-	    static ref RE: Regex = Regex::new(
-		r"^(?P<dev_name>[^\.]+)(?:\.(?P<field>[[:alpha:]]+))?$"
-	    ).unwrap();
+            static ref RE: Regex = Regex::new(
+        r"^(?P<dev_name>[^\.]+)(?:\.(?P<field>[[:alpha:]]+))?$"
+            ).unwrap();
         }
 
         if let Some(caps) = RE.captures(s) {

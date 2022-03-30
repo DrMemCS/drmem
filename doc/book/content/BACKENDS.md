@@ -2,8 +2,4 @@
 
 ## Simple
 
-## REDIS
-
-## SQLite
-
-## PostgreSQL
+## Redis

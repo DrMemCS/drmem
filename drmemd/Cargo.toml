@@ -2,7 +2,7 @@
 name = "drmemd"
 version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
-edition = "2018"
+edition = "2021"
 description = "Main process of the DrMem control system"
 homepage = "https://github.com/rneswold/drmem"
 repository = "https://github.com/rneswold/drmem"
@@ -20,8 +20,8 @@ tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+futures = "0.3"
 
-drmem-types = { path = "../drmem-types", version = "0.1" }
 drmem-api = { path = "../drmem-api", version = "0.1" }
 drmem-config = { path = "../drmem-config", version = "0.1" }
 
@@ -37,6 +37,11 @@ version = "0.1"
 
 [dependencies.drmem-db-redis]
 path = "../backends/drmem-db-redis"
+version = "0.1"
+optional = true
+
+[dependencies.drmem-db-simple]
+path = "../backends/drmem-db-simple"
 version = "0.1"
 optional = true
 
@@ -60,6 +65,11 @@ optional = true
 # This section defines the optional dependencies for the 'gRPC'
 # feature.
 
+[dependencies.tokio-stream]
+version = "0.1"
+features = ["net"]
+optional = true
+
 [dependencies.tonic]
 version = "0.6"
 features = ["prost", "compression"]
@@ -77,7 +87,8 @@ optional = true
 # These are features that can be enabled for drmem.
 
 [features]
-default = ["redis-backend"]
-redis-backend = ["drmem-db-redis"]
+default = ["simple-backend"]
+simple-backend = ["drmem-db-simple"]
+#redis-backend = ["drmem-db-redis"]
 graphql = ["hyper", "juniper", "juniper_hyper"]
-grpc = ["tonic", "prost", "tonic-build"]
+grpc = ["tonic", "prost", "tonic-build", "tokio-stream"]

@@ -1,55 +1,16 @@
-use drmem_api::{driver, Result};
-use drmem_types::Error;
-use std::collections::{hash_map, HashMap};
+use drmem_api::{driver, types::Error, Result, Store};
 use tokio::{
-    select,
-    sync::{broadcast, mpsc, oneshot},
+    sync::{mpsc, oneshot},
     task::JoinHandle,
 };
 use tracing::{info_span, warn};
 use tracing_futures::Instrument;
 
-/// Stores information associated with devices. The key is the full
-/// name of the device.
-///
-/// The value is a 2-tuple where the first element is the send handle
-/// of a broadcast channel. The second element is an optional handle
-/// to transmit settings to the driver.
-struct DeviceMap(
-    HashMap<String, (driver::TxDeviceValue, Option<driver::TxDeviceSetting>)>,
-);
+// If the simple-backend feature is enabled, we define the `store` module and fill it.
 
-impl DeviceMap {
-    fn new() -> Self {
-        DeviceMap(HashMap::new())
-    }
-
-    fn insert_ro_device(
-        &mut self, device_name: String,
-    ) -> Option<driver::TxDeviceValue> {
-        if let hash_map::Entry::Vacant(e) = self.0.entry(device_name) {
-            let (tx, _) = broadcast::channel(20);
-            let _ = e.insert((tx.clone(), None));
-
-            Some(tx)
-        } else {
-            None
-        }
-    }
-
-    fn insert_rw_device(
-        &mut self, device_name: String,
-    ) -> Option<(driver::TxDeviceValue, driver::RxDeviceSetting)> {
-        if let hash_map::Entry::Vacant(e) = self.0.entry(device_name) {
-            let (tx_val, _) = broadcast::channel(20);
-            let (tx_setting, rx_setting) = mpsc::channel(20);
-            let _ = e.insert((tx_val.clone(), Some(tx_setting)));
-
-            Some((tx_val, rx_setting))
-        } else {
-            None
-        }
-    }
+#[cfg(feature = "simple-backend")]
+mod store {
+    pub use drmem_db_simple::open;
 }
 
 /// Holds the state of the core task in the framework.
@@ -58,22 +19,23 @@ impl DeviceMap {
 /// table of active devices. Drivers and client communicate with the
 /// core task through channels.
 struct State {
-    devices: DeviceMap,
+    backend: Box<dyn Store + Send>,
 }
 
 impl State {
     /// Creates an initialized state for the core task.
-    fn create() -> Self {
-        State {
-            devices: DeviceMap::new(),
-        }
+    async fn create() -> Result<Self> {
+        #[cfg(feature = "simple-backend")]
+        let backend = Box::new(store::open().await?);
+
+        Ok(State { backend })
     }
 
     fn send_reply<T>(
-        dev_name: &str, rpy_chan: oneshot::Sender<Result<T>>, val: Option<T>,
+        dev_name: &str, rpy_chan: oneshot::Sender<Result<T>>, val: Result<T>,
     ) {
         let result =
-            val.ok_or_else(|| Error::DeviceDefined(String::from(dev_name)));
+            val.map_err(|_| Error::DeviceDefined(String::from(dev_name)));
 
         if rpy_chan.send(result).is_err() {
             warn!("driver exited before a reply could be sent")
@@ -86,7 +48,8 @@ impl State {
                 ref dev_name,
                 rpy_chan,
             } => {
-                let result = self.devices.insert_ro_device(dev_name.into());
+                let result =
+                    self.backend.register_read_only_device(dev_name).await;
 
                 State::send_reply(dev_name, rpy_chan, result)
             }
@@ -95,7 +58,8 @@ impl State {
                 ref dev_name,
                 rpy_chan,
             } => {
-                let result = self.devices.insert_rw_device(dev_name.into());
+                let result =
+                    self.backend.register_read_write_device(dev_name).await;
 
                 State::send_reply(dev_name, rpy_chan, result)
             }
@@ -109,32 +73,30 @@ impl State {
         mut self, mut rx_drv_req: mpsc::Receiver<driver::Request>,
     ) -> Result<()> {
         loop {
-            select! {
-		Some(req) = rx_drv_req.recv() => {
-                    self.handle_driver_request(req).await
-		}
-		else => {
-                    warn!("no active drivers left ... exiting");
-                    return Ok(())
-		}
+            if let Some(req) = rx_drv_req.recv().await {
+                self.handle_driver_request(req).await
+            } else {
+                warn!("no active drivers left ... exiting");
+                return Ok(());
             }
         }
     }
 }
 
-pub fn start() -> (mpsc::Sender<driver::Request>, JoinHandle<Result<()>>) {
+pub async fn start(
+) -> Result<(mpsc::Sender<driver::Request>, JoinHandle<Result<()>>)> {
     // Create a channel that drivers can use to make requests to the
     // framework. This task will hang onto the Receiver end and each
     // driver will get a .clone() of the transmit handle.
 
     let (tx_drv_req, rx_drv_req) = mpsc::channel(10);
 
-    (
+    Ok((
         tx_drv_req,
-        tokio::spawn(
-            State::create()
-                .run(rx_drv_req)
-                .instrument(info_span!("core")),
-        ),
-    )
+        tokio::spawn(async {
+            let state = State::create().await?;
+
+            state.run(rx_drv_req).instrument(info_span!("core")).await
+        }),
+    ))
 }

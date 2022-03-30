@@ -2,7 +2,7 @@
 name = "drmem-db-redis"
 version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
-edition = "2018"
+edition = "2021"
 description = "Redis backend for DrMem control system"
 homepage = "https://github.com/rneswold/drmem"
 repository = "https://github.com/rneswold/drmem"
@@ -23,7 +23,6 @@ tracing = { version = "^0.1", features = ["std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 futures = { version = "0.3", features = ["std"] }
 
-drmem-types = { path = "../../drmem-types", version = "0.1" }
 drmem-api = { path = "../../drmem-api", version = "0.1" }
 
 [dependencies.drmem-config]

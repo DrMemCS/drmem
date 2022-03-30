@@ -4,6 +4,25 @@ use tracing::Level;
 
 use drmem_api::driver;
 
+// This module is defined when the SIMPLE backend is specified. There
+// are no config parameters for this backend.
+
+#[cfg(feature = "simple-backend")]
+pub mod backend {
+    use serde_derive::Deserialize;
+
+    #[derive(Deserialize)]
+    pub struct Config {}
+
+    impl<'a> Config {
+        pub const fn new() -> Config {
+            Config {}
+        }
+    }
+
+    pub static DEF: Config = Config::new();
+}
+
 // This module is defined when the REDIS backend is specified. It
 // provides configuration parameters that need to be provided in the
 // TOML file to help configure the REDIS support.
@@ -53,24 +72,22 @@ pub struct Config {
 
 impl<'a> Config {
     pub fn get_log_level(&self) -> Level {
-        if let Some(v) = &self.log_level {
-            match v.as_str() {
-                "info" => Level::INFO,
-                "debug" => Level::DEBUG,
-                "trace" => Level::TRACE,
-                _ => Level::WARN,
-            }
-        } else {
-            Level::WARN
+        let v = self
+            .log_level
+            .as_ref()
+            .map(|v| v.as_str())
+            .unwrap_or("warn");
+
+        match v {
+            "info" => Level::INFO,
+            "debug" => Level::DEBUG,
+            "trace" => Level::TRACE,
+            _ => Level::WARN,
         }
     }
 
     pub fn get_backend(&'a self) -> &'a backend::Config {
-        if let Some(v) = &self.backend {
-            v
-        } else {
-            &backend::DEF
-        }
+	self.backend.as_ref().unwrap_or(&backend::DEF)
     }
 }
 
@@ -96,9 +113,8 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 
     // Define the command line arguments.
 
-    let matches = App::new("DrMemory Mini Control System")
+    let matches = App::new("DrMem Mini Control System")
         .version("0.1")
-        .author("Rich Neswold <rich.neswold@gmail.com>")
         .about("A small, yet capable, control system.")
         .arg(
             Arg::with_name("config")
@@ -162,31 +178,52 @@ async fn from_file(path: &str) -> Option<Config> {
 }
 
 async fn find_cfg() -> Config {
-    if let Some(cfg) = from_file("./drmem.toml").await {
-        cfg
-    } else {
-        use std::env;
+    use std::env;
 
-        if let Ok(home) = env::var("HOME") {
-            if let Some(cfg) = from_file(&(home + "/.drmem.toml")).await {
-                return cfg;
-            }
-        }
-        if let Some(cfg) = from_file("/usr/local/etc/drmem.toml").await {
-            cfg
-        } else if let Some(cfg) = from_file("/usr/pkg/etc/drmem.toml").await {
-            cfg
-        } else if let Some(cfg) = from_file("/etc/drmem.toml").await {
-            cfg
-        } else {
-            Config::default()
-        }
+    const CFG_FILE: &str = "drmem.toml";
+
+    // Create a vector of directories that could contain a
+    // configuration file. The directories will be searched in their
+    // order within the vector.
+
+    let mut dirs = vec![String::from("./")];
+
+    // If the user has `HOME` defined, append their home directory to
+    // the search path. Note the end of the path has a period. This is
+    // done so the file will be named `.drmem.toml` in the home
+    // directory. (Kind of hack-y, I know.)
+
+    if let Ok(home) = env::var("HOME") {
+	dirs.push(format!("{}/.", home))
     }
+
+    // Add other, common configuration areas.
+
+    dirs.push(String::from("/usr/local/etc/"));
+    dirs.push(String::from("/usr/pkg/etc/"));
+    dirs.push(String::from("/etc/"));
+
+    // Iterate through the directories. The first file that is found
+    // and can be parsed is used as the configuration.
+
+    for dir in dirs {
+	let file = format!("{}{}", &dir, CFG_FILE);
+
+	if let Some(cfg) = from_file(&file).await {
+	    return cfg
+	}
+    }
+    Config::default()
 }
 
 fn dump_config(cfg: &Config) {
     println!("Configuration:");
     println!("    log level: {}\n", cfg.get_log_level());
+
+    #[cfg(feature = "simple-backend")]
+    {
+        println!("Using SIMPLE backend -- no configuration for it.");
+    }
 
     #[cfg(feature = "redis-backend")]
     {

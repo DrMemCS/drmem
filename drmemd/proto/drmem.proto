@@ -1,8 +1,16 @@
 syntax = "proto3";
 
-service drmem {
-    rpc get_device_info(Devices) returns (stream DeviceInfo) {}
-    rpc query_device(DeviceFilter) returns (stream Devices) {}
+package drmem;
+
+service DrMem {
+    rpc getDeviceInfo(Devices) returns (stream DeviceInfo) {}
+    rpc queryDevices(DeviceFilter) returns (Devices) {}
+    rpc requestData(DeviceRequest) returns (DeviceData) {}
+}
+
+message DateRange {
+    int64 beginDate = 1;
+    optional int64 endDate = 2;
 }
 
 message Devices {
@@ -17,4 +25,15 @@ message DeviceInfo {
 
 message DeviceFilter {
     string pattern = 1;
+}
+
+message DeviceRequest {
+    repeated string device = 1;
+    optional DateRange range = 2;
+}
+
+message DeviceData {
+    string device = 1;
+    int64 stamp = 2;
+    double value = 3;
 }

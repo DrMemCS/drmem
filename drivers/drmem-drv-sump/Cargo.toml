@@ -2,7 +2,7 @@
 name = "drmem-drv-sump"
 version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
@@ -10,8 +10,6 @@ toml = "0.5.6"
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["std"] }
-tokio = { version = "1", features = ["time"] }
-drmem-types = { path = "../../drmem-types", version = "0.1" }
+tokio = { version = "1", features = ["time", "net", "io-util"] }
 drmem-api = { path = "../../drmem-api", version = "0.1" }
 drmem-config = { path = "../../drmem-config", version = "0.1" }
-drmem-db-redis = { path = "../../backends/drmem-db-redis" }

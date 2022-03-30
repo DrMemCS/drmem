@@ -1,20 +1,20 @@
 //! This module defines types and interfaces that driver use to
 //! interact with the core of DrMem.
 
+use crate::types::{device::Value, Error};
 use async_trait::async_trait;
-use drmem_types::{device::Value, Error};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use toml::value;
 
 use super::Result;
 
 pub type Config = value::Table;
-pub type TxDeviceValue = broadcast::Sender<Value>;
 pub type TxDeviceSetting = mpsc::Sender<Value>;
 pub type RxDeviceSetting = mpsc::Receiver<Value>;
 
+pub type ReportReading = Box<dyn Fn(Value) -> Result<()> + Send>;
+
 /// Defines the requests that can be sent to core.
-#[derive(Debug)]
 pub enum Request {
     /// Registers a read-only device with core.
     ///
@@ -22,7 +22,7 @@ pub enum Request {
     /// the hardware.
     AddReadonlyDevice {
         dev_name: String,
-        rpy_chan: oneshot::Sender<Result<TxDeviceValue>>,
+        rpy_chan: oneshot::Sender<Result<ReportReading>>,
     },
 
     /// Registers a writable device with core.
@@ -33,14 +33,10 @@ pub enum Request {
     AddReadWriteDevice {
         dev_name: String,
         rpy_chan: oneshot::Sender<
-            Result<(TxDeviceValue, RxDeviceSetting, Option<Value>)>,
+            Result<(ReportReading, RxDeviceSetting, Option<Value>)>,
         >,
     },
 }
-
-pub type Reading<T> = Box<
-    dyn Fn(T) -> std::result::Result<usize, broadcast::error::SendError<Value>>,
->;
 
 /// A handle which is used to communicate with the core of DrMem.
 /// When a driver is created, it will be given a handle to be used
@@ -77,9 +73,9 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device<T: Into<Value>>(
+    pub async fn add_ro_device(
         &self, name: &str,
-    ) -> super::Result<Reading<T>> {
+    ) -> super::Result<ReportReading> {
         // Create a location for the reply.
 
         let (tx, rx) = oneshot::channel();
@@ -102,25 +98,21 @@ impl RequestChan {
         // received a reply, process the payload.
 
         if result.is_ok() {
-            match rx.await {
-                // If the name was successfully registered, core will
-                // return a sending handle for device readings. Wrap
-                // the handle in a type-safe wrapper (so the driver
-                // can only send the correct type.)
-                Ok(Ok(ch)) => {
-                    return Ok(Box::new(move |v: T| ch.send(v.into())))
-                }
-
-                Ok(Err(e)) => return Err(e),
-
-                Err(_) => (),
+            if let Ok(v) = rx.await {
+                return v;
+            } else {
+                return Err(Error::MissingPeer(String::from(
+                    "core didn't reply to request",
+                )));
             }
         }
 
         // If either communication direction failed, return an error
         // indicating we can't talk to core.
 
-        Err(Error::MissingPeer(String::from("core")))
+        Err(Error::MissingPeer(String::from(
+            "core didn't accept request",
+        )))
     }
 
     /// Registers a read-write device with the framework. `name` is the
@@ -142,11 +134,7 @@ impl RequestChan {
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device(
         &self, name: &str,
-    ) -> Result<(
-        broadcast::Sender<Value>,
-        mpsc::Receiver<Value>,
-        Option<Value>,
-    )> {
+    ) -> Result<(ReportReading, mpsc::Receiver<Value>, Option<Value>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
@@ -159,9 +147,15 @@ impl RequestChan {
         if result.is_ok() {
             if let Ok(v) = rx.await {
                 return v;
+            } else {
+                return Err(Error::MissingPeer(String::from(
+                    "core didn't reply to request",
+                )));
             }
         }
-        Err(Error::MissingPeer(String::from("core")))
+        Err(Error::MissingPeer(String::from(
+            "core didn't accept request",
+        )))
     }
 }
 
