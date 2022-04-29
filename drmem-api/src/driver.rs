@@ -162,11 +162,13 @@ impl RequestChan {
 /// All drivers implement the `driver::API` trait.
 #[async_trait]
 pub trait API {
-    fn create(cfg: Config, drc: RequestChan) -> Result<Box<dyn API>>
+    async fn create_instance(
+        cfg: &Config, drc: RequestChan,
+    ) -> Result<Box<dyn API + Send>>
     where
         Self: Sized;
 
-    async fn run(mut self) -> Result<()>;
+    async fn run(&mut self) -> Result<()>;
 
     /// The name of the driver. This should be relatively short, but
     /// needs to be unique across all drivers.

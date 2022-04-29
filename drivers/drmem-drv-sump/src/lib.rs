@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use drmem_api::{driver, types::Error, Result};
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::SocketAddrV4;
 use tokio::{
     io::{self, AsyncReadExt},
     net::{
@@ -185,51 +185,6 @@ pub struct Sump {
 }
 
 impl Sump {
-    pub async fn new(
-        cfg: &driver::Config, core: driver::RequestChan,
-    ) -> Result<Self> {
-        // Validate the configuration.
-
-        let _addr = match cfg.get("addr") {
-            Some(addr) => addr,
-            None => return Err(Error::BadConfig),
-        };
-
-        let _port = match cfg.get("port") {
-            Some(port) => port,
-            None => return Err(Error::BadConfig),
-        };
-
-        // Define the devices managed by this driver.
-
-        let d_service = core.add_ro_device("service").await?;
-        let d_state = core.add_ro_device("state").await?;
-        let d_duty = core.add_ro_device("duty").await?;
-        let d_inflow = core.add_ro_device("in-flow").await?;
-
-        let addr = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 101), 10_000);
-        let s = TcpStream::connect(addr)
-            .await
-            .map_err(|_| Error::MissingPeer(String::from("sump pump")))?;
-
-        // Unfortunately, we have to hang onto the xmt handle. The
-        // peer process monitors the state of the socket and if we
-        // close our send handle, it thinks we went away and closes
-        // the other end.
-
-        let (rx, tx) = s.into_split();
-
-        Ok(Sump {
-            rx,
-            _tx: tx,
-            state: State::Unknown,
-            d_service,
-            d_state,
-            d_duty,
-            d_inflow,
-        })
-    }
-
     // This function reads the next frame from the sump pump process.
     // It either returns `Ok()` with the two fields' values or `Err()`
     // if a socket error occurred.
@@ -244,16 +199,52 @@ impl Sump {
 
 #[async_trait]
 impl driver::API for Sump {
-    fn create(
-        _cfg: driver::Config, _drc: driver::RequestChan,
-    ) -> Result<Box<dyn driver::API>>
-    where
-        Self: Sized,
-    {
-        todo!()
+    async fn create_instance(
+        cfg: &driver::Config, core: driver::RequestChan,
+    ) -> Result<Box<dyn driver::API + Send>> {
+        // Validate the configuration.
+
+        let addr = match cfg.get("addr") {
+            Some(toml::value::Value::String(addr)) => {
+                if let Ok(addr) = addr.parse::<SocketAddrV4>() {
+                    addr
+                } else {
+                    return Err(Error::BadConfig);
+                }
+            }
+            Some(_) | None => return Err(Error::BadConfig),
+        };
+
+        // Define the devices managed by this driver.
+
+        let d_service = core.add_ro_device("service").await?;
+        let d_state = core.add_ro_device("state").await?;
+        let d_duty = core.add_ro_device("duty").await?;
+        let d_inflow = core.add_ro_device("in-flow").await?;
+
+        let s = TcpStream::connect(addr)
+            .await
+            .map_err(|_| Error::MissingPeer(String::from("sump pump")))?;
+
+        // Unfortunately, we have to hang onto the xmt handle. The
+        // peer process monitors the state of the socket and if we
+        // close our send handle, it thinks we went away and closes
+        // the other end.
+
+        let (rx, tx) = s.into_split();
+
+        Ok(Box::new(Sump {
+            rx,
+            _tx: tx,
+            state: State::Unknown,
+            d_service,
+            d_state,
+            d_duty,
+            d_inflow,
+        }))
     }
 
-    async fn run(mut self) -> Result<()> {
+    async fn run(&mut self) -> Result<()> {
         (self.d_service)(true.into())?;
 
         loop {

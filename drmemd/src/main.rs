@@ -4,8 +4,8 @@ use drmem_api::{
 };
 use drmem_config::Config;
 use futures::future;
-use tracing::error;
 use tokio::task::JoinHandle;
+use tracing::error;
 
 mod core;
 
@@ -67,18 +67,18 @@ async fn run() -> Result<()> {
 
         let (tx_drv_req, core_task) = core::start().await?;
 
-        let drv_pump = drmem_drv_sump::Sump::new(
+        let mut drv_pump = drmem_drv_sump::Sump::create_instance(
             &driver::Config::new(),
             driver::RequestChan::new("basement:sump", &tx_drv_req),
         )
         .await?;
 
-	let _ = future::join_all(vec![
-	    wrap_task(core_task),
+        let _ = future::join_all(vec![
+            wrap_task(core_task),
             #[cfg(feature = "graphql")]
-	    wrap_task(tokio::spawn(graphql::server())),
-	    wrap_task(tokio::spawn(drv_pump.run()))
-	]);
+            wrap_task(tokio::spawn(graphql::server())),
+            wrap_task(tokio::spawn(async move { drv_pump.run().await })),
+        ]);
     }
     Ok(())
 }
