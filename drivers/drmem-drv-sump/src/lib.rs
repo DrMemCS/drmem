@@ -74,7 +74,7 @@ impl State {
     // sync-ing with the state, the state will get updated, but `None`
     // will be returned.
 
-    pub fn off_event(&mut self, stamp: u64) -> Option<(f64, f64)> {
+    pub fn off_event(&mut self, stamp: u64, gpm: f64) -> Option<(f64, f64)> {
         match *self {
             State::Unknown => {
                 info!("sync-ed with OFF state");
@@ -125,7 +125,7 @@ impl State {
                 if on_time > 500.0 {
                     let off_time = (stamp - off_time) as f64;
                     let duty = on_time * 1000.0 / off_time;
-                    let in_flow = (2680.0 * duty / 60.0).round() / 1000.0;
+                    let in_flow = (gpm * duty / 60.0).round() / 1000.0;
 
                     *self = State::Off { off_time: stamp };
                     Some((duty.round() / 10.0, in_flow))
@@ -178,6 +178,7 @@ pub struct Sump {
     rx: OwnedReadHalf,
     _tx: OwnedWriteHalf,
     state: State,
+    gpm: f64,
     d_service: driver::ReportReading,
     d_state: driver::ReportReading,
     d_duty: driver::ReportReading,
@@ -197,6 +198,39 @@ impl Sump {
     }
 }
 
+// Attempts to pull the hostname/port for the remote process.
+
+fn get_cfg_address(cfg: &driver::Config) -> Result<SocketAddrV4> {
+    match cfg.get("addr") {
+        Some(toml::value::Value::String(addr)) => {
+            if let Ok(addr) = addr.parse::<SocketAddrV4>() {
+                return Ok(addr);
+            } else {
+                error!("'addr' config parameter not in hostname:port format")
+            }
+        }
+        Some(_) => error!("'addr' config parameter should be a string"),
+        None => error!("missing 'addr' parameter in config"),
+    }
+
+    Err(Error::BadConfig)
+}
+
+// Attempts to pull the gal-per-min parameter from the driver's
+// configuration. The value can be specified as an integer or floating
+// point. It gets returned only as an `f64`.
+
+fn get_cfg_gpm(cfg: &driver::Config) -> Result<f64> {
+    match cfg.get("gpm") {
+        Some(toml::value::Value::Integer(gpm)) => return Ok(*gpm as f64),
+        Some(toml::value::Value::Float(gpm)) => return Ok(*gpm),
+        Some(_) => error!("'gpm' config parameter should be a number"),
+        None => error!("missing 'gpm' parameter in config"),
+    }
+
+    Err(Error::BadConfig)
+}
+
 #[async_trait]
 impl driver::API for Sump {
     async fn create_instance(
@@ -204,16 +238,8 @@ impl driver::API for Sump {
     ) -> Result<Box<dyn driver::API + Send>> {
         // Validate the configuration.
 
-        let addr = match cfg.get("addr") {
-            Some(toml::value::Value::String(addr)) => {
-                if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                    addr
-                } else {
-                    return Err(Error::BadConfig);
-                }
-            }
-            Some(_) | None => return Err(Error::BadConfig),
-        };
+        let addr = get_cfg_address(cfg)?;
+        let gpm = get_cfg_gpm(cfg)?;
 
         // Define the devices managed by this driver.
 
@@ -222,26 +248,33 @@ impl driver::API for Sump {
         let d_duty = core.add_ro_device("duty").await?;
         let d_inflow = core.add_ro_device("in-flow").await?;
 
-        let s = TcpStream::connect(addr)
-            .await
-            .map_err(|_| Error::MissingPeer(String::from("sump pump")))?;
+        // Mark the connection as 'down'. Once data starts arriving,
+        // this device will be set to `true`.
 
-        // Unfortunately, we have to hang onto the xmt handle. The
-        // peer process monitors the state of the socket and if we
-        // close our send handle, it thinks we went away and closes
-        // the other end.
+        d_service(false.into())?;
 
-        let (rx, tx) = s.into_split();
+        if let Ok(s) = TcpStream::connect(addr).await {
+            // Unfortunately, we have to hang onto the xmt handle. The
+            // peer process monitors the state of the socket and if we
+            // close our send handle, it thinks we went away and
+            // closes the other end.
 
-        Ok(Box::new(Sump {
-            rx,
-            _tx: tx,
-            state: State::Unknown,
-            d_service,
-            d_state,
-            d_duty,
-            d_inflow,
-        }))
+            let (rx, tx) = s.into_split();
+
+            Ok(Box::new(Sump {
+                rx,
+                _tx: tx,
+                state: State::Unknown,
+                gpm,
+                d_service,
+                d_state,
+                d_duty,
+                d_inflow,
+            }))
+        } else {
+            error!("couldn't connect to {}", &addr);
+            Err(Error::MissingPeer(String::from("sump pump")))
+        }
     }
 
     async fn run(&mut self) -> Result<()> {
@@ -256,8 +289,10 @@ impl driver::API for Sump {
                 }
 
                 Ok((stamp, false)) => {
-                    if let Some((duty, in_flow)) = self.state.off_event(stamp) {
-                        info!("duty: {}%, in flow: {} gpm", duty, in_flow);
+                    if let Some((duty, in_flow)) =
+                        self.state.off_event(stamp, self.gpm)
+                    {
+                        info!("duty: {}%, inflow: {} gpm", duty, in_flow);
 
                         (self.d_state)(false.into())?;
                         (self.d_duty)(duty.into())?;
@@ -277,7 +312,7 @@ impl driver::API for Sump {
     }
 
     fn name(&self) -> &'static str {
-        "sump"
+        "sump-net"
     }
 
     fn description(&self) -> &'static str {
@@ -285,6 +320,6 @@ impl driver::API for Sump {
     }
 
     fn summary(&self) -> &'static str {
-        "sump pump monitor"
+        "monitors and computes parameters for a sump pump"
     }
 }
