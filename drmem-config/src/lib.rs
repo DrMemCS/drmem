@@ -83,7 +83,7 @@ impl<'a> Config {
     }
 
     pub fn get_backend(&'a self) -> &'a backend::Config {
-	self.backend.as_ref().unwrap_or(&backend::DEF)
+        self.backend.as_ref().unwrap_or(&backend::DEF)
     }
 }
 
@@ -190,7 +190,7 @@ async fn find_cfg() -> Config {
     // directory. (Kind of hack-y, I know.)
 
     if let Ok(home) = env::var("HOME") {
-	dirs.push(format!("{}/.", home))
+        dirs.push(format!("{}/.", home))
     }
 
     // Add other, common configuration areas.
@@ -203,11 +203,11 @@ async fn find_cfg() -> Config {
     // and can be parsed is used as the configuration.
 
     for dir in dirs {
-	let file = format!("{}{}", &dir, CFG_FILE);
+        let file = format!("{}{}", &dir, CFG_FILE);
 
-	if let Some(cfg) = from_file(&file).await {
-	    return cfg
-	}
+        if let Some(cfg) = from_file(&file).await {
+            return cfg;
+        }
     }
     Config::default()
 }

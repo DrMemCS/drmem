@@ -49,10 +49,10 @@ async fn init_app() -> Option<Config> {
 
 async fn wrap_task(handle: JoinHandle<Result<()>>) -> Result<()> {
     match handle.await {
-	Err(e) if e.is_panic() => error!("terminated due to panic"),
-	Err(_) => error!("terminated due to cancellation"),
-	Ok(Err(e)) => error!("task returned error -- {}", &e),
-	Ok(Ok(_)) => ()
+        Err(e) if e.is_panic() => error!("terminated due to panic"),
+        Err(_) => error!("terminated due to cancellation"),
+        Ok(Err(e)) => error!("task returned error -- {}", &e),
+        Ok(Ok(_)) => (),
     }
     Ok(())
 }
