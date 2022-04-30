@@ -72,11 +72,7 @@ pub struct Config {
 
 impl<'a> Config {
     pub fn get_log_level(&self) -> Level {
-        let v = self
-            .log_level
-            .as_ref()
-            .map(|v| v.as_str())
-            .unwrap_or("warn");
+        let v = self.log_level.as_deref().unwrap_or("warn");
 
         match v {
             "info" => Level::INFO,
