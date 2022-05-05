@@ -32,6 +32,7 @@ drmem-config = { path = "../drmem-config", version = "0.1" }
 [dependencies.drmem-drv-sump]
 path = "../drivers/drmem-drv-sump"
 version = "0.1"
+optional = true
 
 # This section defines the optional dependencies for backend storage.
 
@@ -87,8 +88,10 @@ optional = true
 # These are features that can be enabled for drmem.
 
 [features]
-default = ["simple-backend"]
+default = ["simple-backend", "driver-sump"]
 simple-backend = ["drmem-db-simple"]
 #redis-backend = ["drmem-db-redis"]
 graphql = ["hyper", "juniper", "juniper_hyper"]
 grpc = ["tonic", "prost", "tonic-build", "tokio-stream"]
+
+driver-sump = ["drmem-drv-sump"]

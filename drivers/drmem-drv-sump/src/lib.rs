@@ -1,5 +1,9 @@
 use async_trait::async_trait;
-use drmem_api::{driver, types::Error, Result};
+use drmem_api::{
+    driver::{self, DriverConfig},
+    types::Error,
+    Result,
+};
 use std::net::SocketAddrV4;
 use tokio::{
     io::{self, AsyncReadExt},
@@ -200,7 +204,7 @@ impl Sump {
 
 // Attempts to pull the hostname/port for the remote process.
 
-fn get_cfg_address(cfg: &driver::Config) -> Result<SocketAddrV4> {
+fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
     match cfg.get("addr") {
         Some(toml::value::Value::String(addr)) => {
             if let Ok(addr) = addr.parse::<SocketAddrV4>() {
@@ -220,7 +224,7 @@ fn get_cfg_address(cfg: &driver::Config) -> Result<SocketAddrV4> {
 // configuration. The value can be specified as an integer or floating
 // point. It gets returned only as an `f64`.
 
-fn get_cfg_gpm(cfg: &driver::Config) -> Result<f64> {
+fn get_cfg_gpm(cfg: &DriverConfig) -> Result<f64> {
     match cfg.get("gpm") {
         Some(toml::value::Value::Integer(gpm)) => return Ok(*gpm as f64),
         Some(toml::value::Value::Float(gpm)) => return Ok(*gpm),
@@ -234,12 +238,12 @@ fn get_cfg_gpm(cfg: &driver::Config) -> Result<f64> {
 #[async_trait]
 impl driver::API for Sump {
     async fn create_instance(
-        cfg: &driver::Config, core: driver::RequestChan,
+        cfg: DriverConfig, core: driver::RequestChan,
     ) -> Result<Box<dyn driver::API + Send>> {
         // Validate the configuration.
 
-        let addr = get_cfg_address(cfg)?;
-        let gpm = get_cfg_gpm(cfg)?;
+        let addr = get_cfg_address(&cfg)?;
+        let gpm = get_cfg_gpm(&cfg)?;
 
         // Define the devices managed by this driver.
 

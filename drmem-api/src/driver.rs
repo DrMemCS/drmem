@@ -8,7 +8,7 @@ use toml::value;
 
 use super::Result;
 
-pub type Config = value::Table;
+pub type DriverConfig = value::Table;
 pub type TxDeviceSetting = mpsc::Sender<Value>;
 pub type RxDeviceSetting = mpsc::Receiver<Value>;
 
@@ -44,6 +44,7 @@ pub enum Request {
 ///
 /// This type wraps the `mpsc::Sender<>` and defines a set of helper
 /// methods to send requests and receive replies with the core.
+#[derive(Clone)]
 pub struct RequestChan {
     prefix: String,
     req_chan: mpsc::Sender<Request>,
@@ -163,7 +164,7 @@ impl RequestChan {
 #[async_trait]
 pub trait API {
     async fn create_instance(
-        cfg: &Config, drc: RequestChan,
+        cfg: DriverConfig, drc: RequestChan,
     ) -> Result<Box<dyn API + Send>>
     where
         Self: Sized;

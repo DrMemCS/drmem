@@ -1,13 +1,11 @@
-use drmem_api::{
-    driver::{self, API},
-    Result,
-};
+use drmem_api::{driver::RequestChan, types::Error, Result};
 use drmem_config::Config;
 use futures::future;
 use tokio::task::JoinHandle;
 use tracing::error;
 
 mod core;
+mod driver;
 
 // If the user specifies the 'grpc' feature, then pull in the module
 // that defines the gRPC server.
@@ -61,24 +59,48 @@ async fn wrap_task(handle: JoinHandle<Result<()>>) -> Result<()> {
 // the config, starts the drivers, and monitors their health.
 
 async fn run() -> Result<()> {
-    if let Some(_cfg) = init_app().await {
+    if let Some(cfg) = init_app().await {
+        let drv_tbl = driver::load_table();
+
         // Start the core task. It returns a handle to a channel with
         // which to make requests. It also returns the task handle.
 
         let (tx_drv_req, core_task) = core::start().await?;
 
-        let mut drv_pump = drmem_drv_sump::Sump::create_instance(
-            &driver::Config::new(),
-            driver::RequestChan::new("basement:sump", &tx_drv_req),
-        )
-        .await?;
+        // Build initial vector of required tasks. Crate features will
+        // enable more required tasks.
 
-        let _ = future::join_all(vec![
+        let mut tasks = vec![
             wrap_task(core_task),
             #[cfg(feature = "graphql")]
             wrap_task(tokio::spawn(graphql::server())),
-            wrap_task(tokio::spawn(async move { drv_pump.run().await })),
-        ]);
+        ];
+
+        // Iterate through the list of drivers specified in the
+        // configuration file.
+
+        for driver in cfg.driver {
+            // If the driver exists in the driver table, an instance
+            // can be started. If it doesn't exist, report an error
+            // and exit.
+
+            if let Some(driver_info) = drv_tbl.get(driver.name.as_str()) {
+                let instance = driver_info.run_instance(
+                    driver.cfg.unwrap_or_default().clone(),
+                    RequestChan::new(
+                        &driver.prefix.unwrap_or_else(|| String::from("")),
+                        &tx_drv_req,
+                    ),
+                );
+
+                tasks.push(wrap_task(instance))
+            } else {
+                error!("no driver named {}", &driver.name);
+                return Err(Error::NotFound);
+            }
+        }
+
+        let _ = future::join_all(tasks);
     }
     Ok(())
 }

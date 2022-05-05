@@ -2,7 +2,7 @@ use serde_derive::Deserialize;
 use toml::value;
 use tracing::Level;
 
-use drmem_api::driver;
+use drmem_api::driver::DriverConfig;
 
 // This module is defined when the SIMPLE backend is specified. There
 // are no config parameters for this backend.
@@ -101,7 +101,7 @@ impl Default for Config {
 pub struct Driver {
     pub name: String,
     pub prefix: Option<String>, // XXX: needs to be validated
-    pub cfg: Option<driver::Config>,
+    pub cfg: Option<DriverConfig>,
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
