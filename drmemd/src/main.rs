@@ -35,6 +35,7 @@ async fn init_app() -> Option<Config> {
 
         let subscriber = tracing_subscriber::fmt()
             .with_max_level(cfg.get_log_level())
+            .with_target(false)
             .finish();
 
         tracing::subscriber::set_global_default(subscriber)
