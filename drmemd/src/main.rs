@@ -105,7 +105,9 @@ async fn run() -> Result<()> {
             }
         }
 
-        let _ = future::join_all(tasks);
+        let _ = future::join_all(tasks).await;
+
+        warn!("shutting down")
     }
     Ok(())
 }
