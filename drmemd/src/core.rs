@@ -72,14 +72,12 @@ impl State {
     async fn run(
         mut self, mut rx_drv_req: mpsc::Receiver<driver::Request>,
     ) -> Result<()> {
-        loop {
-            if let Some(req) = rx_drv_req.recv().await {
-                self.handle_driver_request(req).await
-            } else {
-                warn!("no active drivers left ... exiting");
-                return Ok(());
-            }
+        info!("starting");
+        while let Some(req) = rx_drv_req.recv().await {
+            self.handle_driver_request(req).await
         }
+        warn!("no active drivers left");
+        Ok(())
     }
 }
 
