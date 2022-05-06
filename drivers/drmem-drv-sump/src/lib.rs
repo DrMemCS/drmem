@@ -191,6 +191,40 @@ pub struct Sump {
 }
 
 impl Sump {
+
+    // Attempts to pull the hostname/port for the remote process.
+
+    fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
+	match cfg.get("addr") {
+            Some(toml::value::Value::String(addr)) => {
+		if let Ok(addr) = addr.parse::<SocketAddrV4>() {
+                    return Ok(addr);
+		} else {
+                    error!("'addr' not in hostname:port format")
+		}
+            }
+            Some(_) => error!("'addr' config parameter should be a string"),
+            None => error!("missing 'addr' parameter in config"),
+	}
+
+	Err(Error::BadConfig)
+    }
+
+    // Attempts to pull the gal-per-min parameter from the driver's
+    // configuration. The value can be specified as an integer or
+    // floating point. It gets returned only as an `f64`.
+
+    fn get_cfg_gpm(cfg: &DriverConfig) -> Result<f64> {
+	match cfg.get("gpm") {
+            Some(toml::value::Value::Integer(gpm)) => return Ok(*gpm as f64),
+            Some(toml::value::Value::Float(gpm)) => return Ok(*gpm),
+            Some(_) => error!("'gpm' config parameter should be a number"),
+            None => error!("missing 'gpm' parameter in config"),
+	}
+
+	Err(Error::BadConfig)
+    }
+
     // This function reads the next frame from the sump pump process.
     // It either returns `Ok()` with the two fields' values or `Err()`
     // if a socket error occurred.
@@ -203,39 +237,6 @@ impl Sump {
     }
 }
 
-// Attempts to pull the hostname/port for the remote process.
-
-fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
-    match cfg.get("addr") {
-        Some(toml::value::Value::String(addr)) => {
-            if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                return Ok(addr);
-            } else {
-                error!("'addr' config parameter not in hostname:port format")
-            }
-        }
-        Some(_) => error!("'addr' config parameter should be a string"),
-        None => error!("missing 'addr' parameter in config"),
-    }
-
-    Err(Error::BadConfig)
-}
-
-// Attempts to pull the gal-per-min parameter from the driver's
-// configuration. The value can be specified as an integer or floating
-// point. It gets returned only as an `f64`.
-
-fn get_cfg_gpm(cfg: &DriverConfig) -> Result<f64> {
-    match cfg.get("gpm") {
-        Some(toml::value::Value::Integer(gpm)) => return Ok(*gpm as f64),
-        Some(toml::value::Value::Float(gpm)) => return Ok(*gpm),
-        Some(_) => error!("'gpm' config parameter should be a number"),
-        None => error!("missing 'gpm' parameter in config"),
-    }
-
-    Err(Error::BadConfig)
-}
-
 #[async_trait]
 impl driver::API for Sump {
     async fn create_instance(
@@ -243,8 +244,8 @@ impl driver::API for Sump {
     ) -> Result<Box<dyn driver::API + Send>> {
         // Validate the configuration.
 
-        let addr = get_cfg_address(&cfg)?;
-        let gpm = get_cfg_gpm(&cfg)?;
+        let addr = Sump::get_cfg_address(&cfg)?;
+        let gpm = Sump::get_cfg_gpm(&cfg)?;
 
         // Define the devices managed by this driver.
 
