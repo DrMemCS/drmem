@@ -11,6 +11,7 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
+    time,
 };
 use tracing::{debug, error, info, warn};
 
@@ -257,27 +258,35 @@ impl driver::API for Sump {
 
         d_service(false.into())?;
 
-        if let Ok(s) = TcpStream::connect(addr).await {
-            // Unfortunately, we have to hang onto the xmt handle. The
-            // peer process monitors the state of the socket and if we
-            // close our send handle, it thinks we went away and
-            // closes the other end.
+        match time::timeout(
+            time::Duration::from_secs(1),
+            TcpStream::connect(addr),
+        )
+        .await
+        {
+            Err(_) | Ok(Err(_)) => {
+                Err(Error::MissingPeer(String::from("sump pump")))
+            }
 
-            let (rx, tx) = s.into_split();
+            Ok(Ok(s)) => {
+                // Unfortunately, we have to hang onto the xmt handle.
+                // The peer process monitors the state of the socket
+                // and if we close our send handle, it thinks we went
+                // away and closes the other end.
 
-            Ok(Box::new(Sump {
-                rx,
-                _tx: tx,
-                state: State::Unknown,
-                gpm,
-                d_service,
-                d_state,
-                d_duty,
-                d_inflow,
-            }))
-        } else {
-            error!("couldn't connect to {}", &addr);
-            Err(Error::MissingPeer(String::from("sump pump")))
+                let (rx, tx) = s.into_split();
+
+                Ok(Box::new(Sump {
+                    rx,
+                    _tx: tx,
+                    state: State::Unknown,
+                    gpm,
+                    d_service,
+                    d_state,
+                    d_duty,
+                    d_inflow,
+                }))
+            }
         }
     }
 

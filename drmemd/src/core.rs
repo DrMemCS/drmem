@@ -3,10 +3,11 @@ use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
 };
-use tracing::{info_span, warn};
+use tracing::{info, info_span, warn};
 use tracing_futures::Instrument;
 
-// If the simple-backend feature is enabled, we define the `store` module and fill it.
+// If the simple-backend feature is enabled, we define the `store`
+// module and fill it.
 
 #[cfg(feature = "simple-backend")]
 mod store {
@@ -96,7 +97,10 @@ pub async fn start(
         tokio::spawn(async {
             let state = State::create().await?;
 
-            state.run(rx_drv_req).instrument(info_span!("core")).await
+            state
+                .run(rx_drv_req)
+                .instrument(info_span!("driver_manager"))
+                .await
         }),
     ))
 }

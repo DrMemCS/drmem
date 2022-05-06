@@ -2,7 +2,7 @@ use drmem_api::{driver::RequestChan, types::Error, Result};
 use drmem_config::Config;
 use futures::future;
 use tokio::task::JoinHandle;
-use tracing::error;
+use tracing::{error, trace, warn};
 
 mod core;
 mod driver;
@@ -50,7 +50,7 @@ async fn wrap_task(handle: JoinHandle<Result<()>>) -> Result<()> {
         Err(e) if e.is_panic() => error!("terminated due to panic"),
         Err(_) => error!("terminated due to cancellation"),
         Ok(Err(e)) => error!("task returned error -- {}", &e),
-        Ok(Ok(_)) => (),
+        Ok(Ok(())) => (),
     }
     Ok(())
 }
@@ -67,6 +67,8 @@ async fn run() -> Result<()> {
 
         let (tx_drv_req, core_task) = core::start().await?;
 
+        trace!("starting core tasks");
+
         // Build initial vector of required tasks. Crate features will
         // enable more required tasks.
 
@@ -78,6 +80,8 @@ async fn run() -> Result<()> {
 
         // Iterate through the list of drivers specified in the
         // configuration file.
+
+        trace!("starting driver instances");
 
         for driver in cfg.driver {
             // If the driver exists in the driver table, an instance
