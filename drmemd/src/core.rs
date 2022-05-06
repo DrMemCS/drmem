@@ -26,7 +26,6 @@ struct State {
 impl State {
     /// Creates an initialized state for the core task.
     async fn create() -> Result<Self> {
-        #[cfg(feature = "simple-backend")]
         let backend = Box::new(store::open().await?);
 
         Ok(State { backend })
