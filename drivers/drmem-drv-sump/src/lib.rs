@@ -19,7 +19,7 @@ use tracing::{error, info, warn};
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
 
-#[derive(Debug)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 enum State {
     Unknown,
     Off { off_time: u64 },
@@ -88,7 +88,7 @@ impl State {
                 if on_time > 500.0 {
                     let off_time = (stamp - off_time) as f64;
                     let duty = on_time * 1000.0 / off_time;
-                    let in_flow = (gpm * duty / 60.0).round() / 1000.0;
+                    let in_flow = (gpm * duty / 10.0).round() / 100.0;
 
                     *self = State::Off { off_time: stamp };
                     Some((duty.round() / 10.0, in_flow))
@@ -341,5 +341,58 @@ impl driver::API for Sump {
         };
 
         Box::pin(fut)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_states() {
+	let mut state = State::Unknown;
+
+	assert_eq!(state.on_event(0), false);
+	assert_eq!(state, State::Unknown);
+
+	state = State::Off { off_time: 100 };
+
+	assert_eq!(state.on_event(0), false);
+	assert_eq!(state, State::Off { off_time: 100 });
+	assert_eq!(state.on_event(200), true);
+	assert_eq!(state, State::On { off_time: 100, on_time: 200 });
+
+	assert_eq!(state.on_event(200), false);
+	assert_eq!(state, State::On { off_time: 100, on_time: 200 });
+
+	state = State::Unknown;
+
+	assert_eq!(state.off_event(1000, 50.0), None);
+	assert_eq!(state, State::Off { off_time: 1000 });
+	assert_eq!(state.off_event(1100, 50.0), None);
+	assert_eq!(state, State::Off { off_time: 1000 });
+
+	state = State::On { off_time: 1000, on_time: 101000 };
+
+	assert_eq!(state.off_event(1000, 50.0), None);
+	assert_eq!(state, State::Off { off_time: 1000 });
+
+	state = State::On { off_time: 1000, on_time: 101000 };
+
+	assert_eq!(state.off_event(101500, 50.0), None);
+	assert_eq!(state, State::On { off_time: 1000, on_time: 101000 });
+
+	assert!(state.off_event(101501, 50.0).is_some());
+	assert_eq!(state, State::Off { off_time: 101501 });
+
+	state = State::On { off_time: 0, on_time: 540000 };
+
+	assert_eq!(state.off_event(600000, 50.0), Some((10.0, 5.0)));
+	assert_eq!(state, State::Off { off_time: 600000 });
+
+	state = State::On { off_time: 0, on_time: 54000 };
+
+	assert_eq!(state.off_event(60000, 60.0), Some((10.0, 6.0)));
+	assert_eq!(state, State::Off { off_time: 60000 });
     }
 }
