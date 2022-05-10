@@ -15,7 +15,6 @@ keywords = ["control-system", "automation"]
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-async-trait = "0.1"
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["std"] }

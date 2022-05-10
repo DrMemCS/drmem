@@ -1,10 +1,11 @@
-use async_trait::async_trait;
 use drmem_api::{
     driver::{self, DriverConfig},
     types::Error,
     Result,
 };
+use std::future::Future;
 use std::net::SocketAddrV4;
+use std::pin::Pin;
 use tokio::{
     io::{self, AsyncReadExt},
     net::{
@@ -13,50 +14,7 @@ use tokio::{
     },
     time,
 };
-use tracing::{debug, error, info, warn};
-
-const DESCRIPTION: &str = r#"
-This driver monitors the state of a sump pump through a custom,
-non-commercial interface and updates a set of devices based on its
-behavior.
-
-The sump pump state is obatined via TCP with a RaspberryPi that's
-monitoring a GPIO pin for state changes of the sump pump. It sends a
-12-byte packet whenever the state changes. The first 8 bytes holds a
-millisecond timestamp in big-endian format. The following 4 bytes
-holds the new state.
-
-With these packets, the driver can use the timestamps to compute duty
-cycles and incoming flows rates for the sump pit each time the pump
-turns off. The `state`, `duty`, and `in-flow` parameters are updated
-simulataneously and, hence will have the same timestamps.
-
-# Configuration
-
-The driver needs to know where to access the remote service. It also
-needs to know how to scale the results. Two driver arguments are used
-to specify this information:
-
-- `addr` is a string containing the host name, or IP address, and port
-  number of the machine that's actually monitoring the sump pump (in
-  **"hostname:#"** or **"\#.#.#.#:#"** format.)
-- `gpm` is an integer that repesents the gallons-per-minute capacity
-  of the sump pump. The pump owner's manual will typically have a
-  table indicating the flow rate based on the rise of the discharge
-  pipe.
-
-# Devices
-
-The driver creates these devices:
-
-| Base Name | Type     | Units | Comment                                                   |
-|-----------|----------|-------|-----------------------------------------------------------|
-| `service` | bool, RO |       | Set to `true` when communicating with the remote service. |
-| `state`   | bool, RO |       | Set to `true` when the pump is running.                   |
-| `duty`    | f64, RO  | %     | Indicates duty cycle of last cycle.                       |
-| `in-flow` | f64, RO  | gpm   | Indicates the in-flow rate for the last cycle.            |
-
-"#;
+use tracing::{error, info, warn};
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -180,10 +138,10 @@ impl State {
 }
 
 pub struct Sump {
-    rx: OwnedReadHalf,
-    _tx: OwnedWriteHalf,
     state: State,
     gpm: f64,
+    rx: OwnedReadHalf,
+    _tx: OwnedWriteHalf,
     d_service: driver::ReportReading,
     d_state: driver::ReportReading,
     d_duty: driver::ReportReading,
@@ -191,23 +149,70 @@ pub struct Sump {
 }
 
 impl Sump {
+    pub const NAME: &'static str = "sump-gpio";
+
+    pub const SUMMARY: &'static str =
+        "monitors and computes parameters for a sump pump";
+
+    pub const DESCRIPTION: &'static str = r#"
+This driver monitors the state of a sump pump through a custom,
+non-commercial interface and updates a set of devices based on its
+behavior.
+
+The sump pump state is obatined via TCP with a RaspberryPi that's
+monitoring a GPIO pin for state changes of the sump pump. It sends a
+12-byte packet whenever the state changes. The first 8 bytes holds a
+millisecond timestamp in big-endian format. The following 4 bytes
+holds the new state.
+
+With these packets, the driver can use the timestamps to compute duty
+cycles and incoming flows rates for the sump pit each time the pump
+turns off. The `state`, `duty`, and `in-flow` parameters are updated
+simultaneously and, hence will have the same timestamps.
+
+# Configuration
+
+The driver needs to know where to access the remote service. It also
+needs to know how to scale the results. Two driver arguments are used
+to specify this information:
+
+- `addr` is a string containing the host name, or IP address, and port
+  number of the machine that's actually monitoring the sump pump (in
+  **"hostname:#"** or **"\#.#.#.#:#"** format.)
+- `gpm` is an integer that repesents the gallons-per-minute capacity
+  of the sump pump. The pump owner's manual will typically have a
+  table indicating the flow rate based on the rise of the discharge
+  pipe.
+
+# Devices
+
+The driver creates these devices:
+
+| Base Name | Type     | Units | Comment                                                   |
+|-----------|----------|-------|-----------------------------------------------------------|
+| `service` | bool, RO |       | Set to `true` when communicating with the remote service. |
+| `state`   | bool, RO |       | Set to `true` when the pump is running.                   |
+| `duty`    | f64, RO  | %     | Indicates duty cycle of last cycle.                       |
+| `in-flow` | f64, RO  | gpm   | Indicates the in-flow rate for the last cycle.            |
+
+"#;
 
     // Attempts to pull the hostname/port for the remote process.
 
     fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
-	match cfg.get("addr") {
+        match cfg.get("addr") {
             Some(toml::value::Value::String(addr)) => {
-		if let Ok(addr) = addr.parse::<SocketAddrV4>() {
+                if let Ok(addr) = addr.parse::<SocketAddrV4>() {
                     return Ok(addr);
-		} else {
+                } else {
                     error!("'addr' not in hostname:port format")
-		}
+                }
             }
             Some(_) => error!("'addr' config parameter should be a string"),
             None => error!("missing 'addr' parameter in config"),
-	}
+        }
 
-	Err(Error::BadConfig)
+        Err(Error::BadConfig)
     }
 
     // Attempts to pull the gal-per-min parameter from the driver's
@@ -215,14 +220,28 @@ impl Sump {
     // floating point. It gets returned only as an `f64`.
 
     fn get_cfg_gpm(cfg: &DriverConfig) -> Result<f64> {
-	match cfg.get("gpm") {
+        match cfg.get("gpm") {
             Some(toml::value::Value::Integer(gpm)) => return Ok(*gpm as f64),
             Some(toml::value::Value::Float(gpm)) => return Ok(*gpm),
             Some(_) => error!("'gpm' config parameter should be a number"),
             None => error!("missing 'gpm' parameter in config"),
-	}
+        }
 
-	Err(Error::BadConfig)
+        Err(Error::BadConfig)
+    }
+
+    async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
+        info!("connecting to {}", addr);
+
+        let fut = TcpStream::connect(addr);
+
+        match Box::pin(time::timeout(time::Duration::from_secs(1), fut)).await {
+            Err(_) | Ok(Err(_)) => {
+                Err(Error::MissingPeer(String::from("sump pump")))
+            }
+
+            Ok(Ok(s)) => Ok(s),
+        }
     }
 
     // This function reads the next frame from the sump pump process.
@@ -237,103 +256,90 @@ impl Sump {
     }
 }
 
-#[async_trait]
 impl driver::API for Sump {
-    async fn create_instance(
+    fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
-    ) -> Result<Box<dyn driver::API + Send>> {
-        // Validate the configuration.
+    ) -> Pin<
+        Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
+    > {
+        let fut = async move {
+            // Validate the configuration.
 
-        let addr = Sump::get_cfg_address(&cfg)?;
-        let gpm = Sump::get_cfg_gpm(&cfg)?;
+            let addr = Sump::get_cfg_address(&cfg)?;
+            let gpm = Sump::get_cfg_gpm(&cfg)?;
 
-        // Define the devices managed by this driver.
+	    // Connect with the remote process that is connected to
+	    // the sump pump.
 
-        let d_service = core.add_ro_device("service").await?;
-        let d_state = core.add_ro_device("state").await?;
-        let d_duty = core.add_ro_device("duty").await?;
-        let d_inflow = core.add_ro_device("in-flow").await?;
+            let (rx, _tx) = Sump::connect(&addr).await?.into_split();
 
-        // Mark the connection as 'down'. Once data starts arriving,
-        // this device will be set to `true`.
+            // Define the devices managed by this driver.
 
-        d_service(false.into())?;
+            let d_service = core.add_ro_device("service").await?;
+            let d_state = core.add_ro_device("state").await?;
+            let d_duty = core.add_ro_device("duty").await?;
+            let d_inflow = core.add_ro_device("in-flow").await?;
 
-        match time::timeout(
-            time::Duration::from_secs(1),
-            TcpStream::connect(addr),
-        )
-        .await
-        {
-            Err(_) | Ok(Err(_)) => {
-                Err(Error::MissingPeer(String::from("sump pump")))
-            }
+            // Mark the connection as 'down'. Once data starts
+            // arriving, this device will be set to `true`.
 
-            Ok(Ok(s)) => {
-                // Unfortunately, we have to hang onto the xmt handle.
-                // The peer process monitors the state of the socket
-                // and if we close our send handle, it thinks we went
-                // away and closes the other end.
+            d_service(false.into())?;
 
-                let (rx, tx) = s.into_split();
+            Ok(Box::new(Sump {
+                state: State::Unknown,
+                gpm,
+                rx,
+                _tx,
+                d_service,
+                d_state,
+                d_duty,
+                d_inflow,
+            }) as driver::DriverType)
+        };
 
-                Ok(Box::new(Sump {
-                    rx,
-                    _tx: tx,
-                    state: State::Unknown,
-                    gpm,
-                    d_service,
-                    d_state,
-                    d_duty,
-                    d_inflow,
-                }))
-            }
-        }
+        Box::pin(fut)
     }
 
-    async fn run(&mut self) -> Result<()> {
-        (self.d_service)(true.into())?;
+    fn run<'a>(
+        &'a mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + 'a>> {
+        let fut = async {
+            (self.d_service)(true.into())?;
 
-        loop {
-            match self.get_reading().await {
-                Ok((stamp, true)) => {
-                    if self.state.on_event(stamp) {
-                        (self.d_state)(true.into())?;
+            loop {
+                match self.get_reading().await {
+                    Ok((stamp, true)) => {
+                        if self.state.on_event(stamp) {
+                            (self.d_state)(true.into())?;
+                        }
                     }
-                }
 
-                Ok((stamp, false)) => {
-                    if let Some((duty, in_flow)) =
-                        self.state.off_event(stamp, self.gpm)
-                    {
-                        info!("duty: {}%, inflow: {} gpm", duty, in_flow);
+                    Ok((stamp, false)) => {
+                        let gpm = self.gpm;
 
+                        if let Some((duty, in_flow)) =
+                            self.state.off_event(stamp, gpm)
+                        {
+                            info!("duty: {}%, inflow: {} gpm", duty, in_flow);
+
+                            (self.d_state)(false.into())?;
+                            (self.d_duty)(duty.into())?;
+                            (self.d_inflow)(in_flow.into())?;
+                        }
+                    }
+
+                    Err(e) => {
+                        error!("couldn't read sump state -- {:?}", e);
                         (self.d_state)(false.into())?;
-                        (self.d_duty)(duty.into())?;
-                        (self.d_inflow)(in_flow.into())?;
+                        (self.d_service)(false.into())?;
+                        break Err(Error::MissingPeer(String::from(
+                            "sump pump",
+                        )));
                     }
                 }
-
-                Err(e) => {
-                    error!("couldn't read sump state -- {:?}", e);
-                    (self.d_service)(false.into())?;
-                    (self.d_state)(false.into())?;
-                    break Err(Error::OperationError);
-                }
             }
-            debug!("state: {:?}", self.state);
-        }
-    }
+        };
 
-    fn name(&self) -> &'static str {
-        "sump-net"
-    }
-
-    fn description(&self) -> &'static str {
-        DESCRIPTION
-    }
-
-    fn summary(&self) -> &'static str {
-        "monitors and computes parameters for a sump pump"
+        Box::pin(fut)
     }
 }

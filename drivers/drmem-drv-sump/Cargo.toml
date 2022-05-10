@@ -5,7 +5,6 @@ authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-async-trait = "0.1"
 toml = "0.5.6"
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"

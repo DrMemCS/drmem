@@ -1,5 +1,5 @@
 use drmem_api::{
-    driver::{DriverConfig, RequestChan, API},
+    driver::{DriverConfig, DriverType, RequestChan, API},
     Result,
 };
 use futures::future::Future;
@@ -9,12 +9,10 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, info_span, warn};
 use tracing_futures::Instrument;
 
-type DriverInst = Box<dyn API + Send>;
-
 type Factory = fn(
     DriverConfig,
     RequestChan,
-) -> Pin<Box<dyn Future<Output = Result<DriverInst>> + Send>>;
+) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send>>;
 
 pub struct Driver {
     pub driver_name: &'static str,
@@ -43,18 +41,17 @@ impl Driver {
             // Create a Future that creates an instance of the driver
             // using the provided configuration parameters.
 
-            let init_fut = factory(cfg.clone(), req_chan.clone())
+            let result = factory(cfg.clone(), req_chan.clone())
                 .instrument(info_span!("init"));
 
-            match init_fut.await {
+            match result.await {
                 Ok(mut instance) => {
                     // Start the driver instance as a background task
                     // and monitor the return value.
 
-                    match tokio::spawn(
-                        async move { instance.run().await }
-                            .instrument(info_span!("drvr")),
-                    )
+                    match tokio::spawn(async move {
+                        instance.run().instrument(info_span!("drvr")).await
+                    })
                     .await
                     {
                         // This exit value means the driver exited
@@ -88,7 +85,7 @@ impl Driver {
             // system from being compute-bound if the driver panics
             // right away.
 
-	    info!("restarting driver after a short delay");
+            info!("restarting driver after a short delay");
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
     }
@@ -100,12 +97,12 @@ impl Driver {
         &self, cfg: DriverConfig, req_chan: RequestChan,
     ) -> JoinHandle<Result<()>> {
         // Spawn a task that supervises the driver task. If the driver
-        // panics, this supervisor "catches" it and reports a
-        // problem. It then restarts the driver.
+        // panics, this supervisor "catches" it and reports a problem.
+        // It then restarts the driver.
 
         tokio::spawn(
             Driver::manage_instance(self.factory, cfg, req_chan)
-                .instrument(info_span!("mngr", drvr = &self.driver_name)),
+                .instrument(info_span!("mngr", drvr = self.driver_name))
         )
     }
 }
@@ -115,6 +112,8 @@ pub type Table = HashMap<&'static str, Driver>;
 pub fn load_table() -> Table {
     let mut table = HashMap::new();
 
+    // Load the set-up for the GPIO sump pump monitor.
+
     #[cfg(feature = "driver-sump")]
     {
         use drmem_drv_sump::Sump;
@@ -122,10 +121,10 @@ pub fn load_table() -> Table {
         table.insert(
             "sump",
             Driver::create(
-                "sump",
-                "driver to monitor a sump pump",
-                "description",
-                Sump::create_instance,
+                Sump::NAME,
+                Sump::SUMMARY,
+                Sump::DESCRIPTION,
+                <Sump as API>::create_instance,
             ),
         );
     }

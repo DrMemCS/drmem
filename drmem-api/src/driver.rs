@@ -2,7 +2,8 @@
 //! interact with the core of DrMem.
 
 use crate::types::{device::Value, Error};
-use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 use tokio::sync::{mpsc, oneshot};
 use toml::value;
 
@@ -12,7 +13,7 @@ pub type DriverConfig = value::Table;
 pub type TxDeviceSetting = mpsc::Sender<Value>;
 pub type RxDeviceSetting = mpsc::Receiver<Value>;
 
-pub type ReportReading = Box<dyn Fn(Value) -> Result<()> + Send>;
+pub type ReportReading = Box<dyn Fn(Value) -> Result<()> + Send + Sync>;
 
 /// Defines the requests that can be sent to core.
 pub enum Request {
@@ -160,28 +161,47 @@ impl RequestChan {
     }
 }
 
+pub type DriverType = Box<dyn API>;
+
 /// All drivers implement the `driver::API` trait.
-#[async_trait]
-pub trait API {
-    async fn create_instance(
+///
+/// The `API` trait defines methods that are expected to be available
+/// from a driver instance. By supporting this API, the framework can
+/// create driver instances and monitor them as they run.
+
+pub trait API: Send {
+    /// Creates an instance of the driver.
+    ///
+    /// `cfg` contains the driver parameters, as specified in the
+    /// `drmem.toml` configuration file. It is a `toml::Table` type so
+    /// the keys for the parameter names are strings and the
+    /// associated data are `toml::Value` types. This method should
+    /// validate the parameters and convert them into forms useful to
+    /// the driver. By convention, if any errors are found in the
+    /// configuration, this method should return `Error::BadConfig`.
+    ///
+    /// `drc` is the send handle to a device request channel. The
+    /// driver should store this handle and use it to communicate with
+    /// the framework. Its typical use is to register devices with the
+    /// framework, which is usually done in this method. As other
+    /// request types are added, they can be used while the driver is
+    /// running.
+
+    fn create_instance(
         cfg: DriverConfig, drc: RequestChan,
-    ) -> Result<Box<dyn API + Send>>
+    ) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send + 'static>>
     where
         Self: Sized;
 
-    async fn run(&mut self) -> Result<()>;
+    /// Runs the instance of the driver.
+    ///
+    /// Since drivers provide access to hardware, this method should
+    /// never return unless something severe occurs. All drivers are
+    /// monitored by a task and if a driver panics or returns an error
+    /// from this method, it gets reported in the log and then, after
+    /// a short delay, the driver is restarted.
 
-    /// The name of the driver. This should be relatively short, but
-    /// needs to be unique across all drivers.
-    fn name(&self) -> &'static str;
-
-    /// A detailed description of the driver. The format of the string
-    /// should be markdown. The description should include any
-    /// configuration parameter needed in the TOML configuration
-    /// file. It should also mention the endpoints provided by the
-    /// driver.
-    fn description(&self) -> &'static str;
-
-    /// A short, one-line summary of the driver.
-    fn summary(&self) -> &'static str;
+    fn run<'a>(
+        &'a mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Sync + Send + 'a>>;
 }
