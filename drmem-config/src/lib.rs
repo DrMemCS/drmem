@@ -4,10 +4,10 @@ use tracing::Level;
 
 use drmem_api::driver::DriverConfig;
 
-// This module is defined when the SIMPLE backend is specified. There
-// are no config parameters for this backend.
+// This module is defined when no backend is specified. There are no
+// config parameters for this backend.
 
-#[cfg(feature = "simple-backend")]
+#[cfg(not(feature = "redis-backend"))]
 pub mod backend {
     use serde_derive::Deserialize;
 

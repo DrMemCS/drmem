@@ -28,4 +28,3 @@ drmem-api = { path = "../drmem-api", version = "0.1" }
 
 [features]
 redis-backend = []
-simple-backend = []
