@@ -37,7 +37,9 @@ impl State {
     // sync-ing with the state, the state will get updated, but `None`
     // will be returned.
 
-    pub fn off_event(&mut self, stamp: u64, gpm: f64) -> Option<(f64, f64)> {
+    pub fn off_event(
+        &mut self, stamp: u64, gpm: f64,
+    ) -> Option<(u64, f64, f64)> {
         match *self {
             State::Unknown => {
                 info!("sync-ed with OFF state");
@@ -86,12 +88,12 @@ impl State {
                 // ignore it and stay in the ON state.
 
                 if on_time > 500.0 {
-                    let off_time = (stamp - off_time) as f64;
-                    let duty = on_time * 1000.0 / off_time;
+                    let off_time = stamp - off_time;
+                    let duty = on_time * 1000.0 / (off_time as f64);
                     let in_flow = (gpm * duty / 10.0).round() / 100.0;
 
                     *self = State::Off { off_time: stamp };
-                    Some((duty.round() / 10.0, in_flow))
+                    Some((off_time, duty.round() / 10.0, in_flow))
                 } else {
                     warn!("ignoring short ON time -- {:.0} ms", on_time);
                     None
@@ -155,6 +157,29 @@ impl Sump {
         "monitors and computes parameters for a sump pump";
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
+
+    fn elapsed(dur: u64) -> String {
+        match (dur + 500) / 1000 {
+            dur if dur >= 3600 * 24 => {
+                format!(
+                    "{}d{}h{}m{}s",
+                    dur / (3600 * 24),
+                    (dur / 3600) % 24,
+                    (dur / 60) % 60,
+                    dur % 60
+                )
+            }
+            dur if dur >= 3600 => {
+                format!("{}h{}m{}s", dur / 3600, (dur / 60) % 60, dur % 60)
+            }
+            dur if dur >= 60 => {
+                format!("{}m{}s", dur / 60, dur % 60)
+            }
+            dur => {
+                format!("{}s", dur)
+            }
+        }
+    }
 
     // Attempts to pull the hostname/port for the remote process.
 
@@ -276,10 +301,13 @@ impl driver::API for Sump {
                     Ok((stamp, false)) => {
                         let gpm = self.gpm;
 
-                        if let Some((duty, in_flow)) =
-                            self.state.off_event(stamp, gpm)
-                        {
-                            info!("duty: {}%, inflow: {} gpm", duty, in_flow);
+                            if let Some((cycle, duty, in_flow)) =
+                                self.state.off_event(stamp, gpm)
+                            {
+                                info!(
+                                "cycle: {}, duty: {:.1}%, inflow: {:.2} gpm",
+                                Sump::elapsed(cycle), duty, in_flow
+                            );
 
                             (self.d_state)(false.into())?;
                             (self.d_duty)(duty.into())?;
@@ -346,12 +374,12 @@ mod tests {
 
 	state = State::On { off_time: 0, on_time: 540000 };
 
-	assert_eq!(state.off_event(600000, 50.0), Some((10.0, 5.0)));
-	assert_eq!(state, State::Off { off_time: 600000 });
+        assert_eq!(state.off_event(600000, 50.0), Some((600000, 10.0, 5.0)));
+        assert_eq!(state, State::Off { off_time: 600000 });
 
 	state = State::On { off_time: 0, on_time: 54000 };
 
-	assert_eq!(state.off_event(60000, 60.0), Some((10.0, 6.0)));
-	assert_eq!(state, State::Off { off_time: 60000 });
+        assert_eq!(state.off_event(60000, 60.0), Some((60000, 10.0, 6.0)));
+        assert_eq!(state, State::Off { off_time: 60000 });
     }
 }
