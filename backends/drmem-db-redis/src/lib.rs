@@ -84,14 +84,6 @@ fn to_redis(val: &Value) -> Vec<u8> {
             buf.extend_from_slice(s);
             buf
         }
-
-        Value::Rgba(c) => {
-            let mut buf: Vec<u8> = Vec::with_capacity(5);
-
-            buf.push(b'C');
-            buf.extend_from_slice(&c.to_be_bytes());
-            buf
-        }
     }
 }
 
@@ -136,17 +128,6 @@ fn decode_string(buf: &[u8]) -> Result<Value> {
     Err(Error::TypeError)
 }
 
-// Decodes an RGBA value from a 4-byte buffer.
-
-fn decode_color(buf: &[u8]) -> Result<Value> {
-    if buf.len() >= 4 {
-        let buf = buf[..4].try_into().unwrap();
-
-        return Ok(Value::Rgba(u32::from_be_bytes(buf)));
-    }
-    Err(Error::TypeError)
-}
-
 // Returns a `Value` from a `redis::Value`. The only enumeration we
 // support is the `Value::Data` form since that's the one used to
 // return redis data.
@@ -163,7 +144,6 @@ fn from_value(v: &redis::Value) -> Result<Value> {
                 'I' => decode_integer(&buf[1..]),
                 'D' => decode_float(&buf[1..]),
                 'S' => decode_string(&buf[1..]),
-                'C' => decode_color(&buf[1..]),
 
                 // Any other character in the tag field is unknown and
                 // can't be decoded as a `Value`.
