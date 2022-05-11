@@ -176,6 +176,12 @@ impl From<String> for Value {
     }
 }
 
+impl From<&String> for Value {
+    fn from(value: &String) -> Self {
+        Value::Str(value.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
