@@ -125,6 +125,23 @@ pub type Table = HashMap<&'static str, Driver>;
 pub fn load_table() -> Table {
     let mut table = HashMap::new();
 
+    // Load the set-up for the NTP monitor.
+
+    #[cfg(feature = "driver-ntp")]
+    {
+        use drmem_drv_ntp::NtpState;
+
+        table.insert(
+            "ntp",
+            Driver::create(
+                NtpState::NAME,
+                NtpState::SUMMARY,
+                NtpState::DESCRIPTION,
+                <NtpState as API>::create_instance,
+            ),
+        );
+    }
+
     // Load the set-up for the GPIO sump pump monitor.
 
     #[cfg(feature = "driver-sump")]
