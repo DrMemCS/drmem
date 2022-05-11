@@ -6,7 +6,7 @@ use futures::future::Future;
 use std::collections::HashMap;
 use std::pin::Pin;
 use tokio::task::JoinHandle;
-use tracing::{error, info, info_span, warn};
+use tracing::{error, field, info, info_span, warn};
 use tracing_futures::Instrument;
 
 type Factory = fn(
@@ -35,7 +35,8 @@ impl Driver {
     }
 
     async fn manage_instance(
-        factory: Factory, cfg: DriverConfig, req_chan: RequestChan,
+        name: &'static str, factory: Factory, cfg: DriverConfig,
+        req_chan: RequestChan,
     ) -> Result<()> {
         loop {
             // Create a Future that creates an instance of the driver
@@ -50,7 +51,14 @@ impl Driver {
                     // and monitor the return value.
 
                     match tokio::spawn(async move {
-                        instance.run().instrument(info_span!("drvr")).await
+                        instance
+                            .run()
+                            .instrument(info_span!(
+                                "drvr",
+                                name,
+                                cfg = field::Empty
+                            ))
+                            .await
                     })
                     .await
                     {
@@ -101,8 +109,13 @@ impl Driver {
         // It then restarts the driver.
 
         tokio::spawn(
-            Driver::manage_instance(self.factory, cfg, req_chan)
-                .instrument(info_span!("mngr", drvr = self.driver_name))
+            Driver::manage_instance(
+                self.driver_name,
+                self.factory,
+                cfg,
+                req_chan,
+            )
+            .instrument(info_span!("mngr", drvr = self.driver_name)),
         )
     }
 }

@@ -14,7 +14,7 @@ use tokio::{
     },
     time,
 };
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, Span};
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -287,19 +287,33 @@ impl driver::API for Sump {
     fn run<'a>(
         &'a mut self,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + 'a>> {
-        let fut = async {
-            (self.d_service)(true.into())?;
+        let fut =
+            async {
+                // Record the peer's address in the "cfg" field of the
+                // span.
 
-            loop {
-                match self.get_reading().await {
-                    Ok((stamp, true)) => {
-                        if self.state.on_event(stamp) {
-                            (self.d_state)(true.into())?;
+                {
+                    let addr = self
+                        .rx
+                        .peer_addr()
+                        .map(|v| format!("{}", v))
+                        .unwrap_or_else(|_| String::from("**unknown**"));
+
+                    Span::current().record("cfg", &addr.as_str());
+                }
+
+                (self.d_service)(true.into())?;
+
+                loop {
+                    match self.get_reading().await {
+                        Ok((stamp, true)) => {
+                            if self.state.on_event(stamp) {
+                                (self.d_state)(true.into())?;
+                            }
                         }
-                    }
 
-                    Ok((stamp, false)) => {
-                        let gpm = self.gpm;
+                        Ok((stamp, false)) => {
+                            let gpm = self.gpm;
 
                             if let Some((cycle, duty, in_flow)) =
                                 self.state.off_event(stamp, gpm)
@@ -309,23 +323,23 @@ impl driver::API for Sump {
                                 Sump::elapsed(cycle), duty, in_flow
                             );
 
+                                (self.d_state)(false.into())?;
+                                (self.d_duty)(duty.into())?;
+                                (self.d_inflow)(in_flow.into())?;
+                            }
+                        }
+
+                        Err(e) => {
+                            error!("couldn't read sump state -- {:?}", e);
                             (self.d_state)(false.into())?;
-                            (self.d_duty)(duty.into())?;
-                            (self.d_inflow)(in_flow.into())?;
+                            (self.d_service)(false.into())?;
+                            break Err(Error::MissingPeer(String::from(
+                                "sump pump",
+                            )));
                         }
                     }
-
-                    Err(e) => {
-                        error!("couldn't read sump state -- {:?}", e);
-                        (self.d_state)(false.into())?;
-                        (self.d_service)(false.into())?;
-                        break Err(Error::MissingPeer(String::from(
-                            "sump pump",
-                        )));
-                    }
                 }
-            }
-        };
+            };
 
         Box::pin(fut)
     }
