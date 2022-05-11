@@ -252,8 +252,8 @@ impl driver::API for Sump {
             let addr = Sump::get_cfg_address(&cfg)?;
             let gpm = Sump::get_cfg_gpm(&cfg)?;
 
-	    // Connect with the remote process that is connected to
-	    // the sump pump.
+            // Connect with the remote process that is connected to
+            // the sump pump.
 
             let (rx, _tx) = Sump::connect(&addr).await?.into_split();
 
@@ -337,47 +337,77 @@ mod tests {
 
     #[test]
     fn test_states() {
-	let mut state = State::Unknown;
+        let mut state = State::Unknown;
 
-	assert_eq!(state.on_event(0), false);
-	assert_eq!(state, State::Unknown);
+        assert_eq!(state.on_event(0), false);
+        assert_eq!(state, State::Unknown);
 
-	state = State::Off { off_time: 100 };
+        state = State::Off { off_time: 100 };
 
-	assert_eq!(state.on_event(0), false);
-	assert_eq!(state, State::Off { off_time: 100 });
-	assert_eq!(state.on_event(200), true);
-	assert_eq!(state, State::On { off_time: 100, on_time: 200 });
+        assert_eq!(state.on_event(0), false);
+        assert_eq!(state, State::Off { off_time: 100 });
+        assert_eq!(state.on_event(200), true);
+        assert_eq!(
+            state,
+            State::On {
+                off_time: 100,
+                on_time: 200
+            }
+        );
 
-	assert_eq!(state.on_event(200), false);
-	assert_eq!(state, State::On { off_time: 100, on_time: 200 });
+        assert_eq!(state.on_event(200), false);
+        assert_eq!(
+            state,
+            State::On {
+                off_time: 100,
+                on_time: 200
+            }
+        );
 
-	state = State::Unknown;
+        state = State::Unknown;
 
-	assert_eq!(state.off_event(1000, 50.0), None);
-	assert_eq!(state, State::Off { off_time: 1000 });
-	assert_eq!(state.off_event(1100, 50.0), None);
-	assert_eq!(state, State::Off { off_time: 1000 });
+        assert_eq!(state.off_event(1000, 50.0), None);
+        assert_eq!(state, State::Off { off_time: 1000 });
+        assert_eq!(state.off_event(1100, 50.0), None);
+        assert_eq!(state, State::Off { off_time: 1000 });
 
-	state = State::On { off_time: 1000, on_time: 101000 };
+        state = State::On {
+            off_time: 1000,
+            on_time: 101000,
+        };
 
-	assert_eq!(state.off_event(1000, 50.0), None);
-	assert_eq!(state, State::Off { off_time: 1000 });
+        assert_eq!(state.off_event(1000, 50.0), None);
+        assert_eq!(state, State::Off { off_time: 1000 });
 
-	state = State::On { off_time: 1000, on_time: 101000 };
+        state = State::On {
+            off_time: 1000,
+            on_time: 101000,
+        };
 
-	assert_eq!(state.off_event(101500, 50.0), None);
-	assert_eq!(state, State::On { off_time: 1000, on_time: 101000 });
+        assert_eq!(state.off_event(101500, 50.0), None);
+        assert_eq!(
+            state,
+            State::On {
+                off_time: 1000,
+                on_time: 101000
+            }
+        );
 
-	assert!(state.off_event(101501, 50.0).is_some());
-	assert_eq!(state, State::Off { off_time: 101501 });
+        assert!(state.off_event(101501, 50.0).is_some());
+        assert_eq!(state, State::Off { off_time: 101501 });
 
-	state = State::On { off_time: 0, on_time: 540000 };
+        state = State::On {
+            off_time: 0,
+            on_time: 540000,
+        };
 
         assert_eq!(state.off_event(600000, 50.0), Some((600000, 10.0, 5.0)));
         assert_eq!(state, State::Off { off_time: 600000 });
 
-	state = State::On { off_time: 0, on_time: 54000 };
+        state = State::On {
+            off_time: 0,
+            on_time: 54000,
+        };
 
         assert_eq!(state.off_event(60000, 60.0), Some((60000, 10.0, 6.0)));
         assert_eq!(state, State::Off { off_time: 60000 });
