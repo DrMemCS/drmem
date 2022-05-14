@@ -39,3 +39,19 @@ The driver creates these devices:
 | `state`   | bool, RO |       | Set to `true` when the pump is running.                   |
 | `duty`    | f64, RO  | %     | Indicates duty cycle of last cycle.                       |
 | `in-flow` | f64, RO  | gpm   | Indicates the in-flow rate for the last cycle.            |
+
+## Caveats
+
+The remote process polls the state of the pump at 20Hz so the
+timestamps will have 50 ms accuracy. Unfortunately the current switch
+seems to have a little slop in how quickly it turns on. Depending upon
+how many 60 hz cycles it takes to activate the relay, it could add 30
+ms -- or more -- of latency. The relay in the current switch probably
+has some delays, too. Lastly, it has been observed that long cycle
+times (> 5 minutes) can vary by 10 seconds or more! This is probably
+due to, when the pit fills slowly, the float and the attached switch
+having tremendous slop when activating.
+
+The takeaway is the measurements of the on/off times are probably
+accurate to around 100 ms. But the float adds a lot of inaccuracy to
+the measurements.
