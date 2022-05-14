@@ -1,3 +1,5 @@
+# drmem-drv-sump
+
 This driver monitors the state of a sump pump through a custom,
 non-commercial interface and updates a set of devices based on its
 behavior.
@@ -13,7 +15,7 @@ cycles and incoming flows rates for the sump pit each time the pump
 turns off. The `state`, `duty`, and `in-flow` parameters are updated
 simultaneously and, hence will have the same timestamps.
 
-# Configuration
+## Configuration
 
 The driver needs to know where to access the remote service. It also
 needs to know how to scale the results. Two driver arguments are used
@@ -27,7 +29,7 @@ to specify this information:
   table indicating the flow rate based on the rise of the discharge
   pipe.
 
-# Devices
+## Devices
 
 The driver creates these devices:
 
