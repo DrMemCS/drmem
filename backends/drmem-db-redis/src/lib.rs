@@ -1,6 +1,11 @@
 use async_trait::async_trait;
-use drmem_api::{types::{device::Value, Error}, device::Device, Store, Result, driver::{ReportReading, RxDeviceSetting}};
-use std::collections::HashMap;
+use drmem_api::{
+    driver::{ReportReading, RxDeviceSetting},
+    types::{device::Value, Error},
+    Result, Store,
+};
+use drmem_config::backend;
+use futures_util::FutureExt;
 use std::convert::TryInto;
 use tracing::{debug, info, warn};
 
@@ -17,37 +22,36 @@ use tracing::{debug, info, warn};
 // `redis` crate. Since we only need to do the translationin this
 // module, this function will be the translater.
 
-fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
-    match res {
-        Ok(res) => Ok(res),
-        Err(err) => match err.kind() {
-            redis::ErrorKind::ResponseError
-            | redis::ErrorKind::ClusterDown
-            | redis::ErrorKind::CrossSlot
-            | redis::ErrorKind::MasterDown
-            | redis::ErrorKind::IoError => Err(Error::DbCommunicationError),
+fn xlat_err(e: redis::RedisError) -> Error {
+    match e.kind() {
+        redis::ErrorKind::ResponseError
+        | redis::ErrorKind::ClusterDown
+        | redis::ErrorKind::CrossSlot
+        | redis::ErrorKind::MasterDown
+        | redis::ErrorKind::IoError => Error::DbCommunicationError,
 
-            redis::ErrorKind::AuthenticationFailed
-            | redis::ErrorKind::InvalidClientConfig => {
-                Err(Error::AuthenticationError)
-            }
+        redis::ErrorKind::AuthenticationFailed
+        | redis::ErrorKind::InvalidClientConfig => Error::AuthenticationError,
 
-            redis::ErrorKind::TypeError => Err(Error::TypeError),
+        redis::ErrorKind::TypeError => Error::TypeError,
 
-            redis::ErrorKind::ExecAbortError
-            | redis::ErrorKind::BusyLoadingError
-            | redis::ErrorKind::TryAgain
-            | redis::ErrorKind::ClientError
-            | redis::ErrorKind::ExtensionError
-            | redis::ErrorKind::ReadOnly => Err(Error::OperationError),
+        redis::ErrorKind::ExecAbortError
+        | redis::ErrorKind::BusyLoadingError
+        | redis::ErrorKind::TryAgain
+        | redis::ErrorKind::ClientError
+        | redis::ErrorKind::ExtensionError
+        | redis::ErrorKind::ReadOnly => Error::OperationError,
 
-            redis::ErrorKind::NoScriptError
-            | redis::ErrorKind::Moved
-            | redis::ErrorKind::Ask => Err(Error::NotFound),
+        redis::ErrorKind::NoScriptError
+        | redis::ErrorKind::Moved
+        | redis::ErrorKind::Ask => Error::NotFound,
 
-            _ => Err(Error::UnknownError),
-        },
+        _ => Error::UnknownError,
     }
+}
+
+fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
+    res.map_err(xlat_err)
 }
 
 // Encodes a `Value` into a binary which gets stored in redis. This
@@ -159,21 +163,16 @@ fn from_value(v: &redis::Value) -> Result<Value> {
 
 /// Defines a context that uses redis for the back-end storage.
 pub struct RedisStore {
-    /// The base name used by the instance of the driver. Defining
-    /// `Device` instances will add the last segment to the name.
-    base: String,
-
     /// This connection is used for interacting with the database.
-    db_con: redis::aio::Connection,
+    db_con: redis::aio::MultiplexedConnection,
 }
 
 impl RedisStore {
     // Creates a connection to redis.
 
     async fn make_connection(
-        cfg: &drmem_config::backend::Config, name: Option<String>,
-        pword: Option<String>,
-    ) -> Result<redis::aio::Connection> {
+        cfg: &backend::Config, name: Option<String>, pword: Option<String>,
+    ) -> Result<redis::aio::MultiplexedConnection> {
         use redis::{ConnectionAddr, ConnectionInfo, RedisConnectionInfo};
 
         let addr = cfg.get_addr();
@@ -189,7 +188,7 @@ impl RedisStore {
 
         let client = redis::Client::open(ci).unwrap();
 
-        xlat_result(client.get_tokio_connection().await)
+        xlat_result(client.get_multiplexed_tokio_connection().await)
     }
 
     /// Builds a new backend context which interacts with `redis`.
@@ -198,131 +197,151 @@ impl RedisStore {
     /// used for credentials when connecting to `redis`.
 
     pub async fn new(
-        base_name: &str, cfg: &drmem_config::backend::Config,
-        name: Option<String>, pword: Option<String>,
+        cfg: &backend::Config, name: Option<String>, pword: Option<String>,
     ) -> Result<Self> {
         let db_con = RedisStore::make_connection(cfg, name, pword).await?;
 
-        Ok(RedisStore {
-            base: String::from(base_name),
-            db_con,
-        })
+        Ok(RedisStore { db_con })
     }
 
     // Returns the key that returns meta information for the device.
 
     fn info_key(&self, name: &str) -> String {
-        format!("{}:{}#info", &self.base, &name)
+        format!("{}#info", name)
     }
 
     // Returns the key that returns time-series information for the
     // device.
 
     fn history_key(&self, name: &str) -> String {
-        format!("{}:{}#hist", &self.base, &name)
+        format!("{}#hist", name)
     }
 
     // Does some sanity checks on a device to see if it appears to be
     // valid.
 
-    async fn get_device<T: Into<Value> + Send>(
-        &mut self, name: &str,
-    ) -> Result<Device<T>> {
-        let info_key = self.info_key(name);
-        let data_type: String = xlat_result(
-            redis::cmd("TYPE")
-                .arg(&info_key)
-                .query_async(&mut self.db_con)
-                .await,
-        )?;
+    async fn validate_device(&mut self, name: &str) -> Result<()> {
+        // This section verifies the device has a NAME#info key that
+        // is a hash map.
 
-        // If the info key is a "hash" type, we assume the device has
-        // been created and maintained properly.
-
-        if data_type.as_str() == "hash" {
-            let mut result: HashMap<String, redis::Value> = xlat_result(
-                redis::Cmd::hgetall(&info_key)
+        {
+            let info_key = self.info_key(name);
+            let result: Result<String> = xlat_result(
+                redis::cmd("TYPE")
+                    .arg(&info_key)
                     .query_async(&mut self.db_con)
                     .await,
-            )?;
+            );
 
-            // Convert the HaspMap<String, redis::Value> into a
-            // HashMap<String, Value>. As it converts each entry, it
-            // checks to see if the associated redis::Value can be
-            // translated. If not, it is ignored.
-
-            let fields = result
-                .drain()
-                .filter_map(|(k, v)| {
-                    if let Ok(v) = from_value(&v) {
-                        Some((k, v))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            Device::create_from_map(name, fields)
-        } else {
-            Err(Error::NotFound)
+            match result {
+                Ok(data_type) if data_type.as_str() == "hash" => (),
+                Ok(_) => {
+                    warn!("{} is of the wrong key type", &info_key);
+                    return Err(Error::TypeError);
+                }
+                Err(_) => {
+                    warn!("{} doesn't exist", &info_key);
+                    return Err(Error::NotFound);
+                }
+            }
         }
+
+        // This section verifies the device has a NAME#hist key that
+        // is a time-series stream.
+
+        {
+            let hist_key = self.history_key(name);
+            let result: Result<String> = xlat_result(
+                redis::cmd("TYPE")
+                    .arg(&hist_key)
+                    .query_async(&mut self.db_con)
+                    .await,
+            );
+
+            match result {
+                Ok(data_type) if data_type.as_str() == "stream" => Ok(()),
+                Ok(_) => {
+                    warn!("{} is of the wrong key type", &hist_key);
+                    Err(Error::TypeError)
+                }
+                Err(_) => {
+                    warn!("{} doesn't exist", &hist_key);
+                    Err(Error::NotFound)
+                }
+            }
+        }
+    }
+
+    // Initializes the state of a DrMem device in the REDIS database.
+    // It creates two keys: one key is appended with "#info" and
+    // addresses a hash table which will contain device meta
+    // information; the other key is appended with "#hist" and is a
+    // time-series stream which holds recent history of a device's
+    // values.
+
+    async fn init_device(&mut self, name: &str) -> Result<()> {
+        debug!("initializing {}", name);
+
+        let hist_key = self.history_key(name);
+        let info_key = self.info_key(name);
+
+        // Create a command pipeline that deletes the two keys and
+        // then creates them properly with default values.
+
+        let fields: Vec<(String, Vec<u8>)> = vec![];
+
+        xlat_result(
+            redis::pipe()
+                .atomic()
+                .del(&hist_key)
+                .xadd(&hist_key, "1", &[("value", to_redis(&0i64.into()))])
+                .xdel(&hist_key, &["1"])
+                .del(&info_key)
+                .hset_multiple(&info_key, &fields)
+                .query_async(&mut self.db_con)
+                .await,
+        )
+    }
+
+    fn mk_report_func(&self, name: &str) -> ReportReading {
+        let hist_key = self.history_key(name);
+        let db_con = self.db_con.clone();
+
+        Box::new(move |v| {
+            let mut db_con = db_con.clone();
+            let hist_key = hist_key.clone();
+            let data = [("value", to_redis(&v))];
+
+            Box::pin(async move {
+                redis::pipe()
+                    .xadd(&hist_key, "*", &data)
+                    .query_async(&mut db_con)
+                    .map(xlat_result)
+                    .await
+            })
+        })
     }
 }
 
 #[async_trait]
 impl Store for RedisStore {
-
     /// Registers a device in the redis backend.
 
     async fn register_read_only_device(
         &mut self, name: &str,
     ) -> Result<ReportReading> {
-        let dev_name = format!("{}:{}", &self.base, &name);
+        debug!("registering '{}'", name);
 
-        debug!("defining '{}'", &dev_name);
+        if self.validate_device(name).await.is_err() {
+            self.init_device(name).await?;
 
-        match self.get_device(name).await {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                warn!("'{}' isn't defined properly -- {:?}", &dev_name, e);
-
-                let hist_key = self.history_key(name);
-                let info_key = self.info_key(name);
-                let dev = Device::create(name, String::from("summary"), Some(String::from("units")));
-
-                let temp = dev.to_vec();
-                let fields: Vec<(String, Vec<u8>)> = temp
-                    .iter()
-                    .map(|(k, v)| (String::from(*k), to_redis(v)))
-                    .collect();
-
-                // Create a command pipeline that deletes the two keys
-                // and then creates them properly with default values.
-
-                let _: () = xlat_result(
-                    redis::pipe()
-                        .atomic()
-                        .del(&hist_key)
-                        .xadd(
-                            &hist_key,
-                            "1",
-                            &[("value", to_redis(&0i64.into()))],
-                        )
-                        .xdel(&hist_key, &["1"])
-                        .del(&info_key)
-                        .hset_multiple(&info_key, &fields)
-                        .query_async(&mut self.db_con)
-                        .await,
-                )?;
-
-                info!("'{}' has been successfully created", &dev_name);
-                Ok(dev)
-            }
+            info!("'{}' has been successfully created", name);
         }
+        Ok(self.mk_report_func(name))
     }
 
     async fn register_read_write_device(
-        &mut self, name: &str,
+        &mut self, _name: &str,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
         //let mut pipe = redis::pipe();
         //let mut cmd = pipe.atomic();
@@ -332,12 +351,12 @@ impl Store for RedisStore {
 
         //    cmd = cmd.xadd(key, "*", &[("value", to_redis(val))]);
 
-            // TODO: need to check alarm limits -- and add the command
-            // to announce it -- as the command is built-up.
+        // TODO: need to check alarm limits -- and add the command
+        // to announce it -- as the command is built-up.
         //}
 
         //xlat_result(cmd.query_async(&mut self.db_con).await)
-	unimplemented!()
+        unimplemented!()
     }
 }
 
@@ -349,6 +368,7 @@ impl Store for RedisStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use drmem_api::types::device;
     use redis::Value;
 
     // We only want to convert Value::Data() forms. These tests make
@@ -375,11 +395,11 @@ mod tests {
     #[tokio::test]
     async fn test_bool_decoder() {
         assert_eq!(
-            Ok(Value::Bool(false)),
+            Ok(device::Value::Bool(false)),
             from_value(&Value::Data(vec!['F' as u8]))
         );
         assert_eq!(
-            Ok(Value::Bool(true)),
+            Ok(device::Value::Bool(true)),
             from_value(&Value::Data(vec!['T' as u8]))
         );
     }
@@ -388,8 +408,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_bool_encoder() {
-        assert_eq!(vec!['F' as u8], to_redis(&Value::Bool(false)));
-        assert_eq!(vec!['T' as u8], to_redis(&Value::Bool(true)));
+        assert_eq!(vec!['F' as u8], to_redis(&device::Value::Bool(false)));
+        assert_eq!(vec!['T' as u8], to_redis(&device::Value::Bool(true)));
     }
 
     const INT_TEST_CASES: &[(i64, &[u8])] = &[
@@ -424,7 +444,7 @@ mod tests {
     #[tokio::test]
     async fn test_int_encoder() {
         for (v, rv) in INT_TEST_CASES {
-            assert_eq!(*rv, to_redis(&Value::Int(*v)));
+            assert_eq!(*rv, to_redis(&device::Value::Int(*v)));
         }
     }
 
@@ -432,38 +452,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_int_decoder() {
+        assert!(from_value(&Value::Data(vec![])).is_err());
+        assert!(from_value(&Value::Data(vec!['I' as u8])).is_err());
+        assert!(from_value(&Value::Data(vec!['I' as u8, 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec!['I' as u8, 0u8, 0u8])).is_err());
+        assert!(
+            from_value(&Value::Data(vec!['I' as u8, 0u8, 0u8, 0u8])).is_err()
+        );
+
         for (v, rv) in INT_TEST_CASES {
             let data = Value::Data(rv.to_vec());
 
-            assert_eq!(Ok(Value::Int(*v)), from_value(&data));
+            assert_eq!(Ok(device::Value::Int(*v)), from_value(&data));
         }
     }
+}
 
-    const RGBA_TEST_CASES: &[(u32, &[u8])] = &[
-        (0, &['C' as u8, 0x00, 0x00, 0x00, 0x00]),
-        (0xff, &['C' as u8, 0x00, 0x00, 0x00, 0xff]),
-        (0xff00, &['C' as u8, 0x00, 0x00, 0xff, 0x00]),
-        (0xff0000, &['C' as u8, 0x00, 0xff, 0x00, 0x00]),
-        (0xff000000, &['C' as u8, 0xff, 0x00, 0x00, 0x00]),
-    ];
-
-    // Test correct encoding of Value::Rgba values.
-
-    #[tokio::test]
-    async fn test_rgb_encoder() {
-        for (v, rv) in RGBA_TEST_CASES {
-            assert_eq!(*rv, to_redis(&Value::Rgba(*v)));
-        }
-    }
-
-    // Test correct decoding of Value::Rgba values.
-
-    #[tokio::test]
-    async fn test_rgb_decoder() {
-        for (v, rv) in RGBA_TEST_CASES {
-            let data = Value::Data(rv.to_vec());
-
-            assert_eq!(Ok(Value::Rgba(*v)), from_value(&data));
-        }
-    }
+pub async fn open(cfg: &backend::Config) -> Result<impl Store> {
+    RedisStore::new(cfg, None, None).await
 }

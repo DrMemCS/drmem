@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 
-pub mod device;
 pub mod types;
 
 /// A `Result` type where the error value is a value from

@@ -11,7 +11,7 @@ use drmem_api::driver::DriverConfig;
 pub mod backend {
     use serde_derive::Deserialize;
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Clone)]
     pub struct Config {}
 
     impl<'a> Config {
@@ -32,7 +32,7 @@ pub mod backend {
     use serde_derive::Deserialize;
     use std::net::SocketAddr;
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Clone)]
     pub struct Config {
         pub addr: Option<SocketAddr>,
         pub dbn: Option<i64>,

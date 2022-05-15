@@ -92,9 +92,9 @@ optional = true
 # These are features that can be enabled for drmem.
 
 [features]
-default = ["simple-backend", "driver-ntp", "driver-sump"]
+default = ["redis-backend", "driver-ntp", "driver-sump"]
 simple-backend = ["drmem-db-simple"]
-#redis-backend = ["drmem-db-redis"]
+redis-backend = ["drmem-db-redis"]
 graphql = ["hyper", "juniper", "juniper_hyper"]
 grpc = ["tonic", "prost", "tonic-build", "tokio-stream"]
 

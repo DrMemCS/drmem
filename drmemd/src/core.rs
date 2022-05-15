@@ -1,4 +1,5 @@
 use drmem_api::{driver, types::Error, Result, Store};
+use drmem_config::{backend, Config};
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
@@ -6,12 +7,16 @@ use tokio::{
 use tracing::{info, info_span, warn};
 use tracing_futures::Instrument;
 
-// If the simple-backend feature is enabled, we define the `store`
-// module and fill it.
+// Define a `store` module that pulls in the appropriate backend.
 
-#[cfg(feature = "simple-backend")]
+#[cfg(not(feature = "redis-backend"))]
 mod store {
     pub use drmem_db_simple::open;
+}
+
+#[cfg(feature = "redis-backend")]
+mod store {
+    pub use drmem_db_redis::open;
 }
 
 /// Holds the state of the core task in the framework.
@@ -25,8 +30,8 @@ struct State {
 
 impl State {
     /// Creates an initialized state for the core task.
-    async fn create() -> Result<Self> {
-        let backend = Box::new(store::open().await?);
+    async fn create(cfg: backend::Config) -> Result<Self> {
+        let backend = Box::new(store::open(&cfg).await?);
 
         Ok(State { backend })
     }
@@ -82,17 +87,19 @@ impl State {
 }
 
 pub async fn start(
+    cfg: &Config,
 ) -> Result<(mpsc::Sender<driver::Request>, JoinHandle<Result<()>>)> {
     // Create a channel that drivers can use to make requests to the
     // framework. This task will hang onto the Receiver end and each
     // driver will get a .clone() of the transmit handle.
 
     let (tx_drv_req, rx_drv_req) = mpsc::channel(10);
+    let be_cfg = cfg.get_backend().clone();
 
     Ok((
         tx_drv_req,
         tokio::spawn(async {
-            let state = State::create().await?;
+            let state = State::create(be_cfg).await?;
 
             state
                 .run(rx_drv_req)

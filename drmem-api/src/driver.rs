@@ -3,7 +3,7 @@
 
 use crate::types::{device::Value, Error};
 use std::future::Future;
-use std::pin::Pin;
+use std::{pin::Pin, result};
 use tokio::sync::{mpsc, oneshot};
 use toml::value;
 
@@ -13,7 +13,17 @@ pub type DriverConfig = value::Table;
 pub type TxDeviceSetting = mpsc::Sender<Value>;
 pub type RxDeviceSetting = mpsc::Receiver<Value>;
 
-pub type ReportReading = Box<dyn Fn(Value) -> Result<()> + Send + Sync>;
+pub type ReportReading = Box<
+    dyn Fn(
+            Value,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = result::Result<(), Error>> + Send + 'static,
+            >,
+        > + Send
+        + Sync
+        + 'static,
+>;
 
 /// Defines the requests that can be sent to core.
 pub enum Request {
@@ -203,5 +213,5 @@ pub trait API: Send {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Sync + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
 }

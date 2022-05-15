@@ -15,6 +15,7 @@ use drmem_api::{
     types::{device::Value, Error},
     Result, Store,
 };
+use futures_util::future;
 use std::collections::{hash_map, HashMap};
 use tokio::sync::{broadcast, mpsc};
 
@@ -27,6 +28,15 @@ struct SimpleStore(HashMap<String, DeviceInfo>);
 
 pub async fn open() -> Result<impl Store> {
     Ok(SimpleStore(HashMap::new()))
+}
+
+fn mk_report_func(tx: broadcast::Sender<Value>, name: &str) -> ReportReading {
+    let err_msg = format!("can't update {}", name);
+
+    Box::new(move |v| match tx.send(v) {
+        Ok(_) => Box::pin(future::ok(())),
+        Err(_) => Box::pin(future::err(Error::MissingPeer(err_msg.clone()))),
+    })
 }
 
 #[async_trait]
@@ -60,10 +70,7 @@ impl Store for SimpleStore {
             // Create and return the closure that the driver will use
             // to report updates.
 
-            Ok(Box::new(move |v| {
-                let _ = tx.send(v);
-                Ok(())
-            }))
+            Ok(mk_report_func(tx, name))
         } else {
             Err(Error::InUse)
         }
@@ -101,14 +108,7 @@ impl Store for SimpleStore {
             // Create and return the closure that the driver will use
             // to report updates.
 
-            Ok((
-                Box::new(move |v| {
-                    let _ = tx.send(v);
-                    Ok(())
-                }),
-                rx_sets,
-                None,
-            ))
+            Ok((mk_report_func(tx, name), rx_sets, None))
         } else {
             Err(Error::InUse)
         }

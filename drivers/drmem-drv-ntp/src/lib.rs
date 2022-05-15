@@ -342,7 +342,7 @@ impl driver::API for NtpState {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         let fut = async {
             // Record the peer's address in the "cfg" field of the
             // span.
@@ -377,23 +377,23 @@ impl driver::API for NtpState {
                             );
                             info = inf;
                             warning_printed = false;
-                            (self.d_source)(info.get_host().into())?;
-                            (self.d_offset)(info.get_offset().into())?;
-                            (self.d_delay)(info.get_delay().into())?;
-                            (self.d_state)(true.into())?;
+                            (self.d_source)(info.get_host().into()).await?;
+                            (self.d_offset)(info.get_offset().into()).await?;
+                            (self.d_delay)(info.get_delay().into()).await?;
+                            (self.d_state)(true.into()).await?;
                         }
                     } else {
                         if !warning_printed {
                             warn!("no synced host information found");
                             warning_printed = true;
-                            (self.d_state)(false.into())?;
+                            (self.d_state)(false.into()).await?;
                         }
                     }
                 } else {
                     if !warning_printed {
                         warn!("we're not synced to any host");
                         warning_printed = true;
-                        (self.d_state)(false.into())?;
+                        (self.d_state)(false.into()).await?;
                     }
                 }
             }

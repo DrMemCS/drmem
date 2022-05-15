@@ -267,7 +267,7 @@ impl driver::API for Sump {
             // Mark the connection as 'down'. Once data starts
             // arriving, this device will be set to `true`.
 
-            d_service(false.into())?;
+            d_service(false.into()).await?;
 
             Ok(Box::new(Sump {
                 state: State::Unknown,
@@ -286,7 +286,7 @@ impl driver::API for Sump {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         let fut =
             async {
                 // Record the peer's address in the "cfg" field of the
@@ -302,13 +302,13 @@ impl driver::API for Sump {
                     Span::current().record("cfg", &addr.as_str());
                 }
 
-                (self.d_service)(true.into())?;
+                (self.d_service)(true.into()).await?;
 
                 loop {
                     match self.get_reading().await {
                         Ok((stamp, true)) => {
                             if self.state.on_event(stamp) {
-                                (self.d_state)(true.into())?;
+                                (self.d_state)(true.into()).await?;
                             }
                         }
 
@@ -323,16 +323,16 @@ impl driver::API for Sump {
                                 Sump::elapsed(cycle), duty, in_flow
                             );
 
-                                (self.d_state)(false.into())?;
-                                (self.d_duty)(duty.into())?;
-                                (self.d_inflow)(in_flow.into())?;
+                                (self.d_state)(false.into()).await?;
+                                (self.d_duty)(duty.into()).await?;
+                                (self.d_inflow)(in_flow.into()).await?;
                             }
                         }
 
                         Err(e) => {
                             error!("couldn't read sump state -- {:?}", e);
-                            (self.d_state)(false.into())?;
-                            (self.d_service)(false.into())?;
+                            (self.d_state)(false.into()).await?;
+                            (self.d_service)(false.into()).await?;
                             break Err(Error::MissingPeer(String::from(
                                 "sump pump",
                             )));
