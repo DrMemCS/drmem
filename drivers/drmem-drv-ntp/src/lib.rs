@@ -55,7 +55,7 @@ mod server {
         // method.
 
         fn update_host_info(mut self, item: &str) -> Info {
-            match item.split("=").collect::<Vec<&str>>()[..] {
+            match item.split('=').collect::<Vec<&str>>()[..] {
                 ["srcadr", adr] => self.0 .0 = String::from(adr),
                 ["offset", offset] => {
                     self.0 .1 = offset.parse::<f64>().unwrap()
@@ -67,12 +67,18 @@ mod server {
         }
     }
 
+    impl Default for Info {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     // Returns an `Info` type that has been initialized with the
     // parameters defined in `input`.
 
     pub fn decode_info(input: &str) -> Info {
         input
-            .split(",")
+            .split(',')
             .filter(|v| !v.is_empty())
             .map(|v| v.trim_start())
             .fold(Info::new(), Info::update_host_info)
@@ -179,7 +185,7 @@ impl NtpState {
             }
             Err(e) => error!("couldn't send request -> {}", e),
         }
-        return None;
+        None
     }
 
     // Requests information about a given association ID. An `Info`
@@ -299,7 +305,7 @@ impl NtpState {
                 }
             }
         }
-        return None;
+        None
     }
 }
 
@@ -382,19 +388,15 @@ impl driver::API for NtpState {
                             (self.d_delay)(info.get_delay().into()).await?;
                             (self.d_state)(true.into()).await?;
                         }
-                    } else {
-                        if !warning_printed {
-                            warn!("no synced host information found");
-                            warning_printed = true;
-                            (self.d_state)(false.into()).await?;
-                        }
-                    }
-                } else {
-                    if !warning_printed {
-                        warn!("we're not synced to any host");
+                    } else if !warning_printed {
+                        warn!("no synced host information found");
                         warning_printed = true;
                         (self.d_state)(false.into()).await?;
                     }
+                } else if !warning_printed {
+                    warn!("we're not synced to any host");
+                    warning_printed = true;
+                    (self.d_state)(false.into()).await?;
                 }
             }
         };

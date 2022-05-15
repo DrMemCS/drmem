@@ -30,7 +30,7 @@ pub mod backend {
 #[cfg(feature = "redis-backend")]
 pub mod backend {
     use serde_derive::Deserialize;
-    use std::net::SocketAddr;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     #[derive(Deserialize, Clone)]
     pub struct Config {
@@ -47,7 +47,9 @@ pub mod backend {
         }
 
         pub fn get_addr(&'a self) -> SocketAddr {
-            self.addr.unwrap_or("127.0.0.1:6379".parse().unwrap())
+            self.addr.unwrap_or_else(|| {
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6379)
+            })
         }
 
         #[cfg(debug_assertions)]
