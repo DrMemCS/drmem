@@ -325,10 +325,12 @@ impl driver::API for NtpState {
                 if sock.connect(addr).await.is_ok() {
                     // Define the devices managed by this driver.
 
-                    let d_state = core.add_ro_device("state").await?;
-                    let d_source = core.add_ro_device("source").await?;
-                    let d_offset = core.add_ro_device("offset").await?;
-                    let d_delay = core.add_ro_device("delay").await?;
+                    let d_state = core.add_ro_device("state", None).await?;
+                    let d_source = core.add_ro_device("source", None).await?;
+                    let d_offset =
+                        core.add_ro_device("offset", Some("ms")).await?;
+                    let d_delay =
+                        core.add_ro_device("delay", Some("ms")).await?;
 
                     return Ok(Box::new(NtpState {
                         sock,

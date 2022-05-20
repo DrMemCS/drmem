@@ -279,7 +279,9 @@ impl RedisStore {
     // time-series stream which holds recent history of a device's
     // values.
 
-    async fn init_device(&mut self, name: &str) -> Result<()> {
+    async fn init_device(
+        &mut self, name: &str, units: &Option<String>,
+    ) -> Result<()> {
         debug!("initializing {}", name);
 
         let hist_key = self.history_key(name);
@@ -288,7 +290,11 @@ impl RedisStore {
         // Create a command pipeline that deletes the two keys and
         // then creates them properly with default values.
 
-        let fields: Vec<(String, Vec<u8>)> = vec![];
+        let fields: Vec<(&str, String)> = if let Some(units) = units {
+            vec![("units", units.clone())]
+        } else {
+            vec![]
+        };
 
         xlat_result(
             redis::pipe()
@@ -328,12 +334,12 @@ impl Store for RedisStore {
     /// Registers a device in the redis backend.
 
     async fn register_read_only_device(
-        &mut self, name: &str,
+        &mut self, name: &str, units: &Option<String>,
     ) -> Result<ReportReading> {
-        debug!("registering '{}'", name);
+        debug!("registering '{}' as read-only", name);
 
         if self.validate_device(name).await.is_err() {
-            self.init_device(name).await?;
+            self.init_device(name, units).await?;
 
             info!("'{}' has been successfully created", name);
         }
@@ -341,15 +347,15 @@ impl Store for RedisStore {
     }
 
     async fn register_read_write_device(
-        &mut self, _name: &str,
+        &mut self, name: &str, units: &Option<String>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
-        //let mut pipe = redis::pipe();
-        //let mut cmd = pipe.atomic();
+        debug!("registering '{}' as read-write", name);
 
-        //for (dev, val) in values {
-        //    let key = self.history_key(dev);
+        if self.validate_device(name).await.is_err() {
+            self.init_device(name, units).await?;
 
-        //    cmd = cmd.xadd(key, "*", &[("value", to_redis(val))]);
+            info!("'{}' has been successfully created", name);
+        }
 
         // TODO: need to check alarm limits -- and add the command
         // to announce it -- as the command is built-up.

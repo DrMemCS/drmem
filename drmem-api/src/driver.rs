@@ -33,6 +33,7 @@ pub enum Request {
     /// the hardware.
     AddReadonlyDevice {
         dev_name: String,
+        dev_units: Option<String>,
         rpy_chan: oneshot::Sender<Result<ReportReading>>,
     },
 
@@ -43,6 +44,7 @@ pub enum Request {
     /// a read-handle to acccept incoming setting to the device.
     AddReadWriteDevice {
         dev_name: String,
+        dev_units: Option<String>,
         rpy_chan: oneshot::Sender<
             Result<(ReportReading, RxDeviceSetting, Option<Value>)>,
         >,
@@ -86,7 +88,7 @@ impl RequestChan {
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
     pub async fn add_ro_device(
-        &self, name: &str,
+        &self, name: &str, units: Option<&str>,
     ) -> super::Result<ReportReading> {
         // Create a location for the reply.
 
@@ -102,6 +104,7 @@ impl RequestChan {
             .req_chan
             .send(Request::AddReadonlyDevice {
                 dev_name: format!("{}:{}", self.prefix, name),
+                dev_units: units.map(String::from),
                 rpy_chan: tx,
             })
             .await;
@@ -145,13 +148,14 @@ impl RequestChan {
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device(
-        &self, name: &str,
+        &self, name: &str, units: Option<&str>,
     ) -> Result<(ReportReading, mpsc::Receiver<Value>, Option<Value>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
             .send(Request::AddReadWriteDevice {
                 dev_name: format!("{}:{}", self.prefix, name),
+                dev_units: units.map(String::from),
                 rpy_chan: tx,
             })
             .await;

@@ -20,6 +20,7 @@ use std::collections::{hash_map, HashMap};
 use tokio::sync::{broadcast, mpsc};
 
 struct DeviceInfo {
+    _units: Option<String>,
     _tx_reading: broadcast::Sender<Value>,
     _tx_setting: Option<TxDeviceSetting>,
 }
@@ -47,7 +48,7 @@ impl Store for SimpleStore {
     /// this function doesn't allocate a channel to provide settings.
 
     async fn register_read_only_device(
-        &mut self, name: &str,
+        &mut self, name: &str, units: &Option<String>,
     ) -> Result<ReportReading> {
         // Check to see if the device name already exists. It is does,
         // we return an `InUse` error. Otherwise we hang onto the
@@ -63,6 +64,7 @@ impl Store for SimpleStore {
             // Build the entry and insert it in the table.
 
             let _ = e.insert(DeviceInfo {
+                _units: units.clone(),
                 _tx_reading: tx.clone(),
                 _tx_setting: None,
             });
@@ -81,7 +83,7 @@ impl Store for SimpleStore {
     /// resources.
 
     async fn register_read_write_device(
-        &mut self, name: &str,
+        &mut self, name: &str, units: &Option<String>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
         // Check to see if the device name already exists. It is does,
         // we return an `InUse` error. Otherwise we hang onto the
@@ -101,6 +103,7 @@ impl Store for SimpleStore {
             // Build the entry and insert it in the table.
 
             let _ = e.insert(DeviceInfo {
+                _units: units.clone(),
                 _tx_reading: tx.clone(),
                 _tx_setting: Some(tx_sets),
             });
