@@ -49,7 +49,7 @@ impl Store for SimpleStore {
 
     async fn register_read_only_device(
         &mut self, name: &str, units: &Option<String>,
-    ) -> Result<ReportReading> {
+    ) -> Result<(ReportReading, Option<Value>)> {
         // Check to see if the device name already exists. It is does,
         // we return an `InUse` error. Otherwise we hang onto the
         // location in which we can write the entry.
@@ -72,7 +72,7 @@ impl Store for SimpleStore {
             // Create and return the closure that the driver will use
             // to report updates.
 
-            Ok(mk_report_func(tx, name))
+            Ok((mk_report_func(tx, name), None))
         } else {
             Err(Error::InUse)
         }

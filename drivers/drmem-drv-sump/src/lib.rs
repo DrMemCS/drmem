@@ -259,10 +259,11 @@ impl driver::API for Sump {
 
             // Define the devices managed by this driver.
 
-            let d_service = core.add_ro_device("service", None).await?;
-            let d_state = core.add_ro_device("state", None).await?;
-            let d_duty = core.add_ro_device("duty", Some("%")).await?;
-            let d_inflow = core.add_ro_device("in-flow", Some("gpm")).await?;
+            let (d_service, _) = core.add_ro_device("service", None).await?;
+            let (d_state, _) = core.add_ro_device("state", None).await?;
+            let (d_duty, _) = core.add_ro_device("duty", Some("%")).await?;
+            let (d_inflow, _) =
+                core.add_ro_device("in-flow", Some("gpm")).await?;
 
             // Mark the connection as 'down'. Once data starts
             // arriving, this device will be set to `true`.

@@ -366,7 +366,7 @@ impl Store for RedisStore {
 
     async fn register_read_only_device(
         &mut self, name: &str, units: &Option<String>,
-    ) -> Result<ReportReading> {
+    ) -> Result<(ReportReading, Option<Value>)> {
         debug!("registering '{}' as read-only", name);
 
         if self.validate_device(name).await.is_err() {
@@ -374,7 +374,7 @@ impl Store for RedisStore {
 
             info!("'{}' has been successfully created", name);
         }
-        Ok(self.mk_report_func(name))
+        Ok((self.mk_report_func(name), self.last_value(name).await))
     }
 
     async fn register_read_write_device(
@@ -389,7 +389,6 @@ impl Store for RedisStore {
         }
 
         let (tx, rx) = mpsc::channel(20);
-
         let _ = self.table.insert(String::from(name), tx);
 
         Ok((self.mk_report_func(name), rx, self.last_value(name).await))

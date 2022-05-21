@@ -21,7 +21,7 @@ pub trait Store {
 
     async fn register_read_only_device(
         &mut self, name: &str, units: &Option<String>,
-    ) -> Result<driver::ReportReading>;
+    ) -> Result<(driver::ReportReading, Option<types::device::Value>)>;
 
     /// Used by a driver to define a read-write device. `name`
     /// specifies the final segment of the device name (the path

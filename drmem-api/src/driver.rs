@@ -34,7 +34,7 @@ pub enum Request {
     AddReadonlyDevice {
         dev_name: String,
         dev_units: Option<String>,
-        rpy_chan: oneshot::Sender<Result<ReportReading>>,
+        rpy_chan: oneshot::Sender<Result<(ReportReading, Option<Value>)>>,
     },
 
     /// Registers a writable device with core.
@@ -89,7 +89,7 @@ impl RequestChan {
     /// any more updates, it may as well shutdown.
     pub async fn add_ro_device(
         &self, name: &str, units: Option<&str>,
-    ) -> super::Result<ReportReading> {
+    ) -> super::Result<(ReportReading, Option<Value>)> {
         // Create a location for the reply.
 
         let (tx, rx) = oneshot::channel();
