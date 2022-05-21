@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use drmem_api::{
-    driver::{ReportReading, RxDeviceSetting},
+    driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
     types::{device::Value, Error},
     Result, Store,
 };
@@ -167,7 +167,7 @@ fn from_value(v: &redis::Value) -> Result<Value> {
 pub struct RedisStore {
     /// This connection is used for interacting with the database.
     db_con: redis::aio::MultiplexedConnection,
-    table: HashMap<String, mpsc::Sender<Value>>,
+    table: HashMap<String, TxDeviceSetting>,
 }
 
 impl RedisStore {
