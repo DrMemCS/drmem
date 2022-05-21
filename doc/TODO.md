@@ -6,8 +6,8 @@ The runtime framework is what's provided by `drmemd`. It loads drivers
 specified by the configuration and gives them the environment in which
 to run. It also routes device settings to the appropriate drivers.
 
-- [ ] Monitors tasks and restarts them if they fail.
-- [ ] Provides driver registration and factory methods to create
+- [X] Monitors tasks and restarts them if they fail.
+- [X] Provides driver registration and factory methods to create
       instances.
 - [ ] Rather than have every driver linked into `drmemd`, they should
       be shared libraries that are dynamically loaded, based on
@@ -41,21 +41,18 @@ The driver API defines the functions and data types drivers need to
 use to interact with `redis`. It hides the details of how we map the
 driver's worldview onto `redis` data types and capabilities.
 
-- [ ] When starting up, a driver instance does the following for each
+- [X] When starting up, a driver instance does the following for each
       device it manages:
   - [X] If the device exists, it verifies the entry is valid
         (required fields present, proper types, etc.)
   - [X] If it doesn't exist, it creates the device entry and
         inserts a default value into its history.
 - [X] Writes hardware state to redis.
-- [ ] Receives settings (applies setting to hardware and writes to
-      redis.)
+- [X] Receives settings.
 - [X] Drivers can be specified in config file.
-  - [ ] Test parsing (can it handle missing fields?)
+  - [X] Test parsing (can it handle missing fields?)
   - [ ] Test address specification.
-  - [ ] Test redis client/password ACLs
 - [X] Address information can be specified in config file.
-- [ ] Support register/unregister events
 - [X] Needs to be in its own crate.
 
 # Drivers
@@ -63,11 +60,9 @@ driver's worldview onto `redis` data types and capabilities.
 This is a partial list of drivers that could be written for this
 project.
 
-- [ ] Sump pump driver (really only interesting to me.)
+- [X] Sump pump driver (really only interesting to me.)
   - [X] Needs to monitor sump pump and write results to redis.
-  - [ ] Needs to use the final driver API
-  - [ ] Uses RPi GPIO. Maybe a GPIO driver could be written and this
-        driver could use it.
+  - [X] Needs to use the final driver API
 - [ ] Memory driver (allows typed locations to save settings and report
       as readings.)
 - [ ] Weather driver
@@ -78,7 +73,7 @@ project.
 - [ ] Philips Hue driver. Includes not only Philips bulbs, switches, and
       motion sensors but any ZigBee device that happens to work with it.
 - [ ] Tuya driver. An API used by many WiFi-based builbs, plugs, etc.
-- [ ] NTPD driver.
+- [X] NTPD driver.
 
 # Reactive Engine
 
