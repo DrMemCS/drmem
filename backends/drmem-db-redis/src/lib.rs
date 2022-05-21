@@ -331,7 +331,7 @@ impl RedisStore {
             redis::pipe()
                 .atomic()
                 .del(&hist_key)
-                .xadd(&hist_key, "1", &[("value", to_redis(&0i64.into()))])
+                .xadd(&hist_key, "1", &[("value", &[1u8])])
                 .xdel(&hist_key, &["1"])
                 .del(&info_key)
                 .hset_multiple(&info_key, &fields)
