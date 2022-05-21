@@ -6,7 +6,9 @@ use drmem_api::{
 };
 use drmem_config::backend;
 use futures_util::FutureExt;
+use std::collections::HashMap;
 use std::convert::TryInto;
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 // Translates a Redis error into a DrMem error. The translation is
@@ -165,6 +167,7 @@ fn from_value(v: &redis::Value) -> Result<Value> {
 pub struct RedisStore {
     /// This connection is used for interacting with the database.
     db_con: redis::aio::MultiplexedConnection,
+    table: HashMap<String, mpsc::Sender<Value>>,
 }
 
 impl RedisStore {
@@ -201,7 +204,10 @@ impl RedisStore {
     ) -> Result<Self> {
         let db_con = RedisStore::make_connection(cfg, name, pword).await?;
 
-        Ok(RedisStore { db_con })
+        Ok(RedisStore {
+            db_con,
+            table: HashMap::new(),
+        })
     }
 
     // Returns the key that returns meta information for the device.
@@ -215,6 +221,31 @@ impl RedisStore {
 
     fn history_key(&self, name: &str) -> String {
         format!("{}#hist", name)
+    }
+
+    async fn last_value(&mut self, name: &str) -> Option<Value> {
+        let result: Result<HashMap<String, HashMap<String, redis::Value>>> =
+            xlat_result(
+                redis::pipe()
+                    .xrevrange_count(name, "-", "+", 1usize)
+                    .query_async(&mut self.db_con)
+                    .await,
+            );
+
+        if let Ok(v) = result {
+            if let Some((_k, m)) = v.iter().next() {
+                if let Some(val) = m.get("value") {
+                    return from_value(&val).ok();
+                } else {
+                    debug!("no 'value' field for {}", name);
+                }
+            } else {
+                debug!("empty results for {}", name);
+            }
+        } else {
+            debug!("no previous value for {}", name);
+        }
+        None
     }
 
     // Does some sanity checks on a device to see if it appears to be
@@ -357,12 +388,11 @@ impl Store for RedisStore {
             info!("'{}' has been successfully created", name);
         }
 
-        // TODO: need to check alarm limits -- and add the command
-        // to announce it -- as the command is built-up.
-        //}
+        let (tx, rx) = mpsc::channel(20);
 
-        //xlat_result(cmd.query_async(&mut self.db_con).await)
-        unimplemented!()
+        let _ = self.table.insert(String::from(name), tx);
+
+        Ok((self.mk_report_func(name), rx, self.last_value(name).await))
     }
 }
 
