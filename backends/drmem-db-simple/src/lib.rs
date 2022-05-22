@@ -15,6 +15,7 @@ use drmem_api::{
     types::{device::Value, Error},
     Result, Store,
 };
+use drmem_config::backend;
 use futures_util::future;
 use std::collections::{hash_map, HashMap};
 use tokio::sync::{broadcast, mpsc};
@@ -27,7 +28,7 @@ struct DeviceInfo {
 
 struct SimpleStore(HashMap<String, DeviceInfo>);
 
-pub async fn open() -> Result<impl Store> {
+pub async fn open(_cfg: &backend::Config) -> Result<impl Store> {
     Ok(SimpleStore(HashMap::new()))
 }
 
