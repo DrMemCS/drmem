@@ -314,6 +314,7 @@ name = "none"
         // Verify the [backend] section can handle only one field at a
         // time.
 
+        #[cfg(feature = "redis-backend")]
         match toml::from_str::<Config>(
             r#"
 [backend]
@@ -326,21 +327,19 @@ name = "none"
             Ok(cfg) => {
                 let def_cfg = Config::default();
 
-                #[cfg(feature = "redis-backend")]
-                {
-                    assert_eq!(
-                        cfg.get_backend().get_addr(),
-                        "192.168.1.1:6000".parse().unwrap()
-                    );
-                    assert_eq!(
-                        cfg.get_backend().get_dbn(),
-                        def_cfg.get_backend().get_dbn()
-                    );
-                }
+                assert_eq!(
+                    cfg.get_backend().get_addr(),
+                    "192.168.1.1:6000".parse().unwrap()
+                );
+                assert_eq!(
+                    cfg.get_backend().get_dbn(),
+                    def_cfg.get_backend().get_dbn()
+                );
             }
             Err(e) => panic!("TOML parse error: {}", e),
         }
 
+        #[cfg(feature = "redis-backend")]
         match toml::from_str::<Config>(
             r#"
 [backend]
@@ -353,14 +352,11 @@ name = "none"
             Ok(cfg) => {
                 let def_cfg = Config::default();
 
-                #[cfg(feature = "redis-backend")]
-                {
-                    assert_eq!(
-                        cfg.get_backend().get_addr(),
-                        def_cfg.get_backend().get_addr()
-                    );
-                    assert_eq!(cfg.get_backend().get_dbn(), 3);
-                }
+                assert_eq!(
+                    cfg.get_backend().get_addr(),
+                    def_cfg.get_backend().get_addr()
+                );
+                assert_eq!(cfg.get_backend().get_dbn(), 3);
             }
             Err(e) => panic!("TOML parse error: {}", e),
         }
