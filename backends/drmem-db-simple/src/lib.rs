@@ -33,11 +33,12 @@ pub async fn open(_cfg: &backend::Config) -> Result<impl Store> {
 }
 
 fn mk_report_func(tx: broadcast::Sender<Value>, name: &str) -> ReportReading {
-    let err_msg = format!("can't update {}", name);
+    let err_msg = format!("can't update ... {}", name);
 
-    Box::new(move |v| match tx.send(v) {
-        Ok(_) => Box::pin(future::ok(())),
-        Err(_) => Box::pin(future::err(Error::MissingPeer(err_msg.clone()))),
+    Box::new(move |v| {
+	let _ = tx.send(v);
+
+        Box::pin(future::ok(()))
     })
 }
 
