@@ -52,7 +52,7 @@ impl Store for SimpleStore {
     async fn register_read_only_device(
         &mut self, name: &str, units: &Option<String>,
     ) -> Result<(ReportReading, Option<Value>)> {
-        // Check to see if the device name already exists. It is does,
+        // Check to see if the device name already exists. If it does,
         // we return an `InUse` error. Otherwise we hang onto the
         // location in which we can write the entry.
 
