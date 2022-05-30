@@ -159,5 +159,22 @@ pub fn load_table() -> Table {
         );
     }
 
+    // Load the set-up for the GPIO sump pump monitor.
+
+    #[cfg(feature = "driver-weather-wu")]
+    {
+        use drmem_drv_weather_wu::State;
+
+        table.insert(
+            "weather",
+            Driver::create(
+                State::NAME,
+                State::SUMMARY,
+                State::DESCRIPTION,
+                <State as API>::create_instance,
+            ),
+        );
+    }
+
     table
 }

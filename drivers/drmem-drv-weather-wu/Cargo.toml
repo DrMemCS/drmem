@@ -1,0 +1,19 @@
+[package]
+name = "drmem-drv-weather-wu"
+version = "0.1.0"
+authors = ["Rich Neswold <rich.neswold@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+toml = "0.5.6"
+tracing-subscriber = "^0.2"
+tracing-futures = "^0.2"
+tracing = { version = "^0.1", features = ["std"] }
+tokio = { version = "1", features = ["time", "net", "io-util"] }
+drmem-api = { path = "../../drmem-api", version = "0.1" }
+drmem-config = { path = "../../drmem-config", version = "0.1" }
+reqwest = { default-features = false, version = "0.11" }
+
+[dependencies.weather-underground]
+git = "https://github.com/rneswold/weather-underground.git"
+branch = "pull-request"
