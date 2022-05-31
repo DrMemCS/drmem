@@ -32,9 +32,7 @@ pub async fn open(_cfg: &backend::Config) -> Result<impl Store> {
     Ok(SimpleStore(HashMap::new()))
 }
 
-fn mk_report_func(tx: broadcast::Sender<Value>, name: &str) -> ReportReading {
-    let err_msg = format!("can't update ... {}", name);
-
+fn mk_report_func(tx: broadcast::Sender<Value>, _name: &str) -> ReportReading {
     Box::new(move |v| {
 	let _ = tx.send(v);
 
@@ -121,4 +119,37 @@ impl Store for SimpleStore {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use crate::mk_report_func;
+    use drmem_api::types::device::Value;
+    use tokio::sync::broadcast;
+
+    #[tokio::test]
+    async fn test_closure() {
+        let (tx, rx) = broadcast::channel(1);
+
+	std::mem::drop(rx);
+
+	let f = mk_report_func(tx.clone(), "misc");
+
+	assert!(f(Value::Int(1)).await.is_ok());
+
+	{
+	    let mut rx = tx.subscribe();
+
+	    assert!(f(Value::Int(2)).await.is_ok());
+	    assert_eq!(rx.recv().await, Ok(Value::Int(2)));
+	}
+
+	assert!(f(Value::Int(3)).await.is_ok());
+
+	{
+	    let mut rx1 = tx.subscribe();
+	    let mut rx2 = tx.subscribe();
+
+	    assert!(f(Value::Int(4)).await.is_ok());
+	    assert_eq!(rx1.recv().await, Ok(Value::Int(4)));
+	    assert_eq!(rx2.recv().await, Ok(Value::Int(4)));
+	}
+    }
+}
