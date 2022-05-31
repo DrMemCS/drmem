@@ -20,6 +20,8 @@ use futures_util::future;
 use std::collections::{hash_map, HashMap};
 use tokio::sync::{broadcast, mpsc};
 
+const CHAN_SIZE: usize = 20;
+
 struct DeviceInfo {
     _units: Option<String>,
     _tx_reading: broadcast::Sender<Value>,
@@ -59,7 +61,7 @@ impl Store for SimpleStore {
             // keep a history so we set the depth to 1. Slow clients
             // will get an error if they miss an update.
 
-            let (tx, _) = broadcast::channel(1);
+            let (tx, _) = broadcast::channel(CHAN_SIZE);
 
             // Build the entry and insert it in the table.
 
@@ -94,7 +96,7 @@ impl Store for SimpleStore {
             // keep a history so we set the depth to 1. Slow clients
             // will get an error if they miss an update.
 
-            let (tx, _) = broadcast::channel(1);
+            let (tx, _) = broadcast::channel(CHAN_SIZE);
 
             // Create a channel with which to send settings.
 
@@ -126,7 +128,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_closure() {
-        let (tx, rx) = broadcast::channel(1);
+        let (tx, rx) = broadcast::channel(CHAN_SIZE);
 
 	std::mem::drop(rx);
 
