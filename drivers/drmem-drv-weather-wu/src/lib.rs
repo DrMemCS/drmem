@@ -181,29 +181,33 @@ impl State {
                 warn!("ignoring bad precip rate: {:.2}", prate)
             }
 
-	    if ptotal >= 0.0 {
-		if let Some(prev_total) = self.prev_precip_total {
-		    if ptotal > prev_total {
-			debug!("precip calc: {} > {} ... adding {}", ptotal,
-			       prev_total, ptotal - prev_total);
-			self.precip_int += ptotal - prev_total
-		    } else if ptotal < prev_total {
-			debug!("precip calc: {} < {} (sum was reset?) ... adding {}",
+            if ptotal >= 0.0 {
+                if let Some(prev_total) = self.prev_precip_total {
+                    if ptotal > prev_total {
+                        debug!(
+                            "precip calc: {} > {} ... adding {}",
+                            ptotal,
+                            prev_total,
+                            ptotal - prev_total
+                        );
+                        self.precip_int += ptotal - prev_total
+                    } else if ptotal < prev_total {
+                        debug!("precip calc: {} < {} (sum was reset?) ... adding {}",
 			       ptotal, prev_total, ptotal);
-			self.precip_int += ptotal
-		    } else if prate == 0.0 {
-			debug!("precip calc: stable sum, no rain ... resetting sum");
-			self.precip_int = 0.0
-		    }
-		    (self.d_ptotal)(self.precip_int.into()).await?
-		}
-		self.prev_precip_total = Some(ptotal);
+                        self.precip_int += ptotal
+                    } else if prate == 0.0 {
+                        debug!("precip calc: stable sum, no rain ... resetting sum");
+                        self.precip_int = 0.0
+                    }
+                    (self.d_ptotal)(self.precip_int.into()).await?
+                }
+                self.prev_precip_total = Some(ptotal);
             } else {
                 warn!("ignoring bad precip total: {:.2}", ptotal)
             }
         } else {
-	    warn!("need both precip fields to update precip calculations")
-	}
+            warn!("need both precip fields to update precip calculations")
+        }
 
         if let Some(press) = press {
             (self.d_pressure)(press.into()).await?
@@ -285,7 +289,7 @@ impl driver::API for State {
                 Ok(mut con) => {
                     // Validate the driver parameters.
 
-		    debug!("reading config parameters");
+                    debug!("reading config parameters");
 
                     let station = State::get_cfg_station(&cfg)?;
                     let (api_key, interval) =
@@ -303,7 +307,7 @@ impl driver::API for State {
                         "km/h"
                     });
 
-		    debug!("registering devices");
+                    debug!("registering devices");
 
                     let (d_dewpt, _) =
                         core.add_ro_device("dewpoint", temp_unit).await?;
@@ -372,7 +376,7 @@ impl driver::API for State {
 
                     // Assemble and return the state of the driver.
 
-		    debug!("instance successfully created");
+                    debug!("instance successfully created");
 
                     Ok(Box::new(State {
                         con,
@@ -381,7 +385,7 @@ impl driver::API for State {
                         interval,
                         units,
                         precip_int,
-			prev_precip_total: None,
+                        prev_precip_total: None,
                         d_dewpt,
                         d_htidx,
                         d_humidity,
@@ -419,13 +423,13 @@ impl driver::API for State {
             // Loop forever.
 
             loop {
-		debug!("waiting for next poll time");
+                debug!("waiting for next poll time");
 
                 // Wait for the next sample time.
 
                 timer.tick().await;
 
-		debug!("fetching next observation");
+                debug!("fetching next observation");
 
                 let result = wu::fetch_observation(
                     &self.con,

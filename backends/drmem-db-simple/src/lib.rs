@@ -36,7 +36,7 @@ pub async fn open(_cfg: &backend::Config) -> Result<impl Store> {
 
 fn mk_report_func(tx: broadcast::Sender<Value>, _name: &str) -> ReportReading {
     Box::new(move |v| {
-	let _ = tx.send(v);
+        let _ = tx.send(v);
 
         Box::pin(future::ok(()))
     })
@@ -130,28 +130,28 @@ mod tests {
     async fn test_closure() {
         let (tx, rx) = broadcast::channel(CHAN_SIZE);
 
-	std::mem::drop(rx);
+        std::mem::drop(rx);
 
-	let f = mk_report_func(tx.clone(), "misc");
+        let f = mk_report_func(tx.clone(), "misc");
 
-	assert!(f(Value::Int(1)).await.is_ok());
+        assert!(f(Value::Int(1)).await.is_ok());
 
-	{
-	    let mut rx = tx.subscribe();
+        {
+            let mut rx = tx.subscribe();
 
-	    assert!(f(Value::Int(2)).await.is_ok());
-	    assert_eq!(rx.recv().await, Ok(Value::Int(2)));
-	}
+            assert!(f(Value::Int(2)).await.is_ok());
+            assert_eq!(rx.recv().await, Ok(Value::Int(2)));
+        }
 
-	assert!(f(Value::Int(3)).await.is_ok());
+        assert!(f(Value::Int(3)).await.is_ok());
 
-	{
-	    let mut rx1 = tx.subscribe();
-	    let mut rx2 = tx.subscribe();
+        {
+            let mut rx1 = tx.subscribe();
+            let mut rx2 = tx.subscribe();
 
-	    assert!(f(Value::Int(4)).await.is_ok());
-	    assert_eq!(rx1.recv().await, Ok(Value::Int(4)));
-	    assert_eq!(rx2.recv().await, Ok(Value::Int(4)));
-	}
+            assert!(f(Value::Int(4)).await.is_ok());
+            assert_eq!(rx1.recv().await, Ok(Value::Int(4)));
+            assert_eq!(rx2.recv().await, Ok(Value::Int(4)));
+        }
     }
 }

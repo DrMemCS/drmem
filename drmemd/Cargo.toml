@@ -63,7 +63,7 @@ version = "0.15"
 optional = true
 
 [dependencies.juniper_hyper]
-version = "0.6"
+version = "0.8"
 optional = true
 
 [dependencies.hyper]
@@ -97,7 +97,7 @@ optional = true
 # These are features that can be enabled for drmem.
 
 [features]
-default = ["simple-backend", "driver-weather-wu", "driver-ntp", "driver-sump"]
+default = ["simple-backend", "driver-weather-wu", "driver-ntp", "driver-sump", "graphql"]
 simple-backend = ["drmem-db-simple"]
 redis-backend = ["drmem-db-redis"]
 graphql = ["hyper", "juniper", "juniper_hyper"]
