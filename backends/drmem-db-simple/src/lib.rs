@@ -122,7 +122,7 @@ impl Store for SimpleStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::mk_report_func;
+    use crate::{mk_report_func, CHAN_SIZE};
     use drmem_api::types::device::Value;
     use tokio::sync::broadcast;
 
