@@ -102,7 +102,7 @@ impl Default for Config {
 #[derive(Deserialize)]
 pub struct Driver {
     pub name: String,
-    pub prefix: Option<String>, // XXX: needs to be validated
+    pub prefix: String, // XXX: should be a `device::Path` type
     pub cfg: Option<DriverConfig>,
 }
 
@@ -236,7 +236,7 @@ fn dump_config(cfg: &Config) {
             print!(
                 "    name: {}, prefix: {}, cfg: {:?}",
                 &ii.name,
-                ii.prefix.as_ref().unwrap_or(&String::from("\"\"")),
+                &ii.prefix,
                 ii.cfg.as_ref().unwrap_or(&value::Table::new())
             )
         }
@@ -288,6 +288,7 @@ mod tests {
             r#"
 [[driver]]
 name = "none"
+prefix = "null"
 "#,
         ) {
             Ok(cfg) => {
@@ -322,6 +323,7 @@ addr = "192.168.1.1:6000"
 
 [[driver]]
 name = "none"
+prefix = "null"
 "#,
         ) {
             Ok(cfg) => {
@@ -347,6 +349,7 @@ dbn = 3
 
 [[driver]]
 name = "none"
+prefix = "null"
 "#,
         ) {
             Ok(cfg) => {
@@ -366,8 +369,10 @@ name = "none"
         match toml::from_str::<Config>(
             r#"
 log_level = "trace"
+
 [[driver]]
 name = "none"
+prefix = "null"
 "#,
         ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::TRACE),
@@ -376,8 +381,10 @@ name = "none"
         match toml::from_str::<Config>(
             r#"
 log_level = "debug"
+
 [[driver]]
 name = "none"
+prefix = "null"
 "#,
         ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::DEBUG),
@@ -386,8 +393,10 @@ name = "none"
         match toml::from_str::<Config>(
             r#"
 log_level = "info"
+
 [[driver]]
 name = "none"
+prefix = "null"
 "#,
         ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::INFO),
@@ -396,8 +405,10 @@ name = "none"
         match toml::from_str::<Config>(
             r#"
 log_level = "warn"
+
 [[driver]]
 name = "none"
+prefix = "null"
 "#,
         ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
