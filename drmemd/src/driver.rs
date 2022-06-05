@@ -4,7 +4,7 @@ use drmem_api::{
 };
 use futures::future::Future;
 use std::collections::HashMap;
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 use tokio::task::JoinHandle;
 use tracing::{error, field, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -15,7 +15,6 @@ type Factory = fn(
 ) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send>>;
 
 pub struct Driver {
-    pub driver_name: &'static str,
     pub summary: &'static str,
     pub description: &'static str,
     factory: Factory,
@@ -23,11 +22,9 @@ pub struct Driver {
 
 impl Driver {
     pub fn create(
-        name: &'static str, summary: &'static str, description: &'static str,
-        factory: Factory,
+        summary: &'static str, description: &'static str, factory: Factory,
     ) -> Driver {
         Driver {
-            driver_name: name,
             summary,
             description,
             factory,
@@ -35,7 +32,7 @@ impl Driver {
     }
 
     async fn manage_instance(
-        name: &'static str, factory: Factory, cfg: DriverConfig,
+        name: String, factory: Factory, cfg: DriverConfig,
         req_chan: RequestChan,
     ) -> Result<()> {
         loop {
@@ -47,6 +44,8 @@ impl Driver {
 
             match result.await {
                 Ok(mut instance) => {
+                    let name = name.clone();
+
                     // Start the driver instance as a background task
                     // and monitor the return value.
 
@@ -55,7 +54,7 @@ impl Driver {
                             .run()
                             .instrument(info_span!(
                                 "drvr",
-                                name,
+                                name = name.as_str(),
                                 cfg = field::Empty
                             ))
                             .await
@@ -102,79 +101,101 @@ impl Driver {
     // parameters.
 
     pub fn run_instance(
-        &self, cfg: DriverConfig, req_chan: RequestChan,
+        &self, name: String, cfg: DriverConfig, req_chan: RequestChan,
     ) -> JoinHandle<Result<()>> {
         // Spawn a task that supervises the driver task. If the driver
         // panics, this supervisor "catches" it and reports a problem.
         // It then restarts the driver.
 
         tokio::spawn(
-            Driver::manage_instance(
-                self.driver_name,
-                self.factory,
-                cfg,
-                req_chan,
-            )
-            .instrument(info_span!("mngr", drvr = self.driver_name)),
+            Driver::manage_instance(name.clone(), self.factory, cfg, req_chan)
+                .instrument(info_span!("mngr", drvr = name.as_str())),
         )
     }
 }
 
-pub type Table = HashMap<&'static str, Driver>;
+#[derive(Clone)]
+pub struct DriverDb(Arc<HashMap<&'static str, Driver>>);
 
-pub fn load_table() -> Table {
-    let mut table = HashMap::new();
+impl DriverDb {
+    pub fn create() -> DriverDb {
+        let mut table = HashMap::new();
 
-    // Load the set-up for the NTP monitor.
+        // Load the set-up for the NTP monitor.
 
-    #[cfg(feature = "driver-ntp")]
-    {
-        use drmem_drv_ntp::NtpState;
+        #[cfg(feature = "driver-ntp")]
+        {
+            use drmem_drv_ntp::NtpState;
 
-        table.insert(
-            "ntp",
-            Driver::create(
+            table.insert(
                 NtpState::NAME,
-                NtpState::SUMMARY,
-                NtpState::DESCRIPTION,
-                <NtpState as API>::create_instance,
-            ),
-        );
-    }
+                Driver::create(
+                    NtpState::SUMMARY,
+                    NtpState::DESCRIPTION,
+                    <NtpState as API>::create_instance,
+                ),
+            );
+        }
 
-    // Load the set-up for the GPIO sump pump monitor.
+        // Load the set-up for the GPIO sump pump monitor.
 
-    #[cfg(feature = "driver-sump")]
-    {
-        use drmem_drv_sump::Sump;
+        #[cfg(feature = "driver-sump")]
+        {
+            use drmem_drv_sump::Sump;
 
-        table.insert(
-            "sump",
-            Driver::create(
+            table.insert(
                 Sump::NAME,
-                Sump::SUMMARY,
-                Sump::DESCRIPTION,
-                <Sump as API>::create_instance,
-            ),
-        );
-    }
+                Driver::create(
+                    Sump::SUMMARY,
+                    Sump::DESCRIPTION,
+                    <Sump as API>::create_instance,
+                ),
+            );
+        }
 
-    // Load the set-up for the GPIO sump pump monitor.
+        // Load the set-up for the GPIO sump pump monitor.
 
-    #[cfg(feature = "driver-weather-wu")]
-    {
-        use drmem_drv_weather_wu::State;
+        #[cfg(feature = "driver-weather-wu")]
+        {
+            use drmem_drv_weather_wu::State;
 
-        table.insert(
-            "weather",
-            Driver::create(
+            table.insert(
                 State::NAME,
-                State::SUMMARY,
-                State::DESCRIPTION,
-                <State as API>::create_instance,
-            ),
-        );
+                Driver::create(
+                    State::SUMMARY,
+                    State::DESCRIPTION,
+                    <State as API>::create_instance,
+                ),
+            );
+        }
+
+        DriverDb(Arc::new(table))
     }
 
-    table
+    pub fn get_driver(&self, key: &str) -> Option<&Driver> {
+        self.0.get(key)
+    }
+
+    pub fn find(
+        &self, key: &str,
+    ) -> Option<(String, &'static str, &'static str)> {
+        self.0
+            .get(key)
+            .map(|info| (key.to_string(), info.summary, info.description))
+    }
+
+    pub fn get_all(
+        &self,
+    ) -> impl Iterator<Item = (String, &'static str, &'static str)> + '_ {
+        self.0.iter().map(
+            |(
+                k,
+                Driver {
+                    summary,
+                    description,
+                    ..
+                },
+            )| { (k.to_string(), *summary, *description) },
+        )
+    }
 }

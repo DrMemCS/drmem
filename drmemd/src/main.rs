@@ -61,7 +61,7 @@ async fn wrap_task(handle: JoinHandle<Result<()>>) -> Result<()> {
 
 async fn run() -> Result<()> {
     if let Some(cfg) = init_app().await {
-        let drv_tbl = driver::load_table();
+        let drv_tbl = driver::DriverDb::create();
 
         // Start the core task. It returns a handle to a channel with
         // which to make requests. It also returns the task handle.
@@ -76,7 +76,7 @@ async fn run() -> Result<()> {
         let mut tasks = vec![
             wrap_task(core_task),
             #[cfg(feature = "graphql")]
-            wrap_task(tokio::spawn(graphql::server())),
+            wrap_task(tokio::spawn(graphql::server(drv_tbl.clone()))),
         ];
 
         // Iterate through the list of drivers specified in the
@@ -85,22 +85,22 @@ async fn run() -> Result<()> {
         trace!("starting driver instances");
 
         for driver in cfg.driver {
+            let driver_name = driver.name.to_string();
+
             // If the driver exists in the driver table, an instance
             // can be started. If it doesn't exist, report an error
             // and exit.
 
-            if let Some(driver_info) = drv_tbl.get(driver.name.as_str()) {
+            if let Some(driver_info) = drv_tbl.get_driver(&driver_name) {
                 let instance = driver_info.run_instance(
+                    driver_name,
                     driver.cfg.unwrap_or_default().clone(),
-                    RequestChan::new(
-                        &driver.prefix.unwrap_or_else(|| String::from("")),
-                        &tx_drv_req,
-                    ),
+                    RequestChan::new(&driver.prefix, &tx_drv_req),
                 );
 
                 tasks.push(wrap_task(instance))
             } else {
-                error!("no driver named {}", &driver.name);
+                error!("no driver named {}", driver.name);
                 return Err(Error::NotFound);
             }
         }

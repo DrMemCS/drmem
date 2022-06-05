@@ -52,9 +52,12 @@ struct DeviceInfo {
     driver: DriverInfo,
 }
 
+impl juniper::Context for crate::driver::DriverDb {}
+
+/// can you read this?
 struct Config;
 
-#[juniper::graphql_object]
+#[juniper::graphql_object(context = crate::driver::DriverDb)]
 #[graphql(description = "Reports configuration information for `drmemd`.")]
 impl Config {
     #[graphql(description = "Returns information about the available drivers \
@@ -65,6 +68,7 @@ impl Config {
 			     element array is returned. Otherwise `null` is \
 			     returned.")]
     fn driver_info(
+        #[graphql(context)] db: &crate::driver::DriverDb,
         #[graphql(description = "An optional argument which, when provided, \
 				 only returns driver information whose name \
 				 matches. If this argument isn't provided, \
@@ -72,13 +76,31 @@ impl Config {
         name: Option<String>,
     ) -> result::Result<Vec<DriverInfo>, FieldError> {
         info!("driver_info({:?})", &name);
-        if None == name {
-            Ok(vec![])
+
+        if let Some(name) = name {
+            if let Some((n, s, d)) = db.find(&name) {
+                Ok(vec![DriverInfo {
+                    name: n,
+                    summary: s.to_string(),
+                    description: d.to_string(),
+                }])
+            } else {
+                Err(FieldError::new(
+                    "driver not found",
+                    graphql_value!({ "missing_driver": name }),
+                ))
+            }
         } else {
-            Err(FieldError::new(
-                "driver not found",
-                graphql_value!({ "missing_driver": name }),
-            ))
+            let result = db
+                .get_all()
+                .map(|(n, s, d)| DriverInfo {
+                    name: n,
+                    summary: s.to_string(),
+                    description: d.to_string(),
+                })
+                .collect();
+
+            Ok(result)
         }
     }
 
@@ -94,7 +116,7 @@ impl Config {
 
 struct EditConfig;
 
-#[juniper::graphql_object]
+#[juniper::graphql_object(context = crate::driver::DriverDb)]
 impl EditConfig {
     fn mod_redis(_param: String) -> result::Result<bool, FieldError> {
         Err(FieldError::new("not implemented", Value::null()))
@@ -103,7 +125,7 @@ impl EditConfig {
 
 struct Control;
 
-#[juniper::graphql_object]
+#[juniper::graphql_object(context = crate::driver::DriverDb)]
 impl Control {
     fn modify_device(
         _device: String, _value: f64,
@@ -114,19 +136,21 @@ impl Control {
 
 struct MutRoot;
 
-#[juniper::graphql_object]
+#[juniper::graphql_object(context = crate::driver::DriverDb)]
 impl MutRoot {
-    fn config() -> EditConfig { EditConfig }
-    fn control() -> Control { Control }
+    fn config() -> EditConfig {
+        EditConfig
+    }
+    fn control() -> Control {
+        Control
+    }
 }
 
-pub async fn server() -> Result<(), Error> {
+pub async fn server(db: crate::driver::DriverDb) -> Result<(), Error> {
     let addr = ([0, 0, 0, 0], 3000).into();
-
-    let db = Arc::new(());
-
     let root_node =
         Arc::new(RootNode::new(Config, MutRoot, EmptySubscription::new()));
+    let db = Arc::new(db);
 
     let make_svc = make_service_fn(move |_| {
         let root_node = root_node.clone();
