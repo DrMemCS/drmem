@@ -468,13 +468,10 @@ impl driver::API for State {
                         error!("no response from Weather Underground");
                         break;
                     }
-                    Err(e) => {
-                        error!(
-                            "error accessing Weather Underground -- {:?}",
-                            &e
-                        );
-                        break;
-                    }
+                    Err(e) => error!(
+                        "error accessing Weather Underground -- {:?}",
+                        &e
+                    ),
                 }
             }
             (self.d_state)(false.into()).await?;
