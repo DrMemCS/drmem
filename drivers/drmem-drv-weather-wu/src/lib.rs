@@ -140,22 +140,20 @@ impl State {
                 } else {
                     return Err(Error::NotFound);
                 }
+            } else if let Some(params) = &obs.imperial {
+                (
+                    params.dewpt,
+                    params.heat_index,
+                    params.precip_rate,
+                    params.precip_total,
+                    params.pressure,
+                    params.temp,
+                    params.wind_chill,
+                    params.wind_gust,
+                    params.wind_speed,
+                )
             } else {
-                if let Some(params) = &obs.imperial {
-                    (
-                        params.dewpt,
-                        params.heat_index,
-                        params.precip_rate,
-                        params.precip_total,
-                        params.pressure,
-                        params.temp,
-                        params.wind_chill,
-                        params.wind_gust,
-                        params.wind_speed,
-                    )
-                } else {
-                    return Err(Error::NotFound);
-                }
+                return Err(Error::NotFound);
             };
 
         if let Some(dewpt) = dewpt {
