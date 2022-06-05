@@ -39,7 +39,7 @@ pub struct State {
 }
 
 impl State {
-    pub const NAME: &'static str = "weather";
+    pub const NAME: &'static str = "weather-wu";
 
     pub const SUMMARY: &'static str =
         "obtains weather data from Weather Underground";
