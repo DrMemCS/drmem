@@ -165,7 +165,7 @@ mod tests {
     use crate::{mk_report_func, SimpleStore, CHAN_SIZE};
     use drmem_api::{types::device::Value, Store};
     use std::collections::HashMap;
-    use tokio::sync::broadcast;
+    use tokio::sync::{broadcast, mpsc::error::TryRecvError};
 
     #[tokio::test]
     async fn test_ro_registration() {
@@ -200,6 +200,71 @@ mod tests {
             if let Ok((f, None)) =
                 db.register_read_only_device("test", "junk", &None).await
             {
+                // Also, verify that the device update channel wasn't
+                // disrupted by sending a value and receiving it from
+                // the receive handle we opened before re-registering.
+
+                assert!(f(Value::Int(2)).await.is_ok());
+                assert_eq!(rx.try_recv(), Ok(Value::Int(2)));
+            } else {
+                panic!("error registering read-only device from same driver")
+            }
+        } else {
+            panic!("error registering read-only device on empty database")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rw_registration() {
+        let mut db = SimpleStore(HashMap::new());
+
+        // Register a device named "junk" and associate it with the
+        // driver named "test". We don't define units for this device.
+
+        if let Ok((_, mut set_chan, None)) =
+            db.register_read_write_device("test", "junk", &None).await
+        {
+            // Make sure the device was defined and a setting channel
+            // has been created.
+
+            assert!(db.0.get("junk").unwrap().tx_setting.is_some());
+
+            // Make sure the setting channel is valid.
+
+            {
+                let tx_set =
+                    db.0.get("junk").unwrap().tx_setting.clone().unwrap();
+
+                assert_eq!(tx_set.is_closed(), false);
+                assert!(tx_set.send(Value::Int(2)).await.is_ok());
+                assert_eq!(set_chan.try_recv(), Ok(Value::Int(2)));
+            }
+
+            // Create a receiving handle for device updates.
+
+            let mut rx = db.0.get("junk").unwrap().tx_reading.subscribe();
+
+            // Assert that re-registering this device with a different
+            // driver name results in an error. Also verify that it
+            // didn't affect the setting channel.
+
+            assert!(db
+                .register_read_only_device("test2", "junk", &None)
+                .await
+                .is_err());
+            assert_eq!(Err(TryRecvError::Empty), set_chan.try_recv());
+
+            // Assert that re-registering this device with the same
+            // driver name is successful.
+
+            if let Ok((f, _, None)) =
+                db.register_read_write_device("test", "junk", &None).await
+            {
+                assert_eq!(
+                    Err(TryRecvError::Disconnected),
+                    set_chan.try_recv()
+                );
+
                 // Also, verify that the device update channel wasn't
                 // disrupted by sending a value and receiving it from
                 // the receive handle we opened before re-registering.
