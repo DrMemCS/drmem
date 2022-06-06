@@ -171,38 +171,38 @@ mod tests {
     async fn test_ro_registration() {
         let mut db = SimpleStore(HashMap::new());
 
-	// Register a device named "junk" and associate it with the
-	// driver named "test". We don't define units for this device.
+        // Register a device named "junk" and associate it with the
+        // driver named "test". We don't define units for this device.
 
         if let Ok((_, None)) =
             db.register_read_only_device("test", "junk", &None).await
         {
-	    // Make sure the device was defined and the setting
-	    // channel is `None`.
+            // Make sure the device was defined and the setting
+            // channel is `None`.
 
             assert!(db.0.get("junk").unwrap().tx_setting.is_none());
 
-	    // Create a receiving handle for device updates.
+            // Create a receiving handle for device updates.
 
             let mut rx = db.0.get("junk").unwrap().tx_reading.subscribe();
 
-	    // Assert that re-registering this device with a different
-	    // driver name results in an error.
+            // Assert that re-registering this device with a different
+            // driver name results in an error.
 
             assert!(db
                 .register_read_only_device("test2", "junk", &None)
                 .await
                 .is_err());
 
-	    // Assert that re-registering this device with the same
-	    // driver name is successful.
+            // Assert that re-registering this device with the same
+            // driver name is successful.
 
             if let Ok((f, None)) =
                 db.register_read_only_device("test", "junk", &None).await
             {
-		// Also, verify that the device update channel wasn't
-		// disrupted by sending a value and receiving it from
-		// the receive handle we opened before re-registering.
+                // Also, verify that the device update channel wasn't
+                // disrupted by sending a value and receiving it from
+                // the receive handle we opened before re-registering.
 
                 assert!(f(Value::Int(2)).await.is_ok());
                 assert_eq!(rx.recv().await, Ok(Value::Int(2)));
