@@ -32,6 +32,7 @@ pub enum Request {
     /// The reply will contain a channel to broadcast values read from
     /// the hardware.
     AddReadonlyDevice {
+        driver_name: String,
         dev_name: String,
         dev_units: Option<String>,
         rpy_chan: oneshot::Sender<Result<(ReportReading, Option<Value>)>>,
@@ -43,6 +44,7 @@ pub enum Request {
     /// broadcast values read from the hardware. The second element is
     /// a read-handle to acccept incoming setting to the device.
     AddReadWriteDevice {
+        driver_name: String,
         dev_name: String,
         dev_units: Option<String>,
         rpy_chan: oneshot::Sender<
@@ -59,13 +61,17 @@ pub enum Request {
 /// methods to send requests and receive replies with the core.
 #[derive(Clone)]
 pub struct RequestChan {
+    driver_name: String,
     prefix: String,
     req_chan: mpsc::Sender<Request>,
 }
 
 impl RequestChan {
-    pub fn new(prefix: &str, req_chan: &mpsc::Sender<Request>) -> Self {
+    pub fn new(
+        driver_name: &str, prefix: &str, req_chan: &mpsc::Sender<Request>,
+    ) -> Self {
         RequestChan {
+            driver_name: String::from(driver_name),
             prefix: String::from(prefix),
             req_chan: req_chan.clone(),
         }
@@ -103,6 +109,7 @@ impl RequestChan {
         let result = self
             .req_chan
             .send(Request::AddReadonlyDevice {
+                driver_name: self.driver_name.clone(),
                 dev_name: format!("{}:{}", self.prefix, name),
                 dev_units: units.map(String::from),
                 rpy_chan: tx,
@@ -154,6 +161,7 @@ impl RequestChan {
         let result = self
             .req_chan
             .send(Request::AddReadWriteDevice {
+                driver_name: self.driver_name.clone(),
                 dev_name: format!("{}:{}", self.prefix, name),
                 dev_units: units.map(String::from),
                 rpy_chan: tx,

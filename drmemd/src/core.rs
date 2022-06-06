@@ -50,26 +50,32 @@ impl State {
     async fn handle_driver_request(&mut self, req: driver::Request) {
         match req {
             driver::Request::AddReadonlyDevice {
+                ref driver_name,
                 ref dev_name,
                 ref dev_units,
                 rpy_chan,
             } => {
                 let result = self
                     .backend
-                    .register_read_only_device(dev_name, dev_units)
+                    .register_read_only_device(driver_name, dev_name, dev_units)
                     .await;
 
                 State::send_reply(dev_name, rpy_chan, result)
             }
 
             driver::Request::AddReadWriteDevice {
+                ref driver_name,
                 ref dev_name,
                 ref dev_units,
                 rpy_chan,
             } => {
                 let result = self
                     .backend
-                    .register_read_write_device(dev_name, dev_units)
+                    .register_read_write_device(
+                        driver_name,
+                        dev_name,
+                        dev_units,
+                    )
                     .await;
 
                 State::send_reply(dev_name, rpy_chan, result)

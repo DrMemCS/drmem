@@ -20,7 +20,7 @@ pub trait Store {
     /// which can be used to report device updates.
 
     async fn register_read_only_device(
-        &mut self, name: &str, units: &Option<String>,
+        &mut self, driver: &str, name: &str, units: &Option<String>,
     ) -> Result<(driver::ReportReading, Option<types::device::Value>)>;
 
     /// Used by a driver to define a read-write device. `name`
@@ -35,7 +35,7 @@ pub trait Store {
     /// have a persistent store, then `None` is provided.
 
     async fn register_read_write_device(
-        &mut self, name: &str, units: &Option<String>,
+        &mut self, driver: &str, name: &str, units: &Option<String>,
     ) -> Result<(
         driver::ReportReading,
         driver::RxDeviceSetting,

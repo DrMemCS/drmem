@@ -92,10 +92,12 @@ async fn run() -> Result<()> {
             // and exit.
 
             if let Some(driver_info) = drv_tbl.get_driver(&driver_name) {
+                let chan =
+                    RequestChan::new(&driver_name, &driver.prefix, &tx_drv_req);
                 let instance = driver_info.run_instance(
                     driver_name,
                     driver.cfg.unwrap_or_default().clone(),
-                    RequestChan::new(&driver.prefix, &tx_drv_req),
+                    chan,
                 );
 
                 tasks.push(wrap_task(instance))

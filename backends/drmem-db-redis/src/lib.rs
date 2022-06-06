@@ -365,7 +365,7 @@ impl Store for RedisStore {
     /// Registers a device in the redis backend.
 
     async fn register_read_only_device(
-        &mut self, name: &str, units: &Option<String>,
+        &mut self, _driver_name: &str, name: &str, units: &Option<String>,
     ) -> Result<(ReportReading, Option<Value>)> {
         debug!("registering '{}' as read-only", name);
 
@@ -378,7 +378,7 @@ impl Store for RedisStore {
     }
 
     async fn register_read_write_device(
-        &mut self, name: &str, units: &Option<String>,
+        &mut self, _driver_name: &str, name: &str, units: &Option<String>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
         debug!("registering '{}' as read-write", name);
 
