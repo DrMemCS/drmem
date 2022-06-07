@@ -12,7 +12,10 @@
 use async_trait::async_trait;
 use drmem_api::{
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
-    types::{device::Value, Error},
+    types::{
+        device::{Name, Value},
+        Error,
+    },
     Result, Store,
 };
 use drmem_config::backend;
@@ -29,13 +32,13 @@ struct DeviceInfo {
     tx_setting: Option<TxDeviceSetting>,
 }
 
-struct SimpleStore(HashMap<String, DeviceInfo>);
+struct SimpleStore(HashMap<Name, DeviceInfo>);
 
 pub async fn open(_cfg: &backend::Config) -> Result<impl Store> {
     Ok(SimpleStore(HashMap::new()))
 }
 
-fn mk_report_func(tx: broadcast::Sender<Value>, _name: &str) -> ReportReading {
+fn mk_report_func(tx: broadcast::Sender<Value>, _name: &Name) -> ReportReading {
     Box::new(move |v| {
         let _ = tx.send(v);
 
@@ -51,11 +54,11 @@ impl Store for SimpleStore {
     /// this function doesn't allocate a channel to provide settings.
 
     async fn register_read_only_device(
-        &mut self, driver: &str, name: &str, units: &Option<String>,
+        &mut self, driver: &str, name: &Name, units: &Option<String>,
     ) -> Result<(ReportReading, Option<Value>)> {
         // Check to see if the device name already exists.
 
-        match self.0.entry(String::from(name)) {
+        match self.0.entry((*name).clone()) {
             // The device didn't exist. Create it and associate it
             // with the driver.
             hash_map::Entry::Vacant(e) => {
@@ -102,11 +105,11 @@ impl Store for SimpleStore {
     /// resources.
 
     async fn register_read_write_device(
-        &mut self, driver: &str, name: &str, units: &Option<String>,
+        &mut self, driver: &str, name: &Name, units: &Option<String>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
         // Check to see if the device name already exists.
 
-        match self.0.entry(String::from(name)) {
+        match self.0.entry((*name).clone()) {
             // The device didn't exist. Create it and associate it
             // with the driver.
             hash_map::Entry::Vacant(e) => {

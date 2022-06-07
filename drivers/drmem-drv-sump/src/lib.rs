@@ -1,6 +1,6 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::Error,
+    types::{device::Base, Error},
     Result,
 };
 use std::future::Future;
@@ -259,11 +259,16 @@ impl driver::API for Sump {
 
             // Define the devices managed by this driver.
 
-            let (d_service, _) = core.add_ro_device("service", None).await?;
-            let (d_state, _) = core.add_ro_device("state", None).await?;
-            let (d_duty, _) = core.add_ro_device("duty", Some("%")).await?;
-            let (d_inflow, _) =
-                core.add_ro_device("in-flow", Some("gpm")).await?;
+            let (d_service, _) =
+                core.add_ro_device("service".parse::<Base>()?, None).await?;
+            let (d_state, _) =
+                core.add_ro_device("state".parse::<Base>()?, None).await?;
+            let (d_duty, _) = core
+                .add_ro_device("duty".parse::<Base>()?, Some("%"))
+                .await?;
+            let (d_inflow, _) = core
+                .add_ro_device("in-flow".parse::<Base>()?, Some("gpm"))
+                .await?;
 
             // Mark the connection as 'down'. Once data starts
             // arriving, this device will be set to `true`.

@@ -1,8 +1,9 @@
 use crate::{types::Error, Result};
+use serde_derive::Deserialize;
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Hash, Eq)]
 struct Segment(String);
 
 impl Segment {
@@ -35,6 +36,8 @@ impl Segment {
     }
 }
 
+// This trait allows one to use `.parse::<Segment>()`.
+
 impl FromStr for Segment {
     type Err = Error;
 
@@ -49,7 +52,8 @@ impl fmt::Display for Segment {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Deserialize, Hash, Eq)]
+#[serde(try_from = "&str")]
 pub struct Path(Vec<Segment>);
 
 impl Path {
@@ -60,6 +64,21 @@ impl Path {
             .map(Path)
     }
 }
+
+// This trait is defined so that the .TOML parser will use it to parse
+// the device prefix field. Without this, the .TOML parser wants array
+// notation for the path specification (because `Path` is a newtype
+// that wraps a `Vec<>`.)
+
+impl TryFrom<&str> for Path {
+    type Error = Error;
+
+    fn try_from(s: &str) -> Result<Self> {
+	Path::create(s)
+    }
+}
+
+// This trait allows one to use `.parse::<Path>()`.
 
 impl FromStr for Path {
     type Err = Error;
@@ -79,7 +98,7 @@ impl fmt::Display for Path {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Base(Segment);
 
 impl Base {
@@ -87,6 +106,8 @@ impl Base {
         Segment::create(s).map(Base)
     }
 }
+
+// This trait allows one to use `.parse::<Base>()`.
 
 impl FromStr for Base {
     type Err = Error;
@@ -124,10 +145,10 @@ impl fmt::Display for Base {
 /// The client API supports looking up device names using patterns, so
 /// a logical path hierarchy can make those searches more productive.
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Hash, Eq, Clone)]
 pub struct Name {
     path: Path,
-    name: Base,
+    base: Base,
 }
 
 impl Name {
@@ -140,18 +161,19 @@ impl Name {
             .map(Segment::create)
             .collect::<Result<Vec<Segment>>>()
         {
-            Ok(segments) if segments.is_empty() => {
-                Err(Error::InvArgument("empty device name"))
-            }
-            Ok(segments) if segments.len() == 1 => {
-                Err(Error::InvArgument("device has no path"))
+            Ok(segments) if segments.len() < 2 => {
+                Err(Error::InvArgument("device name requires a path and base name"))
             }
             Ok(segments) => Ok(Name {
                 path: Path(segments[0..segments.len() - 1].to_vec()),
-                name: Base(segments[segments.len() - 1].clone()),
+                base: Base(segments[segments.len() - 1].clone()),
             }),
             Err(e) => Err(e),
         }
+    }
+
+    pub fn build(path: Path, base: Base) -> Name {
+        Name { path, base }
     }
 
     /// Returns the path of the device name without the trailing ':'.
@@ -163,15 +185,17 @@ impl Name {
     /// Returns the base name of the device.
 
     pub fn get_name(&self) -> Base {
-        self.name.clone()
+        self.base.clone()
     }
 }
 
 impl fmt::Display for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", &self.path, &self.name)
+        write!(f, "{}:{}", &self.path, &self.base)
     }
 }
+
+// This trait allows one to use `.parse::<Name>()`.
 
 impl FromStr for Name {
     type Err = Error;
@@ -235,28 +259,28 @@ mod tests {
             "p:abc".parse::<Name>().unwrap(),
             Name {
                 path: Path::create("p").unwrap(),
-                name: Base::create("abc").unwrap(),
+                base: Base::create("abc").unwrap(),
             }
         );
         assert_eq!(
             "p:abc1".parse::<Name>().unwrap(),
             Name {
                 path: Path::create("p").unwrap(),
-                name: Base::create("abc1").unwrap(),
+                base: Base::create("abc1").unwrap(),
             }
         );
         assert_eq!(
             "p:abc-1".parse::<Name>().unwrap(),
             Name {
                 path: Path::create("p").unwrap(),
-                name: Base::create("abc-1").unwrap(),
+                base: Base::create("abc-1").unwrap(),
             }
         );
         assert_eq!(
             "p-1:p-2:abc".parse::<Name>().unwrap(),
             Name {
                 path: Path::create("p-1:p-2").unwrap(),
-                name: Base::create("abc").unwrap(),
+                base: Base::create("abc").unwrap(),
             }
         );
 

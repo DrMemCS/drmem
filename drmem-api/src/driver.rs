@@ -1,7 +1,10 @@
 //! This module defines types and interfaces that driver use to
 //! interact with the core of DrMem.
 
-use crate::types::{device::Value, Error};
+use crate::types::{
+    device::{Base, Name, Path, Value},
+    Error,
+};
 use std::future::Future;
 use std::{pin::Pin, result};
 use tokio::sync::{mpsc, oneshot};
@@ -33,7 +36,7 @@ pub enum Request {
     /// the hardware.
     AddReadonlyDevice {
         driver_name: String,
-        dev_name: String,
+        dev_name: Name,
         dev_units: Option<String>,
         rpy_chan: oneshot::Sender<Result<(ReportReading, Option<Value>)>>,
     },
@@ -45,7 +48,7 @@ pub enum Request {
     /// a read-handle to acccept incoming setting to the device.
     AddReadWriteDevice {
         driver_name: String,
-        dev_name: String,
+        dev_name: Name,
         dev_units: Option<String>,
         rpy_chan: oneshot::Sender<
             Result<(ReportReading, RxDeviceSetting, Option<Value>)>,
@@ -62,17 +65,17 @@ pub enum Request {
 #[derive(Clone)]
 pub struct RequestChan {
     driver_name: String,
-    prefix: String,
+    prefix: Path,
     req_chan: mpsc::Sender<Request>,
 }
 
 impl RequestChan {
     pub fn new(
-        driver_name: &str, prefix: &str, req_chan: &mpsc::Sender<Request>,
+        driver_name: &str, prefix: &Path, req_chan: &mpsc::Sender<Request>,
     ) -> Self {
         RequestChan {
             driver_name: String::from(driver_name),
-            prefix: String::from(prefix),
+            prefix: prefix.clone(),
             req_chan: req_chan.clone(),
         }
     }
@@ -94,7 +97,7 @@ impl RequestChan {
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
     pub async fn add_ro_device(
-        &self, name: &str, units: Option<&str>,
+        &self, name: Base, units: Option<&str>,
     ) -> super::Result<(ReportReading, Option<Value>)> {
         // Create a location for the reply.
 
@@ -110,7 +113,7 @@ impl RequestChan {
             .req_chan
             .send(Request::AddReadonlyDevice {
                 driver_name: self.driver_name.clone(),
-                dev_name: format!("{}:{}", self.prefix, name),
+                dev_name: Name::build(self.prefix.clone(), name),
                 dev_units: units.map(String::from),
                 rpy_chan: tx,
             })
@@ -155,14 +158,14 @@ impl RequestChan {
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device(
-        &self, name: &str, units: Option<&str>,
+        &self, name: Base, units: Option<&str>,
     ) -> Result<(ReportReading, mpsc::Receiver<Value>, Option<Value>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
             .send(Request::AddReadWriteDevice {
                 driver_name: self.driver_name.clone(),
-                dev_name: format!("{}:{}", self.prefix, name),
+                dev_name: Name::build(self.prefix.clone(), name),
                 dev_units: units.map(String::from),
                 rpy_chan: tx,
             })

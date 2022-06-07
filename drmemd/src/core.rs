@@ -1,4 +1,8 @@
-use drmem_api::{driver, types::Error, Result, Store};
+use drmem_api::{
+    driver,
+    types::{device::Name, Error},
+    Result, Store,
+};
 use drmem_config::{backend, Config};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -37,10 +41,10 @@ impl State {
     }
 
     fn send_reply<T>(
-        dev_name: &str, rpy_chan: oneshot::Sender<Result<T>>, val: Result<T>,
+        dev_name: &Name, rpy_chan: oneshot::Sender<Result<T>>, val: Result<T>,
     ) {
         let result =
-            val.map_err(|_| Error::DeviceDefined(String::from(dev_name)));
+            val.map_err(|_| Error::DeviceDefined(format!("{}", dev_name)));
 
         if rpy_chan.send(result).is_err() {
             warn!("driver exited before a reply could be sent")

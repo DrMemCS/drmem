@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use drmem_api::{
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
-    types::{device::Value, Error},
+    types::{device::{Value, Name}, Error},
     Result, Store,
 };
 use drmem_config::backend;
@@ -167,7 +167,7 @@ fn from_value(v: &redis::Value) -> Result<Value> {
 pub struct RedisStore {
     /// This connection is used for interacting with the database.
     db_con: redis::aio::MultiplexedConnection,
-    table: HashMap<String, TxDeviceSetting>,
+    table: HashMap<Name, TxDeviceSetting>,
 }
 
 impl RedisStore {
@@ -365,40 +365,39 @@ impl Store for RedisStore {
     /// Registers a device in the redis backend.
 
     async fn register_read_only_device(
-        &mut self, _driver_name: &str, name: &str, units: &Option<String>,
+        &mut self, _driver_name: &str, name: &Name, units: &Option<String>,
     ) -> Result<(ReportReading, Option<Value>)> {
-        debug!("registering '{}' as read-only", name);
+	let name = name.to_string();
 
-        if self.validate_device(name).await.is_err() {
-            self.init_device(name, units).await?;
+        debug!("registering '{}' as read-only", &name);
 
-            info!("'{}' has been successfully created", name);
+        if self.validate_device(&name).await.is_err() {
+            self.init_device(&name, units).await?;
+
+            info!("'{}' has been successfully created", &name);
         }
-        Ok((self.mk_report_func(name), self.last_value(name).await))
+        Ok((self.mk_report_func(&name), self.last_value(&name).await))
     }
 
     async fn register_read_write_device(
-        &mut self, _driver_name: &str, name: &str, units: &Option<String>,
+        &mut self, _driver_name: &str, name: &Name, units: &Option<String>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
-        debug!("registering '{}' as read-write", name);
+	let sname = name.to_string();
 
-        if self.validate_device(name).await.is_err() {
-            self.init_device(name, units).await?;
+        debug!("registering '{}' as read-write", &sname);
 
-            info!("'{}' has been successfully created", name);
+        if self.validate_device(&sname).await.is_err() {
+            self.init_device(&sname, units).await?;
+
+            info!("'{}' has been successfully created", &sname);
         }
 
         let (tx, rx) = mpsc::channel(20);
-        let _ = self.table.insert(String::from(name), tx);
+        let _ = self.table.insert(name.clone(), tx);
 
-        Ok((self.mk_report_func(name), rx, self.last_value(name).await))
+        Ok((self.mk_report_func(&sname), rx, self.last_value(&sname).await))
     }
 }
-
-// This section holds code used for testing the module. The
-// "#[cfg(test)]" attribute means the module will only be compiled and
-// included in the test executable; debug and release versions won't
-// have the code.
 
 #[cfg(test)]
 mod tests {

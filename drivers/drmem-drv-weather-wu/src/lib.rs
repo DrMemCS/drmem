@@ -1,6 +1,6 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::Error,
+    types::{device::Base, Error},
     Result,
 };
 use std::convert::TryFrom;
@@ -307,15 +307,18 @@ impl driver::API for State {
 
                     debug!("registering devices");
 
-                    let (d_dewpt, _) =
-                        core.add_ro_device("dewpoint", temp_unit).await?;
-                    let (d_htidx, _) =
-                        core.add_ro_device("heat-index", temp_unit).await?;
-                    let (d_humidity, _) =
-                        core.add_ro_device("humidity", Some("%")).await?;
+                    let (d_dewpt, _) = core
+                        .add_ro_device("dewpoint".parse::<Base>()?, temp_unit)
+                        .await?;
+                    let (d_htidx, _) = core
+                        .add_ro_device("heat-index".parse::<Base>()?, temp_unit)
+                        .await?;
+                    let (d_humidity, _) = core
+                        .add_ro_device("humidity".parse::<Base>()?, Some("%"))
+                        .await?;
                     let (d_prate, _) = core
                         .add_ro_device(
-                            "precip-rate",
+                            "precip-rate".parse::<Base>()?,
                             Some(if let wu::Unit::English = units {
                                 "in/hr"
                             } else {
@@ -326,7 +329,7 @@ impl driver::API for State {
 
                     let (d_ptotal, precip_int) = core
                         .add_ro_device(
-                            "precip-total",
+                            "precip-total".parse::<Base>()?,
                             Some(if let wu::Unit::English = units {
                                 "in"
                             } else {
@@ -337,7 +340,7 @@ impl driver::API for State {
 
                     let (d_pressure, _) = core
                         .add_ro_device(
-                            "pressure",
+                            "pressure".parse::<Base>()?,
                             Some(if let wu::Unit::English = units {
                                 "in:Hg"
                             } else {
@@ -346,21 +349,38 @@ impl driver::API for State {
                         )
                         .await?;
 
-                    let (d_solrad, _) =
-                        core.add_ro_device("solar-rad", Some("W/m²")).await?;
-                    let (d_state, _) =
-                        core.add_ro_device("state", None).await?;
-                    let (d_temp, _) =
-                        core.add_ro_device("temperature", temp_unit).await?;
-                    let (d_uv, _) = core.add_ro_device("uv", None).await?;
-                    let (d_wndchl, _) =
-                        core.add_ro_device("wind-chill", temp_unit).await?;
-                    let (d_wnddir, _) =
-                        core.add_ro_device("wind-dir", Some("°")).await?;
-                    let (d_wndgst, _) =
-                        core.add_ro_device("wind-gust", speed_unit).await?;
-                    let (d_wndspd, _) =
-                        core.add_ro_device("wind-speed", speed_unit).await?;
+                    let (d_solrad, _) = core
+                        .add_ro_device(
+                            "solar-rad".parse::<Base>()?,
+                            Some("W/m²"),
+                        )
+                        .await?;
+                    let (d_state, _) = core
+                        .add_ro_device("state".parse::<Base>()?, None)
+                        .await?;
+                    let (d_temp, _) = core
+                        .add_ro_device(
+                            "temperature".parse::<Base>()?,
+                            temp_unit,
+                        )
+                        .await?;
+                    let (d_uv, _) =
+                        core.add_ro_device("uv".parse::<Base>()?, None).await?;
+                    let (d_wndchl, _) = core
+                        .add_ro_device("wind-chill".parse::<Base>()?, temp_unit)
+                        .await?;
+                    let (d_wnddir, _) = core
+                        .add_ro_device("wind-dir".parse::<Base>()?, Some("°"))
+                        .await?;
+                    let (d_wndgst, _) = core
+                        .add_ro_device("wind-gust".parse::<Base>()?, speed_unit)
+                        .await?;
+                    let (d_wndspd, _) = core
+                        .add_ro_device(
+                            "wind-speed".parse::<Base>()?,
+                            speed_unit,
+                        )
+                        .await?;
 
                     // If a previous value of the integration is
                     // provided, initialize the state to

@@ -2,7 +2,7 @@ use serde_derive::Deserialize;
 use toml::value;
 use tracing::Level;
 
-use drmem_api::driver::DriverConfig;
+use drmem_api::{driver::DriverConfig, types::device::Path};
 
 // This module is defined when no backend is specified. There are no
 // config parameters for this backend.
@@ -102,7 +102,7 @@ impl Default for Config {
 #[derive(Deserialize)]
 pub struct Driver {
     pub name: String,
-    pub prefix: String, // XXX: should be a `device::Path` type
+    pub prefix: Path,
     pub cfg: Option<DriverConfig>,
 }
 

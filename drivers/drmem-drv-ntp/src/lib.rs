@@ -1,6 +1,6 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::Error,
+    types::{device::Base, Error},
     Result,
 };
 use std::future::Future;
@@ -325,14 +325,18 @@ impl driver::API for NtpState {
                 if sock.connect(addr).await.is_ok() {
                     // Define the devices managed by this driver.
 
-                    let (d_state, _) =
-                        core.add_ro_device("state", None).await?;
-                    let (d_source, _) =
-                        core.add_ro_device("source", None).await?;
-                    let (d_offset, _) =
-                        core.add_ro_device("offset", Some("ms")).await?;
-                    let (d_delay, _) =
-                        core.add_ro_device("delay", Some("ms")).await?;
+                    let (d_state, _) = core
+                        .add_ro_device("state".parse::<Base>()?, None)
+                        .await?;
+                    let (d_source, _) = core
+                        .add_ro_device("source".parse::<Base>()?, None)
+                        .await?;
+                    let (d_offset, _) = core
+                        .add_ro_device("offset".parse::<Base>()?, Some("ms"))
+                        .await?;
+                    let (d_delay, _) = core
+                        .add_ro_device("delay".parse::<Base>()?, Some("ms"))
+                        .await?;
 
                     return Ok(Box::new(NtpState {
                         sock,

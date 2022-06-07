@@ -18,3 +18,5 @@ maintenance = { status = "actively-developed" }
 toml = "0.5.6"
 async-trait = "0.1"
 tokio = { version = "1", features = ["sync"] }
+serde = "1.0.115"
+serde_derive = "1.0.115"
