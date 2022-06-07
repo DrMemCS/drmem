@@ -74,7 +74,7 @@ impl TryFrom<&str> for Path {
     type Error = Error;
 
     fn try_from(s: &str) -> Result<Self> {
-	Path::create(s)
+        Path::create(s)
     }
 }
 
@@ -161,9 +161,9 @@ impl Name {
             .map(Segment::create)
             .collect::<Result<Vec<Segment>>>()
         {
-            Ok(segments) if segments.len() < 2 => {
-                Err(Error::InvArgument("device name requires a path and base name"))
-            }
+            Ok(segments) if segments.len() < 2 => Err(Error::InvArgument(
+                "device name requires a path and base name",
+            )),
             Ok(segments) => Ok(Name {
                 path: Path(segments[0..segments.len() - 1].to_vec()),
                 base: Base(segments[segments.len() - 1].clone()),

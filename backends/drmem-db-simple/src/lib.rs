@@ -21,15 +21,37 @@ use drmem_api::{
 use drmem_config::backend;
 use futures_util::future;
 use std::collections::{hash_map, HashMap};
+use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
+use tracing::error;
 
 const CHAN_SIZE: usize = 20;
 
 struct DeviceInfo {
     owner: String,
-    _units: Option<String>,
+    units: Option<String>,
     tx_reading: broadcast::Sender<Value>,
     tx_setting: Option<TxDeviceSetting>,
+    last_reading: Arc<Mutex<Option<Value>>>,
+}
+
+impl DeviceInfo {
+    pub fn create(
+        owner: String, units: Option<String>,
+        tx_setting: Option<TxDeviceSetting>,
+    ) -> DeviceInfo {
+        let (tx, _) = broadcast::channel(CHAN_SIZE);
+
+        // Build the entry and insert it in the table.
+
+        DeviceInfo {
+            owner,
+            units,
+            tx_reading: tx,
+            tx_setting,
+            last_reading: Arc::new(Mutex::new(None)),
+        }
+    }
 }
 
 struct SimpleStore(HashMap<Name, DeviceInfo>);
@@ -38,10 +60,29 @@ pub async fn open(_cfg: &backend::Config) -> Result<impl Store> {
     Ok(SimpleStore(HashMap::new()))
 }
 
-fn mk_report_func(tx: broadcast::Sender<Value>, _name: &Name) -> ReportReading {
-    Box::new(move |v| {
-        let _ = tx.send(v);
+// Builds the `ReportReading` function. Drivers will call specialized
+// instances of this function to record the latest value of a device.
 
+fn mk_report_func(di: &DeviceInfo, name: &Name) -> ReportReading {
+    let tx = di.tx_reading.clone();
+    let reading = di.last_reading.clone();
+    let name = name.to_string();
+
+    Box::new(move |v| {
+        let _ = tx.send(v.clone());
+
+        // If a lock is obtained, update the current value. The only
+        // way a lock can fail is if it's "poisoned", which means
+        // another thread panicked while holding the lock. This module
+        // holds the only code that uses the mutex and all accesses
+        // are short and infallible, so the error message shouldn't
+        // ever get displayed.
+
+        if let Ok(mut data) = reading.lock() {
+            *data = Some(v)
+        } else {
+            error!("couldn't set current value of {}", &name)
+        }
         Box::pin(future::ok(()))
     })
 }
@@ -62,24 +103,18 @@ impl Store for SimpleStore {
             // The device didn't exist. Create it and associate it
             // with the driver.
             hash_map::Entry::Vacant(e) => {
-                // Create a broadcast channel. Slow clients will get
-                // an error if they miss an update.
-
-                let (tx, _) = broadcast::channel(CHAN_SIZE);
-
                 // Build the entry and insert it in the table.
 
-                let _ = e.insert(DeviceInfo {
-                    owner: String::from(driver),
-                    _units: units.clone(),
-                    tx_reading: tx.clone(),
-                    tx_setting: None,
-                });
+                let di = e.insert(DeviceInfo::create(
+                    String::from(driver),
+                    units.clone(),
+                    None,
+                ));
 
                 // Create and return the closure that the driver will
                 // use to report updates.
 
-                Ok((mk_report_func(tx, name), None))
+                Ok((mk_report_func(di, name), None))
             }
 
             // The device already exists. If it was created from a
@@ -89,9 +124,16 @@ impl Store for SimpleStore {
                 let dev_info = e.get();
 
                 if dev_info.owner == driver {
+                    let func = mk_report_func(dev_info, name);
+                    let guard = dev_info.last_reading.lock();
+
                     Ok((
-                        mk_report_func(dev_info.tx_reading.clone(), name),
-                        None,
+                        func,
+                        if let Ok(data) = guard {
+                            data.clone()
+                        } else {
+                            None
+                        },
                     ))
                 } else {
                     Err(Error::InUse)
@@ -113,28 +155,22 @@ impl Store for SimpleStore {
             // The device didn't exist. Create it and associate it
             // with the driver.
             hash_map::Entry::Vacant(e) => {
-                // Create a broadcast channel. Slow clients will get
-                // an error if they miss an update.
-
-                let (tx, _) = broadcast::channel(CHAN_SIZE);
-
                 // Create a channel with which to send settings.
 
                 let (tx_sets, rx_sets) = mpsc::channel(CHAN_SIZE);
 
                 // Build the entry and insert it in the table.
 
-                let _ = e.insert(DeviceInfo {
-                    owner: String::from(driver),
-                    _units: units.clone(),
-                    tx_reading: tx.clone(),
-                    tx_setting: Some(tx_sets),
-                });
+                let di = e.insert(DeviceInfo::create(
+                    String::from(driver),
+                    units.clone(),
+                    Some(tx_sets),
+                ));
 
                 // Create and return the closure that the driver will
                 // use to report updates.
 
-                Ok((mk_report_func(tx, name), rx_sets, None))
+                Ok((mk_report_func(di, name), rx_sets, None))
             }
 
             // The device already exists. If it was created from a
@@ -150,10 +186,17 @@ impl Store for SimpleStore {
 
                     dev_info.tx_setting = Some(tx_sets);
 
+                    let func = mk_report_func(dev_info, name);
+                    let guard = dev_info.last_reading.lock();
+
                     Ok((
-                        mk_report_func(dev_info.tx_reading.clone(), name),
+                        func,
                         rx_sets,
-                        None,
+                        if let Ok(data) = guard {
+                            data.clone()
+                        } else {
+                            None
+                        },
                     ))
                 } else {
                     Err(Error::InUse)
@@ -165,35 +208,39 @@ impl Store for SimpleStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mk_report_func, SimpleStore, CHAN_SIZE};
-    use drmem_api::{types::device::Value, Store};
+    use crate::{mk_report_func, DeviceInfo, SimpleStore};
+    use drmem_api::{
+        types::device::{Name, Value},
+        Store,
+    };
     use std::collections::HashMap;
-    use tokio::sync::{broadcast, mpsc::error::TryRecvError};
+    use tokio::sync::mpsc::error::TryRecvError;
 
     #[tokio::test]
     async fn test_ro_registration() {
         let mut db = SimpleStore(HashMap::new());
+        let name = "misc:junk".parse::<Name>().unwrap();
 
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
 
         if let Ok((_, None)) =
-            db.register_read_only_device("test", "junk", &None).await
+            db.register_read_only_device("test", &name, &None).await
         {
             // Make sure the device was defined and the setting
             // channel is `None`.
 
-            assert!(db.0.get("junk").unwrap().tx_setting.is_none());
+            assert!(db.0.get(&name).unwrap().tx_setting.is_none());
 
             // Create a receiving handle for device updates.
 
-            let mut rx = db.0.get("junk").unwrap().tx_reading.subscribe();
+            let mut rx = db.0.get(&name).unwrap().tx_reading.subscribe();
 
             // Assert that re-registering this device with a different
             // driver name results in an error.
 
             assert!(db
-                .register_read_only_device("test2", "junk", &None)
+                .register_read_only_device("test2", &name, &None)
                 .await
                 .is_err());
 
@@ -201,7 +248,7 @@ mod tests {
             // driver name is successful.
 
             if let Ok((f, None)) =
-                db.register_read_only_device("test", "junk", &None).await
+                db.register_read_only_device("test", &name, &None).await
             {
                 // Also, verify that the device update channel wasn't
                 // disrupted by sending a value and receiving it from
@@ -220,23 +267,24 @@ mod tests {
     #[tokio::test]
     async fn test_rw_registration() {
         let mut db = SimpleStore(HashMap::new());
+        let name = "misc:junk".parse::<Name>().unwrap();
 
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
 
         if let Ok((_, mut set_chan, None)) =
-            db.register_read_write_device("test", "junk", &None).await
+            db.register_read_write_device("test", &name, &None).await
         {
             // Make sure the device was defined and a setting channel
             // has been created.
 
-            assert!(db.0.get("junk").unwrap().tx_setting.is_some());
+            assert!(db.0.get(&name).unwrap().tx_setting.is_some());
 
             // Make sure the setting channel is valid.
 
             {
                 let tx_set =
-                    db.0.get("junk").unwrap().tx_setting.clone().unwrap();
+                    db.0.get(&name).unwrap().tx_setting.clone().unwrap();
 
                 assert_eq!(tx_set.is_closed(), false);
                 assert!(tx_set.send(Value::Int(2)).await.is_ok());
@@ -245,14 +293,14 @@ mod tests {
 
             // Create a receiving handle for device updates.
 
-            let mut rx = db.0.get("junk").unwrap().tx_reading.subscribe();
+            let mut rx = db.0.get(&name).unwrap().tx_reading.subscribe();
 
             // Assert that re-registering this device with a different
             // driver name results in an error. Also verify that it
             // didn't affect the setting channel.
 
             assert!(db
-                .register_read_only_device("test2", "junk", &None)
+                .register_read_only_device("test2", &name, &None)
                 .await
                 .is_err());
             assert_eq!(Err(TryRecvError::Empty), set_chan.try_recv());
@@ -261,7 +309,7 @@ mod tests {
             // driver name is successful.
 
             if let Ok((f, _, None)) =
-                db.register_read_write_device("test", "junk", &None).await
+                db.register_read_write_device("test", &name, &None).await
             {
                 assert_eq!(
                     Err(TryRecvError::Disconnected),
@@ -284,16 +332,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_closure() {
-        let (tx, rx) = broadcast::channel(CHAN_SIZE);
-
-        std::mem::drop(rx);
-
-        let f = mk_report_func(tx.clone(), "misc");
+        let di = DeviceInfo::create(String::from("test"), None, None);
+        let name = "misc:junk".parse::<Name>().unwrap();
+        let f = mk_report_func(&di, &name);
 
         assert!(f(Value::Int(1)).await.is_ok());
 
         {
-            let mut rx = tx.subscribe();
+            let mut rx = di.tx_reading.subscribe();
 
             assert!(f(Value::Int(2)).await.is_ok());
             assert_eq!(rx.try_recv(), Ok(Value::Int(2)));
@@ -302,8 +348,8 @@ mod tests {
         assert!(f(Value::Int(3)).await.is_ok());
 
         {
-            let mut rx1 = tx.subscribe();
-            let mut rx2 = tx.subscribe();
+            let mut rx1 = di.tx_reading.subscribe();
+            let mut rx2 = di.tx_reading.subscribe();
 
             assert!(f(Value::Int(4)).await.is_ok());
             assert_eq!(rx1.try_recv(), Ok(Value::Int(4)));

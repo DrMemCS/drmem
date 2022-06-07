@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use drmem_api::{
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
-    types::{device::{Value, Name}, Error},
+    types::{
+        device::{Name, Value},
+        Error,
+    },
     Result, Store,
 };
 use drmem_config::backend;
@@ -367,7 +370,7 @@ impl Store for RedisStore {
     async fn register_read_only_device(
         &mut self, _driver_name: &str, name: &Name, units: &Option<String>,
     ) -> Result<(ReportReading, Option<Value>)> {
-	let name = name.to_string();
+        let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
 
@@ -382,7 +385,7 @@ impl Store for RedisStore {
     async fn register_read_write_device(
         &mut self, _driver_name: &str, name: &Name, units: &Option<String>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
-	let sname = name.to_string();
+        let sname = name.to_string();
 
         debug!("registering '{}' as read-write", &sname);
 
@@ -395,7 +398,11 @@ impl Store for RedisStore {
         let (tx, rx) = mpsc::channel(20);
         let _ = self.table.insert(name.clone(), tx);
 
-        Ok((self.mk_report_func(&sname), rx, self.last_value(&sname).await))
+        Ok((
+            self.mk_report_func(&sname),
+            rx,
+            self.last_value(&sname).await,
+        ))
     }
 }
 
