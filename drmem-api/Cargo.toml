@@ -18,5 +18,3 @@ maintenance = { status = "actively-developed" }
 toml = "0.5.6"
 async-trait = "0.1"
 tokio = { version = "1", features = ["sync"] }
-regex = "1"
-lazy_static = "1.4"

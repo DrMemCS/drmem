@@ -5,6 +5,3 @@ pub use value::Value;
 
 mod name;
 pub use name::Name;
-
-mod item;
-pub use item::Item;

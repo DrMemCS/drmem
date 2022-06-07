@@ -1,11 +1,109 @@
-use crate::types::Error;
-use lazy_static::lazy_static;
-use regex::Regex;
+use crate::{types::Error, Result};
 use std::fmt;
 use std::str::FromStr;
 
+#[derive(Debug, Clone, PartialEq)]
+struct Segment(String);
+
+impl Segment {
+    // Returns `true` is the character can be used in a segment of the
+    // device name.
+
+    fn is_valid_char((idx, ch): (usize, char), len: usize) -> bool {
+        ('a'..='z').contains(&ch)
+            || ('A'..='Z').contains(&ch)
+            || ('0'..='9').contains(&ch)
+            || (ch == '-' && idx != 0 && idx != len - 1)
+    }
+
+    // Creates a `Segment`, if the strings contains a well-formed
+    // segment name.
+
+    fn create(s: &str) -> Result<Self> {
+        if !s.is_empty() {
+            if s.chars()
+                .enumerate()
+                .all(|v| Segment::is_valid_char(v, s.len()))
+            {
+                Ok(Segment(String::from(s)))
+            } else {
+                Err(Error::InvArgument("segment contains invalid character"))
+            }
+        } else {
+            Err(Error::InvArgument("contains zero-length segment"))
+        }
+    }
+}
+
+impl FromStr for Segment {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Segment::create(s)
+    }
+}
+
+impl fmt::Display for Segment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", &self.0)
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Path(Vec<Segment>);
+
+impl Path {
+    pub fn create(s: &str) -> Result<Self> {
+        s.split(':')
+            .map(Segment::create)
+            .collect::<Result<Vec<Segment>>>()
+            .map(Path)
+    }
+}
+
+impl FromStr for Path {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Path::create(s)
+    }
+}
+
+impl fmt::Display for Path {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", &self.0[0])?;
+        for ii in &self.0[1..] {
+            write!(f, ":{}", &ii)?
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Base(Segment);
+
+impl Base {
+    pub fn create(s: &str) -> Result<Self> {
+        Segment::create(s).map(Base)
+    }
+}
+
+impl FromStr for Base {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Base::create(s)
+    }
+}
+
+impl fmt::Display for Base {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", &self.0)
+    }
+}
+
 /// Holds a validated device name. A device name consists of a path
-/// and a name where each portion of the name is separated with a
+/// and a base name where each portion of the path is separated with a
 /// colon. Each segment of the path or the name is composed of alpha-
 /// numeric and the dash characters. The dash cannot be the first or
 /// last character, however.
@@ -22,89 +120,63 @@ use std::str::FromStr;
 /// All device names will have a path and a name. Although
 /// superficially similar, device names are not like file system
 /// names. Specifically, there's no concept of moving up or down
-/// paths. The paths are to help organize devices.
+/// paths. The paths provide a naming convention to organize devices.
+/// The client API supports looking up device names using patterns, so
+/// a logical path hierarchy can make those searches more productive.
 
 #[derive(Debug, PartialEq)]
 pub struct Name {
-    path: String,
-    name: String,
+    path: Path,
+    name: Base,
 }
 
 impl Name {
     /// Creates an instance of `Name`, if the provided string
     /// describes a well-formed device name.
 
-    pub fn create(s: &str) -> Result<Name, Error> {
-        lazy_static! {
-        // This regular expression parses a device name. It
-        // uses the "named grouping" feature to easily tag the
-        // matching sections.
-        //
-        // The first section matches any leading path:
-        //
-        //    (?P<path>(?:[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?:)+)
-        //
-        // which can be written more clearly as
-        //
-        //    ALNUM = [0-9a-zA-Z]
-        //    SEGMENT = ALNUM ((ALNUM | '-')* ALNUM)?
-        //
-        //    path = (SEGMENT ':')+
-        //
-        // The difference being that [[:alpha:]] recognizes
-        // Unicode letters instead of just the ASCII "a-zA-Z"
-        // letters.
-        //
-        // The second section represents the base name of the
-        // device:
-        //
-        //    (?P<name>[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?)
-        //
-        // which is just SEGMENT from above.
-
-        static ref RE: Regex = Regex::new(r"^(?P<path>(?:[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?:)+)(?P<name>[\d[[:alpha:]]](?:[\d[[:alpha:]]-]*[\d[[:alpha:]]])?)$").unwrap();
-        }
-
-        // The Regex expression is anchored to the start and end
-        // of the string and both halves to which we're matching
-        // are not optional. So if it returns `Some()`, we have
-        // "path" and "name" entries.
-
-        if let Some(caps) = RE.captures(s) {
-            Ok(Name {
-                path: String::from(&caps["path"]),
-                name: String::from(&caps["name"]),
-            })
-        } else {
-            Err(Error::InvArgument("invalid device path/name"))
+    pub fn create(s: &str) -> Result<Name> {
+        match s
+            .split(':')
+            .map(Segment::create)
+            .collect::<Result<Vec<Segment>>>()
+        {
+            Ok(segments) if segments.is_empty() => {
+                Err(Error::InvArgument("empty device name"))
+            }
+            Ok(segments) if segments.len() == 1 => {
+                Err(Error::InvArgument("device has no path"))
+            }
+            Ok(segments) => Ok(Name {
+                path: Path(segments[0..segments.len() - 1].to_vec()),
+                name: Base(segments[segments.len() - 1].clone()),
+            }),
+            Err(e) => Err(e),
         }
     }
 
     /// Returns the path of the device name without the trailing ':'.
 
-    pub fn get_path(&self) -> &str {
-        let len = self.path.len();
-
-        &self.path[..len - 1]
+    pub fn get_path(&self) -> Path {
+        self.path.clone()
     }
 
     /// Returns the base name of the device.
 
-    pub fn get_name(&self) -> &str {
-        &self.name
+    pub fn get_name(&self) -> Base {
+        self.name.clone()
     }
 }
 
 impl fmt::Display for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", &self.path, &self.name)
+        write!(f, "{}:{}", &self.path, &self.name)
     }
 }
 
 impl FromStr for Name {
     type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Name::create(s)
     }
 }
@@ -112,6 +184,35 @@ impl FromStr for Name {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_segment() {
+        assert!("".parse::<Segment>().is_err());
+        assert!(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+                .parse::<Segment>()
+                .is_ok()
+        );
+        assert!("a-b".parse::<Segment>().is_ok());
+        assert!("a:b".parse::<Segment>().is_err());
+        assert!("-a".parse::<Segment>().is_err());
+        assert!("a-".parse::<Segment>().is_err());
+        assert_eq!(format!("{}", "a-b".parse::<Segment>().unwrap()), "a-b");
+    }
+
+    #[test]
+    fn test_base() {
+        assert_eq!(format!("{}", "a-b".parse::<Base>().unwrap()), "a-b");
+        assert!("a:b".parse::<Base>().is_err());
+    }
+
+    #[test]
+    fn test_path() {
+        assert!("".parse::<Path>().is_err());
+        assert_eq!(format!("{}", "a-b".parse::<Path>().unwrap()), "a-b");
+        assert_eq!(format!("{}", "a:b".parse::<Path>().unwrap()), "a:b");
+        assert_eq!(format!("{}", "a:b:c".parse::<Path>().unwrap()), "a:b:c");
+    }
 
     #[test]
     fn test_device_name() {
@@ -133,36 +234,36 @@ mod tests {
         assert_eq!(
             "p:abc".parse::<Name>().unwrap(),
             Name {
-                path: String::from("p:"),
-                name: String::from("abc"),
+                path: Path::create("p").unwrap(),
+                name: Base::create("abc").unwrap(),
             }
         );
         assert_eq!(
             "p:abc1".parse::<Name>().unwrap(),
             Name {
-                path: String::from("p:"),
-                name: String::from("abc1"),
+                path: Path::create("p").unwrap(),
+                name: Base::create("abc1").unwrap(),
             }
         );
         assert_eq!(
             "p:abc-1".parse::<Name>().unwrap(),
             Name {
-                path: String::from("p:"),
-                name: String::from("abc-1"),
+                path: Path::create("p").unwrap(),
+                name: Base::create("abc-1").unwrap(),
             }
         );
         assert_eq!(
             "p-1:p-2:abc".parse::<Name>().unwrap(),
             Name {
-                path: String::from("p-1:p-2:"),
-                name: String::from("abc"),
+                path: Path::create("p-1:p-2").unwrap(),
+                name: Base::create("abc").unwrap(),
             }
         );
 
         let dn = "p-1:p-2:abc".parse::<Name>().unwrap();
 
-        assert_eq!(dn.get_path(), "p-1:p-2");
-        assert_eq!(dn.get_name(), "abc");
+        assert_eq!(dn.get_path(), Path::create("p-1:p-2").unwrap());
+        assert_eq!(dn.get_name(), Base::create("abc").unwrap());
 
         assert_eq!(format!("{}", dn), "p-1:p-2:abc");
     }
