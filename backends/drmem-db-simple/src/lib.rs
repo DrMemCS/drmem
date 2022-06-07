@@ -336,16 +336,20 @@ mod tests {
         let name = "misc:junk".parse::<Name>().unwrap();
         let f = mk_report_func(&di, &name);
 
+        assert_eq!(*di.last_reading.lock().unwrap(), None);
         assert!(f(Value::Int(1)).await.is_ok());
+        assert_eq!(*di.last_reading.lock().unwrap(), Some(Value::Int(1)));
 
         {
             let mut rx = di.tx_reading.subscribe();
 
             assert!(f(Value::Int(2)).await.is_ok());
             assert_eq!(rx.try_recv(), Ok(Value::Int(2)));
+            assert_eq!(*di.last_reading.lock().unwrap(), Some(Value::Int(2)));
         }
 
         assert!(f(Value::Int(3)).await.is_ok());
+        assert_eq!(*di.last_reading.lock().unwrap(), Some(Value::Int(3)));
 
         {
             let mut rx1 = di.tx_reading.subscribe();
@@ -354,6 +358,7 @@ mod tests {
             assert!(f(Value::Int(4)).await.is_ok());
             assert_eq!(rx1.try_recv(), Ok(Value::Int(4)));
             assert_eq!(rx2.try_recv(), Ok(Value::Int(4)));
+            assert_eq!(*di.last_reading.lock().unwrap(), Some(Value::Int(4)));
         }
     }
 }
