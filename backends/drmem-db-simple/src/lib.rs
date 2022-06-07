@@ -30,9 +30,8 @@ const CHAN_SIZE: usize = 20;
 struct DeviceInfo {
     owner: String,
     units: Option<String>,
-    tx_reading: broadcast::Sender<Value>,
     tx_setting: Option<TxDeviceSetting>,
-    last_reading: Arc<Mutex<Option<Value>>>,
+    reading: Arc<Mutex<(broadcast::Sender<Value>, Option<Value>)>>,
 }
 
 impl DeviceInfo {
@@ -47,9 +46,8 @@ impl DeviceInfo {
         DeviceInfo {
             owner,
             units,
-            tx_reading: tx,
             tx_setting,
-            last_reading: Arc::new(Mutex::new(None)),
+            reading: Arc::new(Mutex::new((tx, None))),
         }
     }
 }
@@ -64,13 +62,10 @@ pub async fn open(_cfg: &backend::Config) -> Result<impl Store> {
 // instances of this function to record the latest value of a device.
 
 fn mk_report_func(di: &DeviceInfo, name: &Name) -> ReportReading {
-    let tx = di.tx_reading.clone();
-    let reading = di.last_reading.clone();
+    let reading = di.reading.clone();
     let name = name.to_string();
 
     Box::new(move |v| {
-        let _ = tx.send(v.clone());
-
         // If a lock is obtained, update the current value. The only
         // way a lock can fail is if it's "poisoned", which means
         // another thread panicked while holding the lock. This module
@@ -79,7 +74,9 @@ fn mk_report_func(di: &DeviceInfo, name: &Name) -> ReportReading {
         // ever get displayed.
 
         if let Ok(mut data) = reading.lock() {
-            *data = Some(v)
+            let _ = data.0.send(v.clone());
+
+            data.1 = Some(v)
         } else {
             error!("couldn't set current value of {}", &name)
         }
@@ -125,12 +122,12 @@ impl Store for SimpleStore {
 
                 if dev_info.owner == driver {
                     let func = mk_report_func(dev_info, name);
-                    let guard = dev_info.last_reading.lock();
+                    let guard = dev_info.reading.lock();
 
                     Ok((
                         func,
                         if let Ok(data) = guard {
-                            data.clone()
+                            data.1.clone()
                         } else {
                             None
                         },
@@ -187,13 +184,13 @@ impl Store for SimpleStore {
                     dev_info.tx_setting = Some(tx_sets);
 
                     let func = mk_report_func(dev_info, name);
-                    let guard = dev_info.last_reading.lock();
+                    let guard = dev_info.reading.lock();
 
                     Ok((
                         func,
                         rx_sets,
                         if let Ok(data) = guard {
-                            data.clone()
+                            data.1.clone()
                         } else {
                             None
                         },
@@ -234,7 +231,14 @@ mod tests {
 
             // Create a receiving handle for device updates.
 
-            let mut rx = db.0.get(&name).unwrap().tx_reading.subscribe();
+            let mut rx =
+                db.0.get(&name)
+                    .unwrap()
+                    .reading
+                    .lock()
+                    .unwrap()
+                    .0
+                    .subscribe();
 
             // Assert that re-registering this device with a different
             // driver name results in an error.
@@ -293,7 +297,14 @@ mod tests {
 
             // Create a receiving handle for device updates.
 
-            let mut rx = db.0.get(&name).unwrap().tx_reading.subscribe();
+            let mut rx =
+                db.0.get(&name)
+                    .unwrap()
+                    .reading
+                    .lock()
+                    .unwrap()
+                    .0
+                    .subscribe();
 
             // Assert that re-registering this device with a different
             // driver name results in an error. Also verify that it
@@ -336,29 +347,29 @@ mod tests {
         let name = "misc:junk".parse::<Name>().unwrap();
         let f = mk_report_func(&di, &name);
 
-        assert_eq!(*di.last_reading.lock().unwrap(), None);
+        assert_eq!(di.reading.lock().unwrap().1, None);
         assert!(f(Value::Int(1)).await.is_ok());
-        assert_eq!(*di.last_reading.lock().unwrap(), Some(Value::Int(1)));
+        assert_eq!(di.reading.lock().unwrap().1, Some(Value::Int(1)));
 
         {
-            let mut rx = di.tx_reading.subscribe();
+            let mut rx = di.reading.lock().unwrap().0.subscribe();
 
             assert!(f(Value::Int(2)).await.is_ok());
             assert_eq!(rx.try_recv(), Ok(Value::Int(2)));
-            assert_eq!(*di.last_reading.lock().unwrap(), Some(Value::Int(2)));
+            assert_eq!(di.reading.lock().unwrap().1, Some(Value::Int(2)));
         }
 
         assert!(f(Value::Int(3)).await.is_ok());
-        assert_eq!(*di.last_reading.lock().unwrap(), Some(Value::Int(3)));
+        assert_eq!(di.reading.lock().unwrap().1, Some(Value::Int(3)));
 
         {
-            let mut rx1 = di.tx_reading.subscribe();
-            let mut rx2 = di.tx_reading.subscribe();
+            let mut rx1 = di.reading.lock().unwrap().0.subscribe();
+            let mut rx2 = di.reading.lock().unwrap().0.subscribe();
 
             assert!(f(Value::Int(4)).await.is_ok());
             assert_eq!(rx1.try_recv(), Ok(Value::Int(4)));
             assert_eq!(rx2.try_recv(), Ok(Value::Int(4)));
-            assert_eq!(*di.last_reading.lock().unwrap(), Some(Value::Int(4)));
+            assert_eq!(di.reading.lock().unwrap().1, Some(Value::Int(4)));
         }
     }
 }
