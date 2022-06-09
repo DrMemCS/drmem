@@ -1,8 +1,11 @@
-# drmem-drv-weather-ug
+# drmem-drv-weather-wu
 
-Periodically obtains weather information from Weather Underground.
-This means, obviously, the associated devices will only update when
-the system has a working internet connection.
+Periodically obtains weather information from the Weather Underground
+website. Weather Underground has a network of 250,000+ weather
+stations run by volunteers. In many parts of the world, one should be
+able to find a nearby weather station. This means, however, the
+associated devices will only update when the system has a working
+internet connection.
 
 ## Configuration
 
@@ -15,7 +18,7 @@ These are the configuration parameters for an instance of the driver.
   personal key isn't specified, the interval can't be less than 10
   minutes. If this parameter isn't provided, 10 minutes is used.
 - `units` can be either "metric" or "imperial" and determines how the
-  device data is scaled (i.e. Fahrenheit or Celsius, etc.)
+  device data is scaled (i.e. Celsius or Fahrenheit, etc.)
 
 ## Devices
 
@@ -26,20 +29,21 @@ then you should try another station ID; Weather Underground has a huge
 set of participating users so your location should have several useful
 stations.
 
-When the driver starts up, it registers all its devices. Part of the
-registration includes the units for each device. For this driver, the
-set of units are determined by a configuration parameter. If you
-change the config parameter and are using the REDIS back-end, the
-units of the devices won't get updated at the new restart. The simple
-back-end doesn't have any persistent storage so each restart uses the
-current configuration.
+Like all drivers, when this driver starts up, it registers all its
+devices. Part of the registration includes the units for each
+device. For this driver, however, the set of units are determined by a
+configuration parameter. If you change the config parameter and are
+using the REDIS back-end, the units of the devices won't get updated
+at a new restart. The simple back-end doesn't have any persistent
+storage so each restart uses the current configuration.
 
 NOTE: The author has seen at least one station provide garbage values
-to Weather Underground and they simply save and report it. This driver
-will do some sanity checks before updating a device. For instance, it
-won't update the humity device if it reads below 0% or higher than
-100%. When a parameter is deemed invalid, a warning will be written to
-the log.
+to Weather Underground and they simply save and report it. This
+driver, therefore, does some sanity checks before updating a device.
+For instance, it won't update the humidity device if it reads below 0%
+or higher than 100%. When a parameter is deemed invalid, the
+associated device won't get updated and a warning is written to the
+log.
 
 | Base Name | Type | Units | Comment |
 |-----------|------|-------|---------|
@@ -57,3 +61,7 @@ the log.
 | `wind-dir` | f64, RO | ° | Wind direction (0° - 360°) |
 | `wind-gust` | f64, RO | mph or km/h | Max wind speed recently measured. |
 | `wind-speed` | f64, RO | mph or km/h | Wind speed |
+
+## History
+
+Added in v0.1.0.

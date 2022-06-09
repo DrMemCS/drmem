@@ -29,3 +29,7 @@ The driver creates these devices:
 | `source`  | string, RO |       | Set to the address of the sync-ed server.                    |
 | `offset`  | f64, RO    | ms    | The offset of the current system-s time with the server's.   |
 | `delay`   | f64, RO    | ms    | The estimated in-flight delay between the systems.           |
+
+## History
+
+Added in v0.1.0.
