@@ -1,5 +1,5 @@
 use crate::types::Error;
-use std::convert::TryFrom;
+use std::{convert::TryFrom, fmt};
 
 /// Defines fundamental types that can be associated with a device.
 /// Drivers set the type for each device they manage and, for devices
@@ -26,6 +26,17 @@ pub enum Value {
     /// system takes too much time serializing string data, it could
     /// throw other portions of DrMem out of "soft real-time".
     Str(String),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Bool(v) => write!(f, "{}", v),
+            Value::Int(v) => write!(f, "{}", v),
+            Value::Flt(v) => write!(f, "{}", v),
+            Value::Str(v) => write!(f, "\"{}\"", v),
+        }
+    }
 }
 
 impl TryFrom<Value> for bool {

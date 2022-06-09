@@ -11,6 +11,7 @@
 
 use async_trait::async_trait;
 use drmem_api::{
+    client,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
     types::{
         device::{Name, Value},
@@ -201,6 +202,29 @@ impl Store for SimpleStore {
             }
         }
     }
+
+    async fn get_device_info(
+        &self, pattern: &Option<String>,
+    ) -> Result<Vec<client::DevInfoReply>> {
+        let pred: Box<dyn FnMut(&(&Name, &DeviceInfo)) -> bool> =
+            if let Some(pattern) = pattern {
+                Box::new(|(k, _)| pattern.parse::<Name>().unwrap() == **k)
+            } else {
+                Box::new(|_| true)
+            };
+        let res: Vec<client::DevInfoReply> = self
+            .0
+            .iter()
+            .filter(pred)
+            .map(|(k, v)| client::DevInfoReply {
+                name: k.clone(),
+                units: v.units.clone(),
+                driver: v.owner.clone(),
+            })
+            .collect();
+
+        Ok(res)
+    }
 }
 
 #[cfg(test)]
@@ -221,13 +245,17 @@ mod tests {
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
 
-        if let Ok((_, None)) =
+        if let Ok((f, None)) =
             db.register_read_only_device("test", &name, &None).await
         {
             // Make sure the device was defined and the setting
             // channel is `None`.
 
             assert!(db.0.get(&name).unwrap().tx_setting.is_none());
+
+            // Report a value.
+
+            assert!(f(Value::Int(1)).await.is_ok());
 
             // Create a receiving handle for device updates.
 
@@ -251,7 +279,7 @@ mod tests {
             // Assert that re-registering this device with the same
             // driver name is successful.
 
-            if let Ok((f, None)) =
+            if let Ok((f, Some(Value::Int(1)))) =
                 db.register_read_only_device("test", &name, &None).await
             {
                 // Also, verify that the device update channel wasn't
@@ -276,7 +304,7 @@ mod tests {
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
 
-        if let Ok((_, mut set_chan, None)) =
+        if let Ok((f, mut set_chan, None)) =
             db.register_read_write_device("test", &name, &None).await
         {
             // Make sure the device was defined and a setting channel
@@ -294,6 +322,10 @@ mod tests {
                 assert!(tx_set.send(Value::Int(2)).await.is_ok());
                 assert_eq!(set_chan.try_recv(), Ok(Value::Int(2)));
             }
+
+            // Report a value.
+
+            assert!(f(Value::Int(1)).await.is_ok());
 
             // Create a receiving handle for device updates.
 
@@ -319,7 +351,7 @@ mod tests {
             // Assert that re-registering this device with the same
             // driver name is successful.
 
-            if let Ok((f, _, None)) =
+            if let Ok((f, _, Some(Value::Int(1)))) =
                 db.register_read_write_device("test", &name, &None).await
             {
                 assert_eq!(

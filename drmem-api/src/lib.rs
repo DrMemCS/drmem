@@ -43,6 +43,11 @@ pub trait Store {
         driver::RxDeviceSetting,
         Option<types::device::Value>,
     )>;
+
+    async fn get_device_info(
+        &self, pattern: &Option<String>,
+    ) -> Result<Vec<client::DevInfoReply>>;
 }
 
+pub mod client;
 pub mod driver;

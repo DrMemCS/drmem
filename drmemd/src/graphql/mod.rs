@@ -1,88 +1,129 @@
-use drmem_api::types::Error;
+use drmem_api::{client, types::Error};
 use futures::TryFutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{server::Server, Body, Method, Response, StatusCode};
 use juniper::{
-    executor::FieldError, graphql_value, EmptySubscription, GraphQLObject,
-    RootNode, Value,
+    self, executor::FieldError, graphql_value, EmptySubscription, RootNode,
+    Value,
 };
 use std::{convert::Infallible, result, sync::Arc};
 use tracing::Instrument;
-use tracing::{error, info, info_span};
+use tracing::{error, info_span};
 
-#[derive(GraphQLObject)]
-#[graphql(description = "Information about the available drivers in the \
-			 running version of `drmemd`.")]
+// The Context parameter for Queries.
+
+struct ConfigDb(crate::driver::DriverDb, client::RequestChan);
+
+impl juniper::Context for ConfigDb {}
+
+// `DriverInfo` is an object that can be returned by a GraphQL
+// query. It contains information related to drivers that are
+// available in the DrMem environment (executable.)
+
 struct DriverInfo {
-    #[graphql(description = "The name of the driver.")]
     name: String,
+    summary: &'static str,
+    description: &'static str,
+}
+
+#[juniper::graphql_object(
+    Context = ConfigDb,
+    description = "Information about a driver in the running version \
+		   of `drmemd`."
+)]
+impl DriverInfo {
+    #[graphql(description = "The name of the driver.")]
+    fn name(&self) -> &str {
+        &self.name
+    }
+
     #[graphql(description = "A short summary of the driver's purpose.")]
-    summary: String,
+    fn summary(&self) -> &str {
+        &self.summary
+    }
+
     #[graphql(description = "Detailed information about the driver: the \
 			     configuration parameters; the devices it \
 			     registers; and other pertinent information. \
 			     This information is formatted in Markdown.")]
-    description: String,
+    fn description(&self) -> &str {
+        &self.description
+    }
 }
 
-#[derive(GraphQLObject)]
-#[graphql(description = "Encapsulates the information of a device reading.")]
-struct Reading {
-    #[graphql(description = "The time at which the value was read. This \
-			     value is given in UTC.")]
-    timestamp: f64,
-    #[graphql(description = "The value of the device.")]
-    value: f64,
-}
+//mod data;
 
-#[derive(GraphQLObject)]
-#[graphql(description = "Information about registered devices in the running \
-			 version of `drmemd`.")]
+// `DeviceInfo` is a GraphQL object which contains information about a
+// device.
+
 struct DeviceInfo {
-    #[graphql(description = "The name of the device.")]
-    name: String,
-    #[graphql(description = "The engineering units of the device's value.")]
+    device_name: String,
     units: Option<String>,
-    #[graphql(description = "The current value of the device. If there \
-			     hasn't been a reading yet, this will be set \
-			     to `null`.")]
-    current: Option<Reading>,
-    #[graphql(description = "Information of the driver which supports this \
-			     device.")]
-    driver: DriverInfo,
+    driver_name: String,
+    db: crate::driver::DriverDb,
 }
 
-impl juniper::Context for crate::driver::DriverDb {}
+#[juniper::graphql_object(
+    Context = ConfigDb,
+    description = "Information about a registered device in the running \
+		   version of `drmemd`."
+)]
+impl DeviceInfo {
+    #[graphql(description = "The name of the device.")]
+    fn device_name(&self) -> &str {
+        &self.device_name
+    }
 
-/// can you read this?
+    #[graphql(description = "The engineering units of the device's value.")]
+    fn units(&self) -> &Option<String> {
+        &self.units
+    }
+
+    #[graphql(
+        description = "Information about the driver that implements this device."
+    )]
+    fn driver(&self) -> Option<DriverInfo> {
+        self.db.get_driver(&self.driver_name).map(|di| DriverInfo {
+            name: self.driver_name.clone(),
+            summary: di.summary,
+            description: di.description,
+        })
+    }
+}
+
+// This defines the top-level Query API.
+
 struct Config;
 
-#[juniper::graphql_object(context = crate::driver::DriverDb)]
-#[graphql(description = "Reports configuration information for `drmemd`.")]
+#[juniper::graphql_object(
+    context = ConfigDb,
+    description = "Reports configuration information for `drmemd`."
+)]
 impl Config {
-    #[graphql(description = "Returns information about the available drivers \
-			     in the running instance of `drmemd`. If `name` \
-			     isn't provided, an array of all driver \
-			     information is returned. If `name` is specified \
-			     and a driver with that name exists, a single \
-			     element array is returned. Otherwise `null` is \
-			     returned.")]
+    #[graphql(
+        description = "Returns information about the available drivers \
+		       in the running instance of `drmemd`. If `name` \
+		       isn't provided, an array of all driver \
+		       information is returned. If `name` is specified \
+		       and a driver with that name exists, a single \
+		       element array is returned. Otherwise `null` is \
+		       returned.",
+        arguments(arg1(
+            description = "An optional argument which, when provided, \
+			   only returns driver information whose name \
+			   matches. If this argument isn't provided, \
+			   every drivers' information will be returned."
+        ),)
+    )]
     fn driver_info(
-        #[graphql(context)] db: &crate::driver::DriverDb,
-        #[graphql(description = "An optional argument which, when provided, \
-				 only returns driver information whose name \
-				 matches. If this argument isn't provided, \
-				 all driver's information will be returned.")]
-        name: Option<String>,
+        #[graphql(context)] db: &ConfigDb, name: Option<String>,
     ) -> result::Result<Vec<DriverInfo>, FieldError> {
-        info!("driver_info({:?})", &name);
-
         if let Some(name) = name {
-            if let Some((n, s, d)) = db.find(&name) {
+            if let Some((n, s, d)) = db.0.find(&name) {
                 Ok(vec![DriverInfo {
                     name: n,
-                    summary: s.to_string(),
-                    description: d.to_string(),
+                    summary: s,
+                    description: d,
                 }])
             } else {
                 Err(FieldError::new(
@@ -91,14 +132,14 @@ impl Config {
                 ))
             }
         } else {
-            let result = db
-                .get_all()
-                .map(|(n, s, d)| DriverInfo {
-                    name: n,
-                    summary: s.to_string(),
-                    description: d.to_string(),
-                })
-                .collect();
+            let result =
+                db.0.get_all()
+                    .map(|(n, s, d)| DriverInfo {
+                        name: n,
+                        summary: s,
+                        description: d,
+                    })
+                    .collect();
 
             Ok(result)
         }
@@ -107,16 +148,32 @@ impl Config {
     #[graphql(description = "Returns information about devices that match \
 			     the specified `pattern`. If no pattern is \
 			     provided, all devices are returned.")]
-    fn device_info(
-        _pattern: Option<String>,
+    async fn device_info(
+        #[graphql(context)] db: &ConfigDb, pattern: Option<String>,
     ) -> result::Result<Vec<DeviceInfo>, FieldError> {
-        Err(FieldError::new("not implemented", Value::null()))
+        let tx = db.1.clone();
+
+        tx.get_device_info(pattern)
+            .await
+            .map(|v| {
+                v.iter()
+                    .map(|e| DeviceInfo {
+                        device_name: e.name.to_string(),
+                        units: e.units.clone(),
+                        driver_name: e.driver.clone(),
+                        db: db.0.clone(),
+                    })
+                    .collect()
+            })
+            .map_err(|_| {
+                FieldError::new("error looking-up device", Value::null())
+            })
     }
 }
 
 struct EditConfig;
 
-#[juniper::graphql_object(context = crate::driver::DriverDb)]
+#[juniper::graphql_object(context = ConfigDb)]
 impl EditConfig {
     fn mod_redis(_param: String) -> result::Result<bool, FieldError> {
         Err(FieldError::new("not implemented", Value::null()))
@@ -125,7 +182,7 @@ impl EditConfig {
 
 struct Control;
 
-#[juniper::graphql_object(context = crate::driver::DriverDb)]
+#[juniper::graphql_object(context = ConfigDb)]
 impl Control {
     fn modify_device(
         _device: String, _value: f64,
@@ -136,7 +193,7 @@ impl Control {
 
 struct MutRoot;
 
-#[juniper::graphql_object(context = crate::driver::DriverDb)]
+#[juniper::graphql_object(context = ConfigDb)]
 impl MutRoot {
     fn config() -> EditConfig {
         EditConfig
@@ -146,11 +203,13 @@ impl MutRoot {
     }
 }
 
-pub async fn server(db: crate::driver::DriverDb) -> Result<(), Error> {
+pub async fn server(
+    db: crate::driver::DriverDb, cchan: client::RequestChan,
+) -> Result<(), Error> {
     let addr = ([0, 0, 0, 0], 3000).into();
     let root_node =
         Arc::new(RootNode::new(Config, MutRoot, EmptySubscription::new()));
-    let db = Arc::new(db);
+    let db = Arc::new(ConfigDb(db, cchan));
 
     let make_svc = make_service_fn(move |_| {
         let root_node = root_node.clone();

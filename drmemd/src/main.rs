@@ -66,7 +66,7 @@ async fn run() -> Result<()> {
         // Start the core task. It returns a handle to a channel with
         // which to make requests. It also returns the task handle.
 
-        let (tx_drv_req, core_task) = core::start(&cfg).await?;
+        let (tx_drv_req, tx_clnt_req, core_task) = core::start(&cfg).await?;
 
         trace!("starting core tasks");
 
@@ -76,7 +76,10 @@ async fn run() -> Result<()> {
         let mut tasks = vec![
             wrap_task(core_task),
             #[cfg(feature = "graphql")]
-            wrap_task(tokio::spawn(graphql::server(drv_tbl.clone()))),
+            wrap_task(tokio::spawn(graphql::server(
+                drv_tbl.clone(),
+                tx_clnt_req.clone(),
+            ))),
         ];
 
         // Iterate through the list of drivers specified in the

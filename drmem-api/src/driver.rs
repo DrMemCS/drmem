@@ -104,10 +104,6 @@ impl RequestChan {
         let (tx, rx) = oneshot::channel();
 
         // Send a request to Core to register the given name.
-        //
-        // XXX: Device names should be handled more formally. This
-        // code doesn't check that the names are of the correct
-        // character set.
 
         let result = self
             .req_chan
