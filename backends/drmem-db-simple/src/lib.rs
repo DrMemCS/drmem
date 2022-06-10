@@ -239,7 +239,7 @@ mod tests {
         Store,
     };
     use std::collections::HashMap;
-    use tokio::sync::mpsc::error::TryRecvError;
+    use tokio::sync::{mpsc::error::TryRecvError, oneshot};
 
     #[tokio::test]
     async fn test_ro_registration() {
@@ -323,8 +323,11 @@ mod tests {
                     db.0.get(&name).unwrap().tx_setting.clone().unwrap();
 
                 assert_eq!(tx_set.is_closed(), false);
-                assert!(tx_set.send(Value::Int(2)).await.is_ok());
-                assert_eq!(set_chan.try_recv(), Ok(Value::Int(2)));
+
+                let (tx_os, _rx_os) = oneshot::channel();
+
+                assert!(tx_set.send((Value::Int(2), tx_os)).await.is_ok());
+                assert_eq!(set_chan.try_recv().unwrap().0, Value::Int(2));
             }
 
             // Report a value.
@@ -350,7 +353,10 @@ mod tests {
                 .register_read_only_device("test2", &name, &None)
                 .await
                 .is_err());
-            assert_eq!(Err(TryRecvError::Empty), set_chan.try_recv());
+            assert_eq!(
+                Err(TryRecvError::Empty),
+                set_chan.try_recv().map(|_| ())
+            );
 
             // Assert that re-registering this device with the same
             // driver name is successful.
@@ -360,7 +366,7 @@ mod tests {
             {
                 assert_eq!(
                     Err(TryRecvError::Disconnected),
-                    set_chan.try_recv()
+                    set_chan.try_recv().map(|_| ())
                 );
 
                 // Also, verify that the device update channel wasn't

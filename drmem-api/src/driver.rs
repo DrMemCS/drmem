@@ -13,8 +13,10 @@ use toml::value;
 use super::Result;
 
 pub type DriverConfig = value::Table;
-pub type TxDeviceSetting = mpsc::Sender<Value>;
-pub type RxDeviceSetting = mpsc::Receiver<Value>;
+pub type TxDeviceSetting =
+    mpsc::Sender<(Value, oneshot::Sender<Result<Value>>)>;
+pub type RxDeviceSetting =
+    mpsc::Receiver<(Value, oneshot::Sender<Result<Value>>)>;
 
 pub type ReportReading = Box<
     dyn Fn(
@@ -155,7 +157,7 @@ impl RequestChan {
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device(
         &self, name: Base, units: Option<&str>,
-    ) -> Result<(ReportReading, mpsc::Receiver<Value>, Option<Value>)> {
+    ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
