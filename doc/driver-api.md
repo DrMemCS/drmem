@@ -69,17 +69,15 @@ events are:
 
 For read-only devices:
 
-- [ ] Driver registers device (name, type, etc.), as read-only, with
+- [X] Driver registers device (name, type, etc.), as read-only, with
       framework. Receives a handle to send readings.
-- [ ] The handle delivers readings directly to the storage backend.
+- [X] The handle delivers readings directly to the storage backend.
 
 For settable devices:
 
-- [ ] Driver registers device (name, type, etc.), as settable, with
+- [X] Driver registers device (name, type, etc.), as settable, with
       framework. Receives a handle to send readings and a handle to
       receive settings.
-- [ ] The send handle delivers readings directly to the storage
-      backend.
 - [ ] The setting handle will return incoming settings.
 
 To read a device:
@@ -104,41 +102,3 @@ readings are stored with the same timestamp.
 
 Each reading that is sent to the backend needs to be compared to alarm
 limits and reported, if necessary.
-
-## Scratchpad For Ideas
-
-Create a typed-template:
-
-```
-let devt: DeviceTemplate<bool> =
-    DeviceTemplate::<bool>::new("name", "summary", "units", 1000);
-```
-
-Driver will receive a connection to the framework. The templates can
-be used to define devices in the framework:
-
-```
-let dev: impl ReadableDevice = fwork.register_device(devt);
-
-let (dev, rx_set): (impl WritableDevice, mpsc::Receiver<*>) =
-    fwork.register_settable_device(devt);
-```
-
-(Do we need `DeviceTemplate`? Maybe the register methods can take the
-parameters directly.)
-
-Should be able to group the readable devices that are logcally
-connected. The grouping should create a function that takes n
-arguments for n devices.
-
-Maybe there isn't a `WriteableDevice` trait? Registering it as
-writable returns the `ReadableDevice` trait along with a channel that
-receives settings. So `ReadableDevice` needs to be renamed?
-
-```
-let dev1: Device<bool> = ...
-let dev2: Device<f64> = ...
-
-let update_fn: async fn(bool, f64) -> Result<> =
-    fwork.group(dev1, dev2);
-```

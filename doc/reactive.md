@@ -32,7 +32,7 @@ represent the data used when reading or writing to hardware.
 ### Primitive Types
 
     bool                                true, false
-    int         64-bit, signed          1, 1_000, -32_000_000
+    int         32-bit, signed          1, 1_000, -32_000_000
     float       64-bit, IEEE            1.0, 1.5e30
     string      utf-8 encoded           "can contain text"
     color       32-bit, unsigned        #ffffffff,

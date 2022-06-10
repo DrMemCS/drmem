@@ -22,10 +22,10 @@ for clients to use. This interface gives clients these abilities:
 - [ ] Get time range of data for a device.
 - [ ] Receive stream of updates from a device.
 - [ ] Send settings to devices.
-- [ ] Get device info.
+- [X] Get device info.
 - [ ] Set device info.
-- [ ] Gets loaded drivers and their information.
-- [ ] Gets devices managed by this node.
+- [X] Gets loaded drivers and their information.
+- [X] Gets devices managed by this node.
 - Security considerations
   - Devices can be marked public/private? Public devices are
     accessible to the Reactive Engine and external clients. Private
@@ -65,22 +65,12 @@ project.
   - [X] Needs to use the final driver API
 - [ ] Memory driver (allows typed locations to save settings and report
       as readings.)
-- [ ] Weather driver
-  - [ ] There will probably be multiple drivers based on the source of
+- [X] Weather driver
+  - [X] There will probably be multiple drivers based on the source of
         the weather data. The author's initial effort would be called
-	`drmem-dev-weather-noaa` as it uses METAR data from NOAA.
+	    `drmem-drv-weather-wu` as it uses Weather Underground.
 - [ ] System driver (monitors local machine's resources)
 - [ ] Philips Hue driver. Includes not only Philips bulbs, switches, and
       motion sensors but any ZigBee device that happens to work with it.
 - [ ] Tuya driver. An API used by many WiFi-based builbs, plugs, etc.
 - [X] NTPD driver.
-
-# Reactive Engine
-
-The RE is a standalone process that uses the client API to read and
-set devices. It will read a source file that describes how inputs
-should control outputs.
-
-- [ ] Must apply device updates in timestamp order.
-- [ ] Devices with the same timestamp must all be applied before
-      updating logic.
