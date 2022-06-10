@@ -108,7 +108,7 @@ impl Config {
 		       and a driver with that name exists, a single \
 		       element array is returned. Otherwise `null` is \
 		       returned.",
-        arguments(arg1(
+        arguments(arg2(
             description = "An optional argument which, when provided, \
 			   only returns driver information whose name \
 			   matches. If this argument isn't provided, \
@@ -147,7 +147,10 @@ impl Config {
 
     #[graphql(description = "Returns information about devices that match \
 			     the specified `pattern`. If no pattern is \
-			     provided, all devices are returned.")]
+			     provided, all devices are returned.\n\n\
+			     NOTE: At this point, the only supported pattern \
+			     is the entire device name. Proper pattern \
+			     handling will be added soon.")]
     async fn device_info(
         #[graphql(context)] db: &ConfigDb, pattern: Option<String>,
     ) -> result::Result<Vec<DeviceInfo>, FieldError> {
@@ -182,11 +185,58 @@ impl EditConfig {
 
 struct Control;
 
-#[juniper::graphql_object(context = ConfigDb)]
+#[juniper::graphql_object(
+    context = ConfigDb,
+    description = "These queries allow devices to be modified."
+)]
 impl Control {
-    fn modify_device(
-        _device: String, _value: f64,
+    #[graphql(description = "Changes the value of a device to the specified, \
+		       boolean value. If the device doesn't accept boolean \
+		       values, an error is returned. This query will return \
+		       the value that was set, which might not be the same \
+		       value specified. For instance, hardware may be in a \
+		       \"locked\" state and so a device can't be set to \
+		       `true`. In a case like that, `false` would be returned.")]
+    fn set_boolean(
+        _device: String, _value: bool,
     ) -> result::Result<bool, FieldError> {
+        Err(FieldError::new("not implemented", Value::null()))
+    }
+
+    #[graphql(description = "Changes the value of a device to the specified, \
+		       integer value. If the device doesn't accept integer \
+		       values, an error is returned. This query returns the \
+		       actual value used by the driver, which may not be \
+		       the same value specified. For instance, if the device \
+		       only accepts a range of values, some drivers may \
+		       return an error and others might clip the setting to \
+		       keep it in range.")]
+    fn set_integer(
+        _device: String, _value: i32,
+    ) -> result::Result<i32, FieldError> {
+        Err(FieldError::new("not implemented", Value::null()))
+    }
+
+    #[graphql(description = "Changes the value of a device to the specified, \
+		       floating point value. If the device doesn't accept \
+		       floating point values, an error is returned. This \
+		       query returns the actual value used by the driver, \
+		       which may not be the same value specified. For \
+		       instance, if the device only accepts a range of \
+		       values, some drivers may return an error and others \
+		       might clip the setting to keep it in range.")]
+    fn set_float(
+        _device: String, _value: f64,
+    ) -> result::Result<f64, FieldError> {
+        Err(FieldError::new("not implemented", Value::null()))
+    }
+
+    #[graphql(description = "Changes the value of a device to the specified, \
+		       string value. If the device doesn't accept string \
+		       values, an error is returned.")]
+    fn set_string(
+        _device: String, _value: String,
+    ) -> result::Result<String, FieldError> {
         Err(FieldError::new("not implemented", Value::null()))
     }
 }
