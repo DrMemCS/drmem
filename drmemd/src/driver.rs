@@ -121,6 +121,19 @@ impl DriverDb {
     pub fn create() -> DriverDb {
         let mut table = HashMap::new();
 
+        {
+            use drmem_drv_timer::Timer;
+
+            table.insert(
+                Timer::NAME,
+                Driver::create(
+                    Timer::SUMMARY,
+                    Timer::DESCRIPTION,
+                    <Timer as API>::create_instance,
+                ),
+            );
+        }
+
         // Load the set-up for the NTP monitor.
 
         #[cfg(feature = "driver-ntp")]
