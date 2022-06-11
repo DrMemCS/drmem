@@ -26,7 +26,14 @@ The driver creates these devices:
 | Base Name | Type     | Units | Comment                                                        |
 |-----------|----------|-------|----------------------------------------------------------------|
 | `enable`  | bool, RW |       | A `false` to `true` transition will reset and start the timer. |
-| `output`  | bool, RO |       | Set to the address of the sync-ed server.                      |
+| `output`  | bool, RO |       | Output state of timer.                                         |
+
+Every value sent to the `enable` device will be reported -- even
+duplicates. This allows one to, if using the redis backend, see the
+history of settings made to the device. The `output` device, however,
+only reports state changes. So if a client were to start the timer and
+start it again before it expires, the `output` would only report the
+initial active and then the final inactive values.
 
 ## History
 
