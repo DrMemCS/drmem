@@ -21,10 +21,10 @@ pub enum Request {
     },
 
     SetDevice {
-	name: device::Name,
-	value: device::Value,
-	rpy_chan: oneshot::Sender<Result<device::Value>>
-    }
+        name: device::Name,
+        value: device::Value,
+        rpy_chan: oneshot::Sender<Result<device::Value>>,
+    },
 }
 
 /// A handle which is used to communicate with the core of DrMem.
@@ -42,28 +42,35 @@ impl RequestChan {
         RequestChan { req_chan }
     }
 
-    pub async fn set_device<T: Into<device::Value> + TryFrom<device::Value, Error = Error>>(
-	&self, name: device::Name, value: T
-    ) -> Result<T>
-    {
-	let (tx, rx) = oneshot::channel();
-	let msg = Request::SetDevice { name, value: value.into(), rpy_chan: tx };
-	let result = self.req_chan.send(msg).await;
+    pub async fn set_device<
+        T: Into<device::Value> + TryFrom<device::Value, Error = Error>,
+    >(
+        &self, name: device::Name, value: T,
+    ) -> Result<T> {
+        let (tx, rx) = oneshot::channel();
+        let msg = Request::SetDevice {
+            name,
+            value: value.into(),
+            rpy_chan: tx,
+        };
+        let result = self.req_chan.send(msg).await;
 
         if result.is_ok() {
-	    if let Ok(reply) = rx.await {
-		match reply {
-		    Ok(v) => T::try_from(v),
-		    Err(e) => Err(e)
-		}
-	    } else {
-                Err(Error::MissingPeer(String::from("core didn't reply to request")))
-	    }
+            if let Ok(reply) = rx.await {
+                match reply {
+                    Ok(v) => T::try_from(v),
+                    Err(e) => Err(e),
+                }
+            } else {
+                Err(Error::MissingPeer(String::from(
+                    "core didn't reply to request",
+                )))
+            }
         } else {
             Err(Error::MissingPeer(String::from(
-		"core didn't accept request",
+                "core didn't accept request",
             )))
-	}
+        }
     }
 
     pub async fn get_device_info(

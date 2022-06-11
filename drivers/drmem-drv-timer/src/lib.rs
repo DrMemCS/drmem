@@ -8,7 +8,7 @@ use drmem_api::{
 };
 use std::{future::Future, pin::Pin};
 use tokio::time;
-use tracing::{self, error, warn, debug};
+use tracing::{self, debug, error, warn};
 
 // This enum represents the four states in which the timer can
 // be. They are a combination of the `enable` input and whether we're
@@ -121,15 +121,15 @@ impl Timer {
                 // return a new timeout value. A user has reset the
                 // timer while is was in a previous timing cycle.
 
-		(
-		    None,
+                (
+                    None,
                     if val {
-			self.state = TimerState::Timing;
-			Some(time::Instant::now() + self.millis)
+                        self.state = TimerState::Timing;
+                        Some(time::Instant::now() + self.millis)
                     } else {
-			None
-                    }
-		)
+                        None
+                    },
+                )
             }
 
             // Not currently timing, but the input was `false`.
@@ -213,7 +213,7 @@ impl driver::API for Timer {
             (self.d_output)((!self.active_level).into()).await?;
 
             loop {
-		debug!("state {:?} : waiting for event", &self.state);
+                debug!("state {:?} : waiting for event", &self.state);
 
                 tokio::select! {
                     // If the driver is in a timing cycle, add the
@@ -245,24 +245,24 @@ impl driver::API for Timer {
 			// new value.
 
 			if let device::Value::Bool(b) = v {
-			    let (out, tmo) = self.update_state(b);
-			    let _ = tx.send(Ok(v));
+                            let (out, tmo) = self.update_state(b);
+                            let _ = tx.send(Ok(v));
 
-			    debug!("state {:?} : new input -> {}", &self.state, b);
+                            debug!("state {:?} : new input -> {}", &self.state, b);
 
-			    if let Some(tmo) = tmo {
+                            if let Some(tmo) = tmo {
 				timeout = tmo
-			    }
+                            }
 
-			    (self.d_enable)(b.into()).await?;
+                            (self.d_enable)(b.into()).await?;
 
-			    if let Some(out) = out {
+                            if let Some(out) = out {
 				(self.d_output)(out.into()).await?;
-			    }
+                            }
 			} else {
-			    let _ = tx.send(Err(Error::TypeError));
+                            let _ = tx.send(Err(Error::TypeError));
 
-			    warn!("state {:?} : received bad value -> {:?}", &self.state, &v);
+                            warn!("state {:?} : received bad value -> {:?}", &self.state, &v);
 			}
                     }
                 }
@@ -299,48 +299,48 @@ mod tests {
         );
 
         assert_eq!(timer.state, TimerState::Armed);
-	assert_eq!((None, None), timer.update_state(false));
+        assert_eq!((None, None), timer.update_state(false));
 
-	let (a, b) = timer.update_state(true);
+        let (a, b) = timer.update_state(true);
 
         assert_eq!(timer.state, TimerState::Timing);
-	assert_eq!(Some(true), a);
-	assert!(b.is_some());
+        assert_eq!(Some(true), a);
+        assert!(b.is_some());
 
-	assert_eq!((None, None), timer.update_state(true));
+        assert_eq!((None, None), timer.update_state(true));
         assert_eq!(timer.state, TimerState::Timing);
 
-	assert_eq!((None, None), timer.update_state(false));
+        assert_eq!((None, None), timer.update_state(false));
         assert_eq!(timer.state, TimerState::TimingAndArmed);
 
-	assert_eq!((None, None), timer.update_state(false));
+        assert_eq!((None, None), timer.update_state(false));
         assert_eq!(timer.state, TimerState::TimingAndArmed);
 
-	let (a, b) = timer.update_state(true);
+        let (a, b) = timer.update_state(true);
 
         assert_eq!(timer.state, TimerState::Timing);
-	assert!(a.is_none());
-	assert!(b.is_some());
+        assert!(a.is_none());
+        assert!(b.is_some());
 
-	timer.time_expired();
+        timer.time_expired();
         assert_eq!(timer.state, TimerState::TimedOut);
 
-	assert_eq!((None, None), timer.update_state(true));
+        assert_eq!((None, None), timer.update_state(true));
         assert_eq!(timer.state, TimerState::TimedOut);
 
-	assert_eq!((None, None), timer.update_state(false));
+        assert_eq!((None, None), timer.update_state(false));
         assert_eq!(timer.state, TimerState::Armed);
 
-	let (a, b) = timer.update_state(true);
+        let (a, b) = timer.update_state(true);
 
         assert_eq!(timer.state, TimerState::Timing);
-	assert_eq!(Some(true), a);
-	assert!(b.is_some());
+        assert_eq!(Some(true), a);
+        assert!(b.is_some());
 
-	assert_eq!((None, None), timer.update_state(false));
+        assert_eq!((None, None), timer.update_state(false));
         assert_eq!(timer.state, TimerState::TimingAndArmed);
 
-	timer.time_expired();
+        timer.time_expired();
         assert_eq!(timer.state, TimerState::Armed);
     }
 }

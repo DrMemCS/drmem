@@ -90,18 +90,18 @@ impl State {
                 }
             }
 
-	    client::Request::SetDevice {
-		name,
-		value,
-		rpy_chan
-	    } => {
+            client::Request::SetDevice {
+                name,
+                value,
+                rpy_chan,
+            } => {
                 let fut = self.backend.set_device(name, value);
                 let result = fut.await;
 
                 if rpy_chan.send(result).is_err() {
                     warn!("driver exited before a reply could be sent")
                 }
-	    }
+            }
         }
     }
 

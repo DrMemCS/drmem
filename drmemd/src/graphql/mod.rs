@@ -1,4 +1,7 @@
-use drmem_api::{client, types::{device, Error}};
+use drmem_api::{
+    client,
+    types::{device, Error},
+};
 use futures::TryFutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{server::Server, Body, Method, Response, StatusCode};
@@ -186,22 +189,25 @@ impl EditConfig {
 struct Control;
 
 impl Control {
-    async fn perform_setting<T: Into<device::Value> + TryFrom<device::Value, Error = Error>> (
+    async fn perform_setting<
+        T: Into<device::Value> + TryFrom<device::Value, Error = Error>,
+    >(
         db: &ConfigDb, device: &str, value: T,
     ) -> result::Result<T, FieldError> {
-	if let Ok(name) = device.parse::<device::Name>() {
+        if let Ok(name) = device.parse::<device::Name>() {
             let tx = db.1.clone();
 
-	    tx.set_device::<T>(name, value).await
-		.map_err(|e| {
-		    let errmsg = format!("{}", &e);
+            tx.set_device::<T>(name, value).await.map_err(|e| {
+                let errmsg = format!("{}", &e);
 
-		    FieldError::new("error making setting",
-				    graphql_value!({ "error": errmsg }))
-		})
-	} else {
-	    Err(FieldError::new("badly formed device name", Value::null()))
-	}
+                FieldError::new(
+                    "error making setting",
+                    graphql_value!({ "error": errmsg }),
+                )
+            })
+        } else {
+            Err(FieldError::new("badly formed device name", Value::null()))
+        }
     }
 }
 
@@ -220,7 +226,7 @@ impl Control {
     async fn set_boolean(
         #[graphql(context)] db: &ConfigDb, device: String, value: bool,
     ) -> result::Result<bool, FieldError> {
-	Control::perform_setting(db, &device, value).await
+        Control::perform_setting(db, &device, value).await
     }
 
     #[graphql(description = "Changes the value of a device to the specified, \
@@ -234,7 +240,7 @@ impl Control {
     async fn set_integer(
         #[graphql(context)] db: &ConfigDb, device: String, value: i32,
     ) -> result::Result<i32, FieldError> {
-	Control::perform_setting(db, &device, value).await
+        Control::perform_setting(db, &device, value).await
     }
 
     #[graphql(description = "Changes the value of a device to the specified, \
@@ -248,7 +254,7 @@ impl Control {
     async fn set_float(
         #[graphql(context)] db: &ConfigDb, device: String, value: f64,
     ) -> result::Result<f64, FieldError> {
-	Control::perform_setting(db, &device, value).await
+        Control::perform_setting(db, &device, value).await
     }
 
     #[graphql(description = "Changes the value of a device to the specified, \
@@ -257,7 +263,7 @@ impl Control {
     async fn set_string(
         #[graphql(context)] db: &ConfigDb, device: String, value: String,
     ) -> result::Result<String, FieldError> {
-	Control::perform_setting(db, &device, value).await
+        Control::perform_setting(db, &device, value).await
     }
 }
 
