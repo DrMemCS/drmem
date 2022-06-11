@@ -121,12 +121,15 @@ impl Timer {
                 // return a new timeout value. A user has reset the
                 // timer while is was in a previous timing cycle.
 
-                if val {
-                    self.state = TimerState::Timing;
-                    (None, Some(time::Instant::now() + self.millis))
-                } else {
-                    (None, None)
-                }
+		(
+		    None,
+                    if val {
+			self.state = TimerState::Timing;
+			Some(time::Instant::now() + self.millis)
+                    } else {
+			None
+                    }
+		)
             }
 
             // Not currently timing, but the input was `false`.
