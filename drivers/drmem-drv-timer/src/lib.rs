@@ -245,9 +245,9 @@ impl driver::API for Timer {
 			// new value.
 
 			if let device::Value::Bool(b) = v {
+			    let (out, tmo) = self.update_state(b);
 			    let _ = tx.send(Ok(v));
 
-			    let (out, tmo) = self.update_state(b);
 			    debug!("state {:?} : new input -> {}", &self.state, b);
 
 			    if let Some(tmo) = tmo {
