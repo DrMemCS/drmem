@@ -8,7 +8,7 @@ use drmem_api::{
 };
 use std::{future::Future, pin::Pin};
 use tokio::time;
-use tracing::{self, error, warn, info};
+use tracing::{self, error, warn, debug};
 
 // This enum represents the four states in which the timer can
 // be. They are a combination of the `enable` input and whether we're
@@ -213,11 +213,15 @@ impl driver::API for Timer {
             (self.d_output)((!self.active_level).into()).await?;
 
             loop {
+		debug!("state {:?} : waiting for event", &self.state);
+
                 tokio::select! {
                     // If the driver is in a timing cycle, add the
                     // sleep future to the list of futures to await.
 
                     _ = time::sleep_until(timeout), if self.timing() => {
+			debug!("state {:?} : timeout occurred", &self.state);
+
 			// If the timeout occurs, update the state and
 			// set the output to the inactive value.
 
@@ -244,6 +248,7 @@ impl driver::API for Timer {
 			    let _ = tx.send(Ok(v));
 
 			    let (out, tmo) = self.update_state(b);
+			    debug!("state {:?} : new input -> {}", &self.state, b);
 
 			    if let Some(tmo) = tmo {
 				timeout = tmo
@@ -256,6 +261,8 @@ impl driver::API for Timer {
 			    }
 			} else {
 			    let _ = tx.send(Err(Error::TypeError));
+
+			    warn!("state {:?} : received bad value -> {:?}", &self.state, &v);
 			}
                     }
                 }
