@@ -12,9 +12,8 @@ pub enum Value {
     Bool(bool),
 
     /// For devices that return/accept an integer value. It is stored
-    /// as a signed, 64-bit value so a device returning an unsinged,
-    /// 32-bit integer will have enough space to represent it.
-    Int(i64),
+    /// as a signed, 32-bit.
+    Int(i32),
 
     /// For devices that return/accept floating point numbers.
     Flt(f64),
@@ -57,32 +56,12 @@ impl From<bool> for Value {
     }
 }
 
-impl TryFrom<Value> for i64 {
-    type Error = Error;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        if let Value::Int(v) = value {
-            Ok(v)
-        } else {
-            Err(Error::TypeError)
-        }
-    }
-}
-
-impl From<i64> for Value {
-    fn from(value: i64) -> Self {
-        Value::Int(value)
-    }
-}
-
 impl TryFrom<Value> for i32 {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Int(v) = value {
-            if let Ok(v) = i32::try_from(v) {
-                return Ok(v);
-            }
+            return Ok(v);
         }
         Err(Error::TypeError)
     }
@@ -90,26 +69,7 @@ impl TryFrom<Value> for i32 {
 
 impl From<i32> for Value {
     fn from(value: i32) -> Self {
-        Value::Int(i64::from(value))
-    }
-}
-
-impl TryFrom<Value> for u32 {
-    type Error = Error;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        if let Value::Int(v) = value {
-            if let Ok(v) = u32::try_from(v) {
-                return Ok(v);
-            }
-        }
-        Err(Error::TypeError)
-    }
-}
-
-impl From<u32> for Value {
-    fn from(value: u32) -> Self {
-        Value::Int(i64::from(value))
+        Value::Int(value)
     }
 }
 
@@ -128,7 +88,7 @@ impl TryFrom<Value> for i16 {
 
 impl From<i16> for Value {
     fn from(value: i16) -> Self {
-        Value::Int(i64::from(value))
+        Value::Int(i32::from(value))
     }
 }
 
@@ -147,7 +107,7 @@ impl TryFrom<Value> for u16 {
 
 impl From<u16> for Value {
     fn from(value: u16) -> Self {
-        Value::Int(i64::from(value))
+        Value::Int(i32::from(value))
     }
 }
 
@@ -203,9 +163,9 @@ mod tests {
         assert_eq!(Value::Bool(true), Value::from(true));
         assert_eq!(Value::Bool(false), Value::from(false));
 
-        assert_eq!(Value::Int(0), Value::from(0i64));
+        assert_eq!(Value::Int(0), Value::from(0i32));
         assert_eq!(Value::Int(-1), Value::from(-1i32));
-        assert_eq!(Value::Int(2), Value::from(2u32));
+        assert_eq!(Value::Int(2), Value::from(2i32));
         assert_eq!(Value::Int(-3), Value::from(-3i16));
         assert_eq!(Value::Int(4), Value::from(4u16));
 
@@ -226,53 +186,34 @@ mod tests {
         assert!(bool::try_from(Value::Flt(0.0)).is_err());
         assert!(bool::try_from(Value::Str(String::from("hello"))).is_err());
 
-        // Check that we can convert i64 values.
-
-        assert!(i64::try_from(Value::Bool(true)).is_err());
-        assert_eq!(i64::try_from(Value::Int(0)), Ok(0i64));
-        assert!(i64::try_from(Value::Flt(0.0)).is_err());
-        assert!(i64::try_from(Value::Str(String::from("hello"))).is_err());
-
-        // Check that we can convert u32 values.
+        // Check that we can convert i32 values.
 
         assert!(i32::try_from(Value::Bool(true)).is_err());
-        assert_eq!(i32::try_from(Value::Int(0x7fffffffi64)), Ok(0x7fffffffi32));
+        assert_eq!(i32::try_from(Value::Int(0x7fffffffi32)), Ok(0x7fffffffi32));
         assert_eq!(
-            i32::try_from(Value::Int(-0x80000000i64)),
+            i32::try_from(Value::Int(-0x80000000i32)),
             Ok(-0x80000000i32)
         );
-        assert!(i32::try_from(Value::Int(0x80000000i64)).is_err());
-        assert!(i32::try_from(Value::Int(-0x80000000i64 - 1i64)).is_err());
         assert!(i32::try_from(Value::Flt(0.0)).is_err());
         assert!(i32::try_from(Value::Str(String::from("hello"))).is_err());
-
-        // Check that we can convert u32 values.
-
-        assert!(u32::try_from(Value::Bool(true)).is_err());
-        assert_eq!(u32::try_from(Value::Int(0xffffffffi64)), Ok(0xffffffffu32));
-        assert_eq!(u32::try_from(Value::Int(0i64)), Ok(0u32));
-        assert!(u32::try_from(Value::Int(0x100000000i64)).is_err());
-        assert!(u32::try_from(Value::Int(-1i64)).is_err());
-        assert!(u32::try_from(Value::Flt(0.0)).is_err());
-        assert!(u32::try_from(Value::Str(String::from("hello"))).is_err());
 
         // Check that we can convert i16 values.
 
         assert!(i16::try_from(Value::Bool(true)).is_err());
-        assert_eq!(i16::try_from(Value::Int(0x7fffi64)), Ok(0x7fffi16));
-        assert_eq!(i16::try_from(Value::Int(-0x8000i64)), Ok(-0x8000i16));
-        assert!(i16::try_from(Value::Int(0x8000i64)).is_err());
-        assert!(i16::try_from(Value::Int(-0x8000i64 - 1i64)).is_err());
+        assert_eq!(i16::try_from(Value::Int(0x7fffi32)), Ok(0x7fffi16));
+        assert_eq!(i16::try_from(Value::Int(-0x8000i32)), Ok(-0x8000i16));
+        assert!(i16::try_from(Value::Int(0x8000i32)).is_err());
+        assert!(i16::try_from(Value::Int(-0x8000i32 - 1i32)).is_err());
         assert!(i16::try_from(Value::Flt(0.0)).is_err());
         assert!(i16::try_from(Value::Str(String::from("hello"))).is_err());
 
         // Check that we can convert u16 values.
 
         assert!(u16::try_from(Value::Bool(true)).is_err());
-        assert_eq!(u16::try_from(Value::Int(0xffffi64)), Ok(0xffffu16));
-        assert_eq!(u16::try_from(Value::Int(0i64)), Ok(0u16));
-        assert!(u16::try_from(Value::Int(0x10000i64)).is_err());
-        assert!(u16::try_from(Value::Int(-1i64)).is_err());
+        assert_eq!(u16::try_from(Value::Int(0xffffi32)), Ok(0xffffu16));
+        assert_eq!(u16::try_from(Value::Int(0i32)), Ok(0u16));
+        assert!(u16::try_from(Value::Int(0x10000i32)).is_err());
+        assert!(u16::try_from(Value::Int(-1i32)).is_err());
         assert!(u16::try_from(Value::Flt(0.0)).is_err());
         assert!(u16::try_from(Value::Str(String::from("hello"))).is_err());
     }
