@@ -19,6 +19,12 @@ pub enum Request {
         pattern: Option<String>,
         rpy_chan: oneshot::Sender<Vec<DevInfoReply>>,
     },
+
+    SetDevice {
+	name: device::Name,
+	value: device::Value,
+	rpy_chan: oneshot::Sender<Result<device::Value>>
+    }
 }
 
 /// A handle which is used to communicate with the core of DrMem.
@@ -34,6 +40,30 @@ pub struct RequestChan {
 impl RequestChan {
     pub fn new(req_chan: mpsc::Sender<Request>) -> Self {
         RequestChan { req_chan }
+    }
+
+    pub async fn set_device<T: Into<device::Value> + TryFrom<device::Value, Error = Error>>(
+	&self, name: device::Name, value: T
+    ) -> Result<T>
+    {
+	let (tx, rx) = oneshot::channel();
+	let msg = Request::SetDevice { name, value: value.into(), rpy_chan: tx };
+	let result = self.req_chan.send(msg).await;
+
+        if result.is_ok() {
+	    if let Ok(reply) = rx.await {
+		match reply {
+		    Ok(v) => T::try_from(v),
+		    Err(e) => Err(e)
+		}
+	    } else {
+                Err(Error::MissingPeer(String::from("core didn't reply to request")))
+	    }
+        } else {
+            Err(Error::MissingPeer(String::from(
+		"core didn't accept request",
+            )))
+	}
     }
 
     pub async fn get_device_info(

@@ -8,7 +8,7 @@ use drmem_api::{
 };
 use std::{future::Future, pin::Pin};
 use tokio::time;
-use tracing::error;
+use tracing::{self, error, warn, info};
 
 // This enum represents the four states in which the timer can
 // be. They are a combination of the `enable` input and whether we're

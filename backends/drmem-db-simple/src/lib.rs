@@ -23,7 +23,7 @@ use drmem_config::backend;
 use futures_util::future;
 use std::collections::{hash_map, HashMap};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{oneshot, broadcast, mpsc};
 use tracing::error;
 
 const CHAN_SIZE: usize = 20;
@@ -228,6 +228,28 @@ impl Store for SimpleStore {
             .collect();
 
         Ok(res)
+    }
+
+    async fn set_device(&self, name: Name, value: Value) -> Result<Value> {
+	if let Some(di) = self.0.get(&name) {
+	    if let Some(tx) = &di.tx_setting {
+		let (tx_rpy, rx_rpy) = oneshot::channel();
+
+		match tx.send((value, tx_rpy)).await {
+		    Ok(()) => {
+			match rx_rpy.await {
+			    Ok(reply) => reply,
+			    Err(_) => Err(Error::MissingPeer("driver broke connection".to_string()))
+			}
+		    }
+		    Err(_) => Err(Error::MissingPeer("driver is ignoring settings".to_string()))
+		}
+	    } else {
+		Err(Error::OperationError)
+	    }
+	} else {
+	    Err(Error::NotFound)
+	}
     }
 }
 

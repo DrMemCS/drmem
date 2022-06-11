@@ -1,4 +1,4 @@
-use drmem_api::{client, types::Error};
+use drmem_api::{client, types::{device, Error}};
 use futures::TryFutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{server::Server, Body, Method, Response, StatusCode};
@@ -185,6 +185,26 @@ impl EditConfig {
 
 struct Control;
 
+impl Control {
+    async fn perform_setting<T: Into<device::Value> + TryFrom<device::Value, Error = Error>> (
+        db: &ConfigDb, device: &str, value: T,
+    ) -> result::Result<T, FieldError> {
+	if let Ok(name) = device.parse::<device::Name>() {
+            let tx = db.1.clone();
+
+	    tx.set_device::<T>(name, value).await
+		.map_err(|e| {
+		    let errmsg = format!("{}", &e);
+
+		    FieldError::new("error making setting",
+				    graphql_value!({ "error": errmsg }))
+		})
+	} else {
+	    Err(FieldError::new("badly formed device name", Value::null()))
+	}
+    }
+}
+
 #[juniper::graphql_object(
     context = ConfigDb,
     description = "These queries allow devices to be modified."
@@ -197,10 +217,10 @@ impl Control {
 		       value specified. For instance, hardware may be in a \
 		       \"locked\" state and so a device can't be set to \
 		       `true`. In a case like that, `false` would be returned.")]
-    fn set_boolean(
-        _device: String, _value: bool,
+    async fn set_boolean(
+        #[graphql(context)] db: &ConfigDb, device: String, value: bool,
     ) -> result::Result<bool, FieldError> {
-        Err(FieldError::new("not implemented", Value::null()))
+	Control::perform_setting(db, &device, value).await
     }
 
     #[graphql(description = "Changes the value of a device to the specified, \
@@ -211,10 +231,10 @@ impl Control {
 		       only accepts a range of values, some drivers may \
 		       return an error and others might clip the setting to \
 		       keep it in range.")]
-    fn set_integer(
-        _device: String, _value: i32,
+    async fn set_integer(
+        #[graphql(context)] db: &ConfigDb, device: String, value: i32,
     ) -> result::Result<i32, FieldError> {
-        Err(FieldError::new("not implemented", Value::null()))
+	Control::perform_setting(db, &device, value).await
     }
 
     #[graphql(description = "Changes the value of a device to the specified, \
@@ -225,19 +245,19 @@ impl Control {
 		       instance, if the device only accepts a range of \
 		       values, some drivers may return an error and others \
 		       might clip the setting to keep it in range.")]
-    fn set_float(
-        _device: String, _value: f64,
+    async fn set_float(
+        #[graphql(context)] db: &ConfigDb, device: String, value: f64,
     ) -> result::Result<f64, FieldError> {
-        Err(FieldError::new("not implemented", Value::null()))
+	Control::perform_setting(db, &device, value).await
     }
 
     #[graphql(description = "Changes the value of a device to the specified, \
 		       string value. If the device doesn't accept string \
 		       values, an error is returned.")]
-    fn set_string(
-        _device: String, _value: String,
+    async fn set_string(
+        #[graphql(context)] db: &ConfigDb, device: String, value: String,
     ) -> result::Result<String, FieldError> {
-        Err(FieldError::new("not implemented", Value::null()))
+	Control::perform_setting(db, &device, value).await
     }
 }
 
