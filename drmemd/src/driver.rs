@@ -134,6 +134,19 @@ impl DriverDb {
             );
         }
 
+        {
+            use drmem_drv_cycle::Instance;
+
+            table.insert(
+                Instance::NAME,
+                Driver::create(
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    <Instance as API>::create_instance,
+                ),
+            );
+        }
+
         // Load the set-up for the NTP monitor.
 
         #[cfg(feature = "driver-ntp")]
