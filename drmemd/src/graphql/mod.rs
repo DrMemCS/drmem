@@ -281,54 +281,57 @@ impl MutRoot {
 
 pub async fn server(
     db: crate::driver::DriverDb, cchan: client::RequestChan,
-) -> Result<(), Error> {
+) -> Result<Infallible, Error> {
     let addr = ([0, 0, 0, 0], 3000).into();
-    let root_node =
-        Arc::new(RootNode::new(Config, MutRoot, EmptySubscription::new()));
     let db = Arc::new(ConfigDb(db, cchan));
 
-    let make_svc = make_service_fn(move |_| {
-        let root_node = root_node.clone();
-        let ctx = db.clone();
+    loop {
+	let root_node =
+            Arc::new(RootNode::new(Config, MutRoot, EmptySubscription::new()));
+	let db = db.clone();
+	let make_svc = make_service_fn(move |_| {
+            let root_node = root_node.clone();
+            let ctx = db.clone();
 
-        async {
-            Ok::<_, Infallible>(service_fn(move |req| {
-                let root_node = root_node.clone();
-                let ctx = ctx.clone();
+            async {
+		Ok::<_, Infallible>(service_fn(move |req| {
+                    let root_node = root_node.clone();
+                    let ctx = ctx.clone();
 
-                async {
-                    match (req.method(), req.uri().path()) {
-                        (&Method::GET, "/") => {
-                            let resp =
-                                juniper_hyper::graphiql("/graphql", None).await;
+                    async {
+			match (req.method(), req.uri().path()) {
+                            (&Method::GET, "/") => {
+				let resp =
+                                    juniper_hyper::graphiql("/graphql", None).await;
 
-                            Ok::<_, hyper::Error>(resp)
-                        }
+				Ok::<_, hyper::Error>(resp)
+                            }
 
-                        (&Method::GET, "/graphql")
-                        | (&Method::POST, "/graphql") => Ok::<_, hyper::Error>(
-                            juniper_hyper::graphql(root_node, ctx, req)
-                                .instrument(info_span!("graphql"))
-                                .await,
-                        ),
+                            (&Method::GET, "/graphql")
+				| (&Method::POST, "/graphql") => Ok::<_, hyper::Error>(
+				    juniper_hyper::graphql(root_node, ctx, req)
+					.instrument(info_span!("graphql"))
+					.await,
+				),
 
-                        _ => {
-                            let mut resp = Response::new(Body::empty());
+                            _ => {
+				let mut resp = Response::new(Body::empty());
 
-                            *resp.status_mut() = StatusCode::NOT_FOUND;
-                            Ok::<_, hyper::Error>(resp)
-                        }
+				*resp.status_mut() = StatusCode::NOT_FOUND;
+				Ok::<_, hyper::Error>(resp)
+                            }
+			}
                     }
-                }
-            }))
-        }
-    });
+		}))
+            }
+	});
 
-    Server::bind(&addr)
-        .serve(make_svc)
-        .map_err(|e| {
-            error!("web server stopped -- {}", &e);
-            Error::UnknownError
-        })
-        .await
+	Server::bind(&addr)
+            .serve(make_svc)
+            .map_err(|e| {
+		error!("web server stopped -- {}", &e);
+		Error::UnknownError
+            })
+            .await?
+    }
 }

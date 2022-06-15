@@ -4,9 +4,8 @@ use drmem_api::{
     Result,
 };
 use std::future::Future;
-use std::net::SocketAddrV4;
-use std::pin::Pin;
-use std::{net::SocketAddr, str};
+use std::{convert::Infallible, pin::Pin};
+use std::{net::{SocketAddr, SocketAddrV4}, str};
 use tokio::net::UdpSocket;
 use tokio::time::{self, Duration};
 use tracing::{debug, error, info, warn, Span};
@@ -356,7 +355,7 @@ impl driver::API for NtpState {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Infallible>> + Send + 'a>> {
         let fut = async {
             // Record the peer's address in the "cfg" field of the
             // span.

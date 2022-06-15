@@ -3,6 +3,7 @@ use drmem_config::Config;
 use futures::future;
 use tokio::task::JoinHandle;
 use tracing::{error, trace, warn};
+use std::convert::Infallible;
 
 mod core;
 mod driver;
@@ -46,14 +47,25 @@ async fn init_app() -> Option<Config> {
     }
 }
 
-async fn wrap_task(handle: JoinHandle<Result<()>>) -> Result<()> {
+async fn wrap_task(handle: JoinHandle<Result<Infallible>>) -> Result<Infallible> {
     match handle.await {
-        Err(e) if e.is_panic() => error!("terminated due to panic"),
-        Err(_) => error!("terminated due to cancellation"),
-        Ok(Err(e)) => error!("task returned error -- {}", &e),
-        Ok(Ok(())) => (),
+        Err(e) if e.is_panic() => {
+	    error!("terminated due to panic");
+	    Err(Error::OperationError)
+	}
+
+        Err(_) => {
+	    error!("terminated due to cancellation");
+	    Err(Error::OperationError)
+	}
+
+	Ok(Ok(_)) => unreachable!(),
+
+        Ok(Err(e)) => {
+	    error!("task returned error -- {}", &e);
+	    Err(e)
+	}
     }
-    Ok(())
 }
 
 // Runs the main body of the application. This top-level task reads

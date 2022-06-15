@@ -3,6 +3,7 @@ use drmem_config::{backend, Config};
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{info, info_span, warn};
 use tracing_futures::Instrument;
+use std::convert::Infallible;
 
 // Define a `store` module that pulls in the appropriate backend.
 
@@ -111,19 +112,22 @@ impl State {
     async fn run(
         mut self, mut rx_drv_req: mpsc::Receiver<driver::Request>,
         mut rx_clnt_req: mpsc::Receiver<client::Request>,
-    ) -> Result<()> {
+    ) -> Result<Infallible> {
         info!("starting");
         loop {
             tokio::select! {
-            Some(req) = rx_drv_req.recv() =>
-                        self.handle_driver_request(req).await,
-            Some(req) = rx_clnt_req.recv() =>
-                        self.handle_client_request(req).await,
-            else => break
-                }
+		Some(req) = rx_drv_req.recv() =>
+                    self.handle_driver_request(req).await,
+		Some(req) = rx_clnt_req.recv() =>
+                    self.handle_client_request(req).await,
+		else => break
+            }
         }
-        warn!("no drivers or clients left");
-        Ok(())
+
+	const ERR_MSG: &str = "no drivers or clients left";
+
+        warn!(ERR_MSG);
+	Err(Error::MissingPeer(ERR_MSG.to_string()))
     }
 }
 
@@ -135,7 +139,7 @@ pub async fn start(
 ) -> Result<(
     mpsc::Sender<driver::Request>,
     client::RequestChan,
-    JoinHandle<Result<()>>,
+    JoinHandle<Result<Infallible>>,
 )> {
     // Create a channel that drivers can use to make requests to the
     // framework. This task will hang onto the Receiver end and each

@@ -4,7 +4,7 @@ use drmem_api::{
 };
 use futures::future::Future;
 use std::collections::HashMap;
-use std::{pin::Pin, sync::Arc};
+use std::{convert::Infallible, pin::Pin, sync::Arc};
 use tokio::task::JoinHandle;
 use tracing::{error, field, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -34,7 +34,7 @@ impl Driver {
     async fn manage_instance(
         name: String, factory: Factory, cfg: DriverConfig,
         req_chan: RequestChan,
-    ) -> Result<()> {
+    ) -> Result<Infallible> {
         loop {
             // Create a Future that creates an instance of the driver
             // using the provided configuration parameters.
@@ -61,15 +61,7 @@ impl Driver {
                     })
                     .await
                     {
-                        // This exit value means the driver exited
-                        // intentionally. This shouldn't happen
-                        // normally. If this happens, the supervisor
-                        // exits which should shutdown the
-                        // application.
-                        Ok(Ok(())) => {
-                            warn!("driver exited intentionally");
-                            return Ok(());
-                        }
+                        Ok(Ok(_)) => unreachable!(),
 
                         // If the driver exits with an error, report
                         // it and restart the driver (after a delay.)
@@ -102,7 +94,7 @@ impl Driver {
 
     pub fn run_instance(
         &self, name: String, cfg: DriverConfig, req_chan: RequestChan,
-    ) -> JoinHandle<Result<()>> {
+    ) -> JoinHandle<Result<Infallible>> {
         // Spawn a task that supervises the driver task. If the driver
         // panics, this supervisor "catches" it and reports a problem.
         // It then restarts the driver.

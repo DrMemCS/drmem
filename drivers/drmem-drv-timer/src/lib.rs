@@ -6,7 +6,7 @@ use drmem_api::{
     },
     Result,
 };
-use std::{future::Future, pin::Pin};
+use std::{convert::Infallible, future::Future, pin::Pin};
 use tokio::time;
 use tracing::{self, debug, error, warn};
 
@@ -205,7 +205,7 @@ impl driver::API for Timer {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Infallible>> + Send + 'a>> {
         let fut = async {
             let mut timeout = time::Instant::now();
 

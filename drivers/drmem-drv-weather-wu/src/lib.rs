@@ -3,7 +3,7 @@ use drmem_api::{
     types::{device::Base, Error},
     Result,
 };
-use std::convert::TryFrom;
+use std::convert::{TryFrom, Infallible};
 use std::{future::Future, pin::Pin};
 use tokio::time::{interval_at, Duration, Instant};
 use tracing::{debug, error, warn, Span};
@@ -432,7 +432,7 @@ impl driver::API for State {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Infallible>> + Send + 'a>> {
         let fut = async {
             Span::current().record("cfg", &self.station.as_str());
 

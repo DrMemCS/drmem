@@ -5,7 +5,7 @@ use drmem_api::{
 };
 use std::future::Future;
 use std::net::SocketAddrV4;
-use std::pin::Pin;
+use std::{convert::Infallible, pin::Pin};
 use tokio::{
     io::{self, AsyncReadExt},
     net::{
@@ -292,7 +292,7 @@ impl driver::API for Sump {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Infallible>> + Send + 'a>> {
         let fut =
             async {
                 // Record the peer's address in the "cfg" field of the
