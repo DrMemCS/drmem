@@ -114,14 +114,14 @@ impl DriverDb {
         let mut table = HashMap::new();
 
         {
-            use drmem_drv_timer::Timer;
+            use drmem_drv_timer::Instance;
 
             table.insert(
-                Timer::NAME,
+                Instance::NAME,
                 Driver::create(
-                    Timer::SUMMARY,
-                    Timer::DESCRIPTION,
-                    <Timer as API>::create_instance,
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    <Instance as API>::create_instance,
                 ),
             );
         }
@@ -143,14 +143,14 @@ impl DriverDb {
 
         #[cfg(feature = "driver-ntp")]
         {
-            use drmem_drv_ntp::NtpState;
+            use drmem_drv_ntp::Instance;
 
             table.insert(
-                NtpState::NAME,
+                Instance::NAME,
                 Driver::create(
-                    NtpState::SUMMARY,
-                    NtpState::DESCRIPTION,
-                    <NtpState as API>::create_instance,
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    <Instance as API>::create_instance,
                 ),
             );
         }
@@ -159,14 +159,14 @@ impl DriverDb {
 
         #[cfg(feature = "driver-sump")]
         {
-            use drmem_drv_sump::Sump;
+            use drmem_drv_sump::Instance;
 
             table.insert(
-                Sump::NAME,
+                Instance::NAME,
                 Driver::create(
-                    Sump::SUMMARY,
-                    Sump::DESCRIPTION,
-                    <Sump as API>::create_instance,
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    <Instance as API>::create_instance,
                 ),
             );
         }
@@ -175,14 +175,14 @@ impl DriverDb {
 
         #[cfg(feature = "driver-weather-wu")]
         {
-            use drmem_drv_weather_wu::State;
+            use drmem_drv_weather_wu::Instance;
 
             table.insert(
-                State::NAME,
+                Instance::NAME,
                 Driver::create(
-                    State::SUMMARY,
-                    State::DESCRIPTION,
-                    <State as API>::create_instance,
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    <Instance as API>::create_instance,
                 ),
             );
         }

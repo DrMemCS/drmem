@@ -139,7 +139,7 @@ impl State {
     }
 }
 
-pub struct Sump {
+pub struct Instance {
     state: State,
     gpm: f64,
     rx: OwnedReadHalf,
@@ -150,7 +150,7 @@ pub struct Sump {
     d_inflow: driver::ReportReading,
 }
 
-impl Sump {
+impl Instance {
     pub const NAME: &'static str = "sump-gpio";
 
     pub const SUMMARY: &'static str =
@@ -240,7 +240,7 @@ impl Sump {
     }
 }
 
-impl driver::API for Sump {
+impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
     ) -> Pin<
@@ -249,13 +249,13 @@ impl driver::API for Sump {
         let fut = async move {
             // Validate the configuration.
 
-            let addr = Sump::get_cfg_address(&cfg)?;
-            let gpm = Sump::get_cfg_gpm(&cfg)?;
+            let addr = Instance::get_cfg_address(&cfg)?;
+            let gpm = Instance::get_cfg_gpm(&cfg)?;
 
             // Connect with the remote process that is connected to
             // the sump pump.
 
-            let (rx, _tx) = Sump::connect(&addr).await?.into_split();
+            let (rx, _tx) = Instance::connect(&addr).await?.into_split();
 
             // Define the devices managed by this driver.
 
@@ -275,7 +275,7 @@ impl driver::API for Sump {
 
             d_service(false.into()).await?;
 
-            Ok(Box::new(Sump {
+            Ok(Box::new(Instance {
                 state: State::Unknown,
                 gpm,
                 rx,
@@ -326,7 +326,7 @@ impl driver::API for Sump {
                             {
                                 info!(
                                 "cycle: {}, duty: {:.1}%, inflow: {:.2} gpm",
-                                Sump::elapsed(cycle), duty, in_flow
+                                Instance::elapsed(cycle), duty, in_flow
                             );
 
                                 (self.d_state)(false.into()).await?;

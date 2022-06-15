@@ -12,7 +12,7 @@ use weather_underground as wu;
 const DEFAULT_INTERVAL: u64 = 10;
 const MIN_PUBLIC_INTERVAL: u64 = 10;
 
-pub struct State {
+pub struct Instance {
     con: reqwest::Client,
     station: String,
     api_key: String,
@@ -38,7 +38,7 @@ pub struct State {
     d_wndspd: driver::ReportReading,
 }
 
-impl State {
+impl Instance {
     pub const NAME: &'static str = "weather-wu";
 
     pub const SUMMARY: &'static str =
@@ -276,7 +276,7 @@ impl State {
     }
 }
 
-impl driver::API for State {
+impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
     ) -> Pin<
@@ -289,10 +289,10 @@ impl driver::API for State {
 
                     debug!("reading config parameters");
 
-                    let station = State::get_cfg_station(&cfg)?;
+                    let station = Instance::get_cfg_station(&cfg)?;
                     let (api_key, interval) =
-                        State::get_cfg_key_and_interval(&mut con, &cfg).await?;
-                    let units = State::get_cfg_units(&cfg)?;
+                        Instance::get_cfg_key_and_interval(&mut con, &cfg).await?;
+                    let units = Instance::get_cfg_units(&cfg)?;
 
                     let temp_unit = Some(if let wu::Unit::English = units {
                         "°F"
@@ -396,7 +396,7 @@ impl driver::API for State {
 
                     debug!("instance successfully created");
 
-                    Ok(Box::new(State {
+                    Ok(Box::new(Instance {
                         con,
                         station,
                         api_key,

@@ -84,7 +84,7 @@ mod server {
     }
 }
 
-pub struct NtpState {
+pub struct Instance {
     sock: UdpSocket,
     seq: u16,
     d_state: driver::ReportReading,
@@ -93,7 +93,7 @@ pub struct NtpState {
     d_delay: driver::ReportReading,
 }
 
-impl NtpState {
+impl Instance {
     pub const NAME: &'static str = "ntp";
 
     pub const SUMMARY: &'static str =
@@ -157,7 +157,7 @@ impl NtpState {
                     }
 
                     Ok(len) => {
-                        let total = NtpState::read_u16(&buf[10..=11]) as usize;
+                        let total = Instance::read_u16(&buf[10..=11]) as usize;
                         let expected_len = total + 12 + (4 - total % 4) % 4;
 
                         // Make sure the incoming buffer is as large as
@@ -167,7 +167,7 @@ impl NtpState {
                         if expected_len == len {
                             for ii in buf[12..len].chunks_exact(4) {
                                 if (ii[2] & 0x7) == 6 {
-                                    return Some(NtpState::read_u16(
+                                    return Some(Instance::read_u16(
                                         &ii[0..=1],
                                     ));
                                 }
@@ -226,7 +226,7 @@ impl NtpState {
                     }
 
                     Ok(len) => {
-                        let offset = NtpState::read_u16(&buf[8..=9]) as usize;
+                        let offset = Instance::read_u16(&buf[8..=9]) as usize;
 
                         // We don't keep track of which of the
                         // multiple packets we've already received.
@@ -238,7 +238,7 @@ impl NtpState {
                             break;
                         }
 
-                        let total = NtpState::read_u16(&buf[10..=11]) as usize;
+                        let total = Instance::read_u16(&buf[10..=11]) as usize;
                         let expected_len = total + 12 + (4 - total % 4) % 4;
 
                         // Make sure the incoming buffer is as large
@@ -308,7 +308,7 @@ impl NtpState {
     }
 }
 
-impl driver::API for NtpState {
+impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
     ) -> Pin<
@@ -317,7 +317,7 @@ impl driver::API for NtpState {
         let fut = async move {
             // Validate the configuration.
 
-            let addr = NtpState::get_cfg_address(&cfg)?;
+            let addr = Instance::get_cfg_address(&cfg)?;
             let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();
 
             if let Ok(sock) = UdpSocket::bind(loc_if).await {
@@ -337,7 +337,7 @@ impl driver::API for NtpState {
                         .add_ro_device("delay".parse::<Base>()?, Some("ms"))
                         .await?;
 
-                    return Ok(Box::new(NtpState {
+                    return Ok(Box::new(Instance {
                         sock,
                         seq: 1,
                         d_state,

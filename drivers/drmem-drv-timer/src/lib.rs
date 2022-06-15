@@ -22,7 +22,7 @@ enum TimerState {
     TimedOut,       // Not timing, input is true
 }
 
-pub struct Timer {
+pub struct Instance {
     state: TimerState,
     active_level: bool,
     millis: time::Duration,
@@ -31,7 +31,7 @@ pub struct Timer {
     s_enable: driver::RxDeviceSetting,
 }
 
-impl Timer {
+impl Instance {
     pub const NAME: &'static str = "timer";
 
     pub const SUMMARY: &'static str =
@@ -39,15 +39,15 @@ impl Timer {
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
 
-    /// Creates a new `Timer` instance. It is assumed the external
+    /// Creates a new `Instance` instance. It is assumed the external
     /// input is `false` so the initial timer state is `Armed`.
 
     pub fn new(
         active_level: bool, millis: time::Duration,
         d_output: driver::ReportReading, d_enable: driver::ReportReading,
         s_enable: driver::RxDeviceSetting,
-    ) -> Timer {
-        Timer {
+    ) -> Instance {
+        Instance {
             state: TimerState::Armed,
             active_level,
             millis,
@@ -175,7 +175,7 @@ impl Timer {
     }
 }
 
-impl driver::API for Timer {
+impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
     ) -> Pin<
@@ -184,8 +184,8 @@ impl driver::API for Timer {
         let fut = async move {
             // Validate the configuration.
 
-            let millis = Timer::get_cfg_millis(&cfg)?;
-            let level = Timer::get_cfg_level(&cfg)?;
+            let millis = Instance::get_cfg_millis(&cfg)?;
+            let level = Instance::get_cfg_level(&cfg)?;
 
             // Define the devices managed by this driver.
 
@@ -195,7 +195,7 @@ impl driver::API for Timer {
                 core.add_rw_device("enable".parse::<Base>()?, None).await?;
 
             Ok(
-                Box::new(Timer::new(level, millis, d_output, d_enable, rx_set))
+                Box::new(Instance::new(level, millis, d_output, d_enable, rx_set))
                     as driver::DriverType,
             )
         };
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn test_state_changes() {
         let (_tx, rx) = mpsc::channel(20);
-        let mut timer = Timer::new(
+        let mut timer = Instance::new(
             true,
             time::Duration::from_millis(1000),
             Box::new(fake_report),
