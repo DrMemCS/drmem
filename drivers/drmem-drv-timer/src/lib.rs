@@ -8,7 +8,7 @@ use drmem_api::{
 };
 use std::{convert::Infallible, future::Future, pin::Pin};
 use tokio::time;
-use tracing::{self, debug, error, warn};
+use tracing::{self, debug, info, error, warn};
 
 // This enum represents the four states in which the timer can
 // be. They are a combination of the `enable` input and whether we're
@@ -205,15 +205,15 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Infallible>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
             let mut timeout = time::Instant::now();
 
-            (self.d_enable)(false.into()).await?;
-            (self.d_output)((!self.active_level).into()).await?;
+            (self.d_enable)(false.into()).await;
+            (self.d_output)((!self.active_level).into()).await;
 
             loop {
-                debug!("state {:?} : waiting for event", &self.state);
+                info!("state {:?} : waiting for event", &self.state);
 
                 tokio::select! {
                     // If the driver is in a timing cycle, add the
@@ -226,7 +226,7 @@ impl driver::API for Instance {
 			// set the output to the inactive value.
 
 			self.time_expired();
-			(self.d_output)((!self.active_level).into()).await?;
+			(self.d_output)((!self.active_level).into()).await;
                     }
 
                     // Always look for settings. We're pattern
@@ -254,10 +254,10 @@ impl driver::API for Instance {
 				timeout = tmo
                             }
 
-                            (self.d_enable)(b.into()).await?;
+                            (self.d_enable)(b.into()).await;
 
                             if let Some(out) = out {
-				(self.d_output)(out.into()).await?;
+				(self.d_output)(out.into()).await;
                             }
 			} else {
                             let _ = tx.send(Err(Error::TypeError));
@@ -281,10 +281,8 @@ mod tests {
 
     fn fake_report(
         _v: device::Value,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        let fut = async { Ok(()) };
-
-        Box::pin(fut)
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(async { () })
     }
 
     #[test]

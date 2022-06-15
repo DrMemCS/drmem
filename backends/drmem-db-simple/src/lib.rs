@@ -20,7 +20,6 @@ use drmem_api::{
     Result, Store,
 };
 use drmem_config::backend;
-use futures_util::future;
 use std::collections::{hash_map, HashMap};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -81,7 +80,7 @@ fn mk_report_func(di: &DeviceInfo, name: &Name) -> ReportReading {
         } else {
             error!("couldn't set current value of {}", &name)
         }
-        Box::pin(future::ok(()))
+        Box::pin(async { () })
     })
 }
 
@@ -283,7 +282,7 @@ mod tests {
 
             // Report a value.
 
-            assert!(f(Value::Int(1)).await.is_ok());
+            f(Value::Int(1)).await;
 
             // Create a receiving handle for device updates.
 
@@ -314,7 +313,7 @@ mod tests {
                 // disrupted by sending a value and receiving it from
                 // the receive handle we opened before re-registering.
 
-                assert!(f(Value::Int(2)).await.is_ok());
+                f(Value::Int(2)).await;
                 assert_eq!(rx.try_recv(), Ok(Value::Int(2)));
             } else {
                 panic!("error registering read-only device from same driver")
@@ -356,7 +355,7 @@ mod tests {
 
             // Report a value.
 
-            assert!(f(Value::Int(1)).await.is_ok());
+            f(Value::Int(1)).await;
 
             // Create a receiving handle for device updates.
 
@@ -397,7 +396,7 @@ mod tests {
                 // disrupted by sending a value and receiving it from
                 // the receive handle we opened before re-registering.
 
-                assert!(f(Value::Int(2)).await.is_ok());
+                f(Value::Int(2)).await;
                 assert_eq!(rx.try_recv(), Ok(Value::Int(2)));
             } else {
                 panic!("error registering read-only device from same driver")
@@ -414,25 +413,25 @@ mod tests {
         let f = mk_report_func(&di, &name);
 
         assert_eq!(di.reading.lock().unwrap().1, None);
-        assert!(f(Value::Int(1)).await.is_ok());
+        f(Value::Int(1)).await;
         assert_eq!(di.reading.lock().unwrap().1, Some(Value::Int(1)));
 
         {
             let mut rx = di.reading.lock().unwrap().0.subscribe();
 
-            assert!(f(Value::Int(2)).await.is_ok());
+            f(Value::Int(2)).await;
             assert_eq!(rx.try_recv(), Ok(Value::Int(2)));
             assert_eq!(di.reading.lock().unwrap().1, Some(Value::Int(2)));
         }
 
-        assert!(f(Value::Int(3)).await.is_ok());
+        f(Value::Int(3)).await;
         assert_eq!(di.reading.lock().unwrap().1, Some(Value::Int(3)));
 
         {
             let mut rx1 = di.reading.lock().unwrap().0.subscribe();
             let mut rx2 = di.reading.lock().unwrap().0.subscribe();
 
-            assert!(f(Value::Int(4)).await.is_ok());
+            f(Value::Int(4)).await;
             assert_eq!(rx1.try_recv(), Ok(Value::Int(4)));
             assert_eq!(rx2.try_recv(), Ok(Value::Int(4)));
             assert_eq!(di.reading.lock().unwrap().1, Some(Value::Int(4)));

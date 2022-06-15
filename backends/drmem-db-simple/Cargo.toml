@@ -19,7 +19,6 @@ async-trait = "0.1"
 drmem-api = { path = "../../drmem-api", version = "0.1" }
 tokio = { version = "1", features = ["sync"] }
 tracing = { version = "^0.1", features = ["std"] }
-futures-util = "0.3"
 
 [dependencies.drmem-config]
 path = "../../drmem-config"

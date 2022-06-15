@@ -119,7 +119,7 @@ impl Instance {
     // correct device channel. It also does some sanity checks on the
     // values.
 
-    async fn handle(&mut self, obs: &wu::Observation) -> Result<()> {
+    async fn handle(&mut self, obs: &wu::Observation) {
         // Retreive all the parameters whose units can change between
         // English and Metric.
 
@@ -138,7 +138,7 @@ impl Instance {
                         params.wind_speed,
                     )
                 } else {
-                    return Err(Error::NotFound);
+                    panic!("weather data didn't return any metric data")
                 }
             } else if let Some(params) = &obs.imperial {
                 (
@@ -153,12 +153,12 @@ impl Instance {
                     params.wind_speed,
                 )
             } else {
-                return Err(Error::NotFound);
+                panic!("weather data didn't return any imperial data")
             };
 
         if let Some(dewpt) = dewpt {
             if (0.0..=200.0).contains(&dewpt) {
-                (self.d_dewpt)(dewpt.into()).await?
+                (self.d_dewpt)(dewpt.into()).await
             } else {
                 warn!("ignoring bad dew point value: {:.1}", dewpt)
             }
@@ -166,7 +166,7 @@ impl Instance {
 
         if let Some(htidx) = htidx {
             if (0.0..=200.0).contains(&htidx) {
-                (self.d_htidx)(htidx.into()).await?
+                (self.d_htidx)(htidx.into()).await
             } else {
                 warn!("ignoring bad heat index value: {:.1}", htidx)
             }
@@ -174,7 +174,7 @@ impl Instance {
 
         if let (Some(prate), Some(ptotal)) = (prate, ptotal) {
             if (0.0..=24.0).contains(&prate) {
-                (self.d_prate)(prate.into()).await?
+                (self.d_prate)(prate.into()).await
             } else {
                 warn!("ignoring bad precip rate: {:.2}", prate)
             }
@@ -197,7 +197,7 @@ impl Instance {
                         debug!("precip calc: stable sum, no rain ... resetting sum");
                         self.precip_int = 0.0
                     }
-                    (self.d_ptotal)(self.precip_int.into()).await?
+                    (self.d_ptotal)(self.precip_int.into()).await
                 }
                 self.prev_precip_total = Some(ptotal);
             } else {
@@ -208,23 +208,23 @@ impl Instance {
         }
 
         if let Some(press) = press {
-            (self.d_pressure)(press.into()).await?
+            (self.d_pressure)(press.into()).await
         }
 
         if let Some(temp) = temp {
-            (self.d_temp)(temp.into()).await?
+            (self.d_temp)(temp.into()).await
         }
 
         if let Some(wndchl) = wndchl {
-            (self.d_wndchl)(wndchl.into()).await?
+            (self.d_wndchl)(wndchl.into()).await
         }
 
         if let Some(wndgst) = wndgst {
-            (self.d_wndgst)(wndgst.into()).await?
+            (self.d_wndgst)(wndgst.into()).await
         }
 
         if let Some(wndspd) = wndspd {
-            (self.d_wndspd)(wndspd.into()).await?
+            (self.d_wndspd)(wndspd.into()).await
         }
 
         // If solar radiation readings are provided, report them.
@@ -236,7 +236,7 @@ impl Instance {
             // slightly inaccurate sensors won't be ignored.
 
             if (0.0..=1400.0).contains(&sol_rad) {
-                (self.d_solrad)(sol_rad.into()).await?
+                (self.d_solrad)(sol_rad.into()).await
             } else {
                 warn!("ignoring bad solar radiation value: {:.1}", sol_rad)
             }
@@ -249,7 +249,7 @@ impl Instance {
             // doubtful there's a place on earth that gets that low.
 
             if (0.0..=100.0).contains(&humidity) {
-                (self.d_humidity)(humidity.into()).await?
+                (self.d_humidity)(humidity.into()).await
             } else {
                 warn!("ignoring bad humidity value: {:.1}", humidity)
             }
@@ -258,7 +258,7 @@ impl Instance {
         // If UV readings are provided, report them.
 
         if let Some(uv) = obs.uv {
-            (self.d_uv)(uv.into()).await?
+            (self.d_uv)(uv.into()).await
         }
 
         // If wind direction readings are provided, report them.
@@ -267,12 +267,11 @@ impl Instance {
             // Make sure the reading is in range.
 
             if (0.0..=360.0).contains(&winddir) {
-                (self.d_wnddir)(winddir.into()).await?
+                (self.d_wnddir)(winddir.into()).await
             } else {
                 warn!("ignoring bad wind direction value: {:.1}", winddir)
             }
         }
-        Ok(())
     }
 }
 
@@ -432,7 +431,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Infallible>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
             Span::current().record("cfg", &self.station.as_str());
 
@@ -458,44 +457,45 @@ impl driver::API for Instance {
                 .await;
 
                 match result {
-                    Ok(Some(response)) => {
-                        if let Ok(resp) =
-                            wu::ObservationResponse::try_from(response)
-                        {
-                            if let Some(obs) = resp.observations {
-                                if !obs.is_empty() {
-                                    // The API we're using should only
-                                    // return 1 set of observations.
-                                    // If it, for some reason, changes
-                                    // and returns more, log it.
+                    Ok(Some(response)) =>
+			match wu::ObservationResponse::try_from(response) {
+                            Ok(resp) => {
+				if let Some(obs) = resp.observations {
+                                    if !obs.is_empty() {
+					// The API we're using should
+					// only return 1 set of
+					// observations. If it, for
+					// some reason, changes and
+					// returns more, log it.
 
-                                    if obs.len() > 1 {
-                                        warn!("ignoring {} extra weather observations", obs.len() - 1);
+					if obs.len() > 1 {
+                                            warn!("ignoring {} extra weather observations", obs.len() - 1);
+					}
+					(self.d_state)(true.into()).await;
+					self.handle(&obs[0]).await;
+					continue
                                     }
-                                    (self.d_state)(true.into()).await?;
-                                    self.handle(&obs[0]).await?
-                                } else {
-                                    warn!("no weather data received")
-                                }
-                            } else {
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
+				}
+				warn!("no weather data received")
+			    }
+
+			    Err(e) => {
+				(self.d_state)(false.into()).await;
+				panic!("error response from Weather Underground -- {:?}", &e)
+			    }
+			}
+
                     Ok(None) => {
-                        error!("no response from Weather Underground");
-                        break;
+			(self.d_state)(false.into()).await;
+                        panic!("no response from Weather Underground")
                     }
-                    Err(e) => error!(
-                        "error accessing Weather Underground -- {:?}",
-                        &e
-                    ),
-                }
+
+		    Err(e) => {
+			(self.d_state)(false.into()).await;
+			panic!("error accessing Weather Underground -- {:?}", &e)
+                    }
+		}
             }
-            (self.d_state)(false.into()).await?;
-            Err(Error::MissingPeer("Weather Underground".to_string()))
         };
 
         Box::pin(fut)

@@ -6,7 +6,7 @@ use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
 use tokio::task::JoinHandle;
-use tracing::{error, field, info, info_span, warn};
+use tracing::{error, field, info, info_span};
 use tracing_futures::Instrument;
 
 type Factory = fn(
@@ -61,13 +61,7 @@ impl Driver {
                     })
                     .await
                     {
-                        Ok(Ok(_)) => unreachable!(),
-
-                        // If the driver exits with an error, report
-                        // it and restart the driver (after a delay.)
-                        Ok(Err(e)) => {
-                            warn!("driver exited due to error -- {}", e)
-                        }
+                        Ok(_) => unreachable!(),
 
                         // If `spawn()` returns this value, the driver
                         // exited abnormally. Report it and restart

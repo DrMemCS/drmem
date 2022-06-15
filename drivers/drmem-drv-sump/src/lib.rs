@@ -270,11 +270,6 @@ impl driver::API for Instance {
                 .add_ro_device("in-flow".parse::<Base>()?, Some("gpm"))
                 .await?;
 
-            // Mark the connection as 'down'. Once data starts
-            // arriving, this device will be set to `true`.
-
-            d_service(false.into()).await?;
-
             Ok(Box::new(Instance {
                 state: State::Unknown,
                 gpm,
@@ -292,7 +287,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Infallible>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut =
             async {
                 // Record the peer's address in the "cfg" field of the
@@ -308,13 +303,13 @@ impl driver::API for Instance {
                     Span::current().record("cfg", &addr.as_str());
                 }
 
-                (self.d_service)(true.into()).await?;
+                (self.d_service)(true.into()).await;
 
                 loop {
                     match self.get_reading().await {
                         Ok((stamp, true)) => {
                             if self.state.on_event(stamp) {
-                                (self.d_state)(true.into()).await?;
+                                (self.d_state)(true.into()).await;
                             }
                         }
 
@@ -325,23 +320,20 @@ impl driver::API for Instance {
                                 self.state.off_event(stamp, gpm)
                             {
                                 info!(
-                                "cycle: {}, duty: {:.1}%, inflow: {:.2} gpm",
-                                Instance::elapsed(cycle), duty, in_flow
-                            );
+                                    "cycle: {}, duty: {:.1}%, inflow: {:.2} gpm",
+                                    Instance::elapsed(cycle), duty, in_flow
+				);
 
-                                (self.d_state)(false.into()).await?;
-                                (self.d_duty)(duty.into()).await?;
-                                (self.d_inflow)(in_flow.into()).await?;
+                                (self.d_state)(false.into()).await;
+                                (self.d_duty)(duty.into()).await;
+                                (self.d_inflow)(in_flow.into()).await;
                             }
                         }
 
                         Err(e) => {
-                            error!("couldn't read sump state -- {:?}", e);
-                            (self.d_state)(false.into()).await?;
-                            (self.d_service)(false.into()).await?;
-                            break Err(Error::MissingPeer(String::from(
-                                "sump pump",
-                            )));
+                            (self.d_state)(false.into()).await;
+                            (self.d_service)(false.into()).await;
+                            panic!("couldn't read sump state -- {:?}", e);
                         }
                     }
                 }

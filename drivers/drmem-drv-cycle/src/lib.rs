@@ -165,17 +165,17 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Infallible>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
 	    let mut timer = time::interval(self.millis);
 
 	    if self.enabled_at_boot {
 		self.state = CycleState::CycleHigh;
-		(self.d_enable)(true.into()).await?;
-		(self.d_output)(true.into()).await?;
+		(self.d_enable)(true.into()).await;
+		(self.d_output)(true.into()).await;
 	    } else {
-		(self.d_enable)(false.into()).await?;
-		(self.d_output)(false.into()).await?;
+		(self.d_enable)(false.into()).await;
+		(self.d_output)(false.into()).await;
 	    }
 
             loop {
@@ -192,7 +192,7 @@ impl driver::API for Instance {
 
 			if let Some(v) = self.time_expired() {
 			    debug!("state {:?} : timeout occurred -- output {}", &self.state, v);
-			    (self.d_output)(v.into()).await?
+			    (self.d_output)(v.into()).await;
 			}
                     }
 
@@ -222,10 +222,10 @@ impl driver::API for Instance {
 
                             debug!("state {:?} : new input -> {}", &self.state, b);
 
-                            (self.d_enable)(b.into()).await?;
+                            (self.d_enable)(b.into()).await;
 
                             if let Some(out) = out {
-				(self.d_output)(out.into()).await?;
+				(self.d_output)(out.into()).await;
                             }
 			} else {
                             let _ = tx.send(Err(Error::TypeError));
@@ -249,10 +249,8 @@ mod tests {
 
     fn fake_report(
         _v: device::Value,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        let fut = async { Ok(()) };
-
-        Box::pin(fut)
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(async { () })
     }
 
     #[test]

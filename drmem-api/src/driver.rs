@@ -6,7 +6,7 @@ use crate::types::{
     Error,
 };
 use std::future::Future;
-use std::{pin::Pin, result, convert::Infallible};
+use std::{pin::Pin, convert::Infallible};
 use tokio::sync::{mpsc, oneshot};
 use toml::value;
 
@@ -23,7 +23,7 @@ pub type ReportReading = Box<
             Value,
         ) -> Pin<
             Box<
-                dyn Future<Output = result::Result<(), Error>> + Send + 'static,
+                dyn Future<Output = ()> + Send + 'static,
             >,
         > + Send
         + Sync
@@ -226,5 +226,5 @@ pub trait API: Send {
 
     fn run<'a>(
         &'a mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Infallible>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>>;
 }
