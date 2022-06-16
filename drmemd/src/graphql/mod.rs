@@ -54,6 +54,21 @@ impl DriverInfo {
     }
 }
 
+#[derive(GraphQLInputObject)]
+#[graphql(description = "Describes data that can be sent to devices. When \
+			 specifying data, one -- and only one -- field \
+			 must be set.")]
+struct Data {
+    #[graphql(name = "int", description = "Placeholder for integer values.")]
+    f_int: Option<i32>,
+    #[graphql(name = "flt", description = "Placeholder for float values.")]
+    f_float: Option<f64>,
+    #[graphql(name = "bool", description = "Placeholder for boolean values.")]
+    f_bool: Option<bool>,
+    #[graphql(name = "str", description = "Placeholder for string values.")]
+    f_string: Option<String>,
+}
+
 //mod data;
 
 // `DeviceInfo` is a GraphQL object which contains information about a
@@ -216,54 +231,57 @@ impl Control {
     description = "These queries allow devices to be modified."
 )]
 impl Control {
-    #[graphql(description = "Changes the value of a device to the specified, \
-		       boolean value. If the device doesn't accept boolean \
-		       values, an error is returned. This query will return \
-		       the value that was set, which might not be the same \
-		       value specified. For instance, hardware may be in a \
-		       \"locked\" state and so a device can't be set to \
-		       `true`. In a case like that, `false` would be returned.")]
-    async fn set_boolean(
-        #[graphql(context)] db: &ConfigDb, device: String, value: bool,
-    ) -> result::Result<bool, FieldError> {
-        Control::perform_setting(db, &device, value).await
-    }
+    #[graphql(description = "Submits `value` to be applied to the device \
+			     associated with the given `name`. If the data \
+			     is in a format the device doesn't support an \
+			     error is returned. The `value` parameter \
+			     contains several fields. Only one should be \
+			     set. It is an error to have all fields `null` \
+			     or more than one field non-`null`.")]
+    async fn set_device(
+        #[graphql(context)] db: &ConfigDb, name: String, value: Data,
+    ) -> FieldResult<Option<bool>> {
+        match value {
+            Data {
+                f_int: None,
+                f_float: None,
+                f_bool: None,
+                f_string: None,
+            } => Err(FieldError::new("no data provided", Value::null())),
 
-    #[graphql(description = "Changes the value of a device to the specified, \
-		       integer value. If the device doesn't accept integer \
-		       values, an error is returned. This query returns the \
-		       actual value used by the driver, which may not be \
-		       the same value specified. For instance, if the device \
-		       only accepts a range of values, some drivers may \
-		       return an error and others might clip the setting to \
-		       keep it in range.")]
-    async fn set_integer(
-        #[graphql(context)] db: &ConfigDb, device: String, value: i32,
-    ) -> result::Result<i32, FieldError> {
-        Control::perform_setting(db, &device, value).await
-    }
+            Data {
+                f_int: Some(v),
+                f_float: None,
+                f_bool: None,
+                f_string: None,
+            } => Control::perform_setting(db, &name, v).await.map(|_| None),
 
-    #[graphql(description = "Changes the value of a device to the specified, \
-		       floating point value. If the device doesn't accept \
-		       floating point values, an error is returned. This \
-		       query returns the actual value used by the driver, \
-		       which may not be the same value specified. For \
-		       instance, if the device only accepts a range of \
-		       values, some drivers may return an error and others \
-		       might clip the setting to keep it in range.")]
-    async fn set_float(
-        #[graphql(context)] db: &ConfigDb, device: String, value: f64,
-    ) -> result::Result<f64, FieldError> {
-        Control::perform_setting(db, &device, value).await
-    }
+            Data {
+                f_int: None,
+                f_float: Some(v),
+                f_bool: None,
+                f_string: None,
+            } => Control::perform_setting(db, &name, v).await.map(|_| None),
 
-    #[graphql(description = "Changes the value of a device to the specified, \
-		       string value. If the device doesn't accept string \
-		       values, an error is returned.")]
-    async fn set_string(
-        #[graphql(context)] db: &ConfigDb, device: String, value: String,
-    ) -> result::Result<String, FieldError> {
-        Control::perform_setting(db, &device, value).await
+            Data {
+                f_int: None,
+                f_float: None,
+                f_bool: Some(v),
+                f_string: None,
+            } => Control::perform_setting(db, &name, v).await.map(|_| None),
+
+            Data {
+                f_int: None,
+                f_float: None,
+                f_bool: None,
+                f_string: Some(v),
+            } => Control::perform_setting(db, &name, v).await.map(|_| None),
+
+            Data { .. } => Err(FieldError::new(
+                "must only specify one item of data",
+                Value::null(),
+            )),
+        }
     }
 }
 
