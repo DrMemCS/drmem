@@ -5,7 +5,10 @@ use drmem_api::{
 };
 use std::future::Future;
 use std::{convert::Infallible, pin::Pin};
-use std::{net::{SocketAddr, SocketAddrV4}, str};
+use std::{
+    net::{SocketAddr, SocketAddrV4},
+    str,
+};
 use tokio::net::UdpSocket;
 use tokio::time::{self, Duration};
 use tracing::{debug, error, info, warn, Span};

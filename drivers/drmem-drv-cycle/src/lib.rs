@@ -41,13 +41,11 @@ impl Instance {
     /// Creates a new, idle `Instance`.
 
     pub fn new(
-	enabled: bool,
-        millis: time::Duration,
-        d_output: driver::ReportReading, d_enable: driver::ReportReading,
-        s_enable: driver::RxDeviceSetting,
+        enabled: bool, millis: time::Duration, d_output: driver::ReportReading,
+        d_enable: driver::ReportReading, s_enable: driver::RxDeviceSetting,
     ) -> Instance {
         Instance {
-	    enabled_at_boot: enabled,
+            enabled_at_boot: enabled,
             state: CycleState::Idle,
             millis,
             d_output,
@@ -82,26 +80,26 @@ impl Instance {
             Some(_) => {
                 error!("'enabled' config parameter should be a boolean")
             }
-            None => return Ok(false)
+            None => return Ok(false),
         }
 
         Err(Error::BadConfig)
     }
 
     fn time_expired(&mut self) -> Option<bool> {
-	match self.state {
+        match self.state {
             CycleState::Idle => None,
 
-	    CycleState::CycleHigh => {
-		self.state = CycleState::CycleLow;
-		Some(false)
-	    }
+            CycleState::CycleHigh => {
+                self.state = CycleState::CycleLow;
+                Some(false)
+            }
 
-	    CycleState::CycleLow => {
-		self.state = CycleState::CycleHigh;
-		Some(true)
-	    }
-	}
+            CycleState::CycleLow => {
+                self.state = CycleState::CycleHigh;
+                Some(true)
+            }
+        }
     }
 
     // Updates the state based on new `enable`. Returns a 2-tuple
@@ -112,25 +110,24 @@ impl Instance {
 
     fn update_state(&mut self, val: bool) -> (bool, Option<bool>) {
         match self.state {
-            CycleState::Idle =>
+            CycleState::Idle => {
                 if val {
                     self.state = CycleState::CycleHigh;
-		    (true, Some(true))
-		} else {
-		    (false, None)
-                },
+                    (true, Some(true))
+                } else {
+                    (false, None)
+                }
+            }
 
-            CycleState::CycleHigh
-		| CycleState::CycleLow =>
-		(
-		    false,
-                    if val {
-			None
-		    } else {
-			self.state = CycleState::Idle;
-			Some(false)
-                    }
-		),
+            CycleState::CycleHigh | CycleState::CycleLow => (
+                false,
+                if val {
+                    None
+                } else {
+                    self.state = CycleState::Idle;
+                    Some(false)
+                },
+            ),
         }
     }
 }
@@ -154,10 +151,9 @@ impl driver::API for Instance {
             let (d_enable, rx_set, _) =
                 core.add_rw_device("enable".parse::<Base>()?, None).await?;
 
-            Ok(
-                Box::new(Instance::new(enabled, millis, d_output, d_enable, rx_set))
-                    as driver::DriverType,
-            )
+            Ok(Box::new(Instance::new(
+                enabled, millis, d_output, d_enable, rx_set,
+            )) as driver::DriverType)
         };
 
         Box::pin(fut)
@@ -167,16 +163,16 @@ impl driver::API for Instance {
         &'a mut self,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
-	    let mut timer = time::interval(self.millis);
+            let mut timer = time::interval(self.millis);
 
-	    if self.enabled_at_boot {
-		self.state = CycleState::CycleHigh;
-		(self.d_enable)(true.into()).await;
-		(self.d_output)(true.into()).await;
-	    } else {
-		(self.d_enable)(false.into()).await;
-		(self.d_output)(false.into()).await;
-	    }
+            if self.enabled_at_boot {
+                self.state = CycleState::CycleHigh;
+                (self.d_enable)(true.into()).await;
+                (self.d_output)(true.into()).await;
+            } else {
+                (self.d_enable)(false.into()).await;
+                (self.d_output)(false.into()).await;
+            }
 
             loop {
                 debug!("state {:?} : waiting for event", &self.state);
@@ -257,37 +253,37 @@ mod tests {
     fn test_state_changes() {
         let (_tx, rx) = mpsc::channel(20);
         let mut timer = Instance::new(
-	    false,
+            false,
             time::Duration::from_millis(1000),
             Box::new(fake_report),
             Box::new(fake_report),
             rx,
         );
 
-	// Verify that, when in the Idle state, an input of `false` or
-	// a timer timeout doesn't move the FSM out of the Idle state.
+        // Verify that, when in the Idle state, an input of `false` or
+        // a timer timeout doesn't move the FSM out of the Idle state.
 
         assert_eq!(timer.state, CycleState::Idle);
         assert_eq!((false, None), timer.update_state(false));
-	assert_eq!(None, timer.time_expired());
+        assert_eq!(None, timer.time_expired());
         assert_eq!(timer.state, CycleState::Idle);
 
-	// Verify that a `true` input in the Idle state requires the
-	// timer to be reset and the output to be reported. Verify a
-	// second `true` has no effect.
+        // Verify that a `true` input in the Idle state requires the
+        // timer to be reset and the output to be reported. Verify a
+        // second `true` has no effect.
 
-	assert_eq!((true, Some(true)), timer.update_state(true));
+        assert_eq!((true, Some(true)), timer.update_state(true));
         assert_eq!((false, None), timer.update_state(true));
 
-	// Verify timeouts result in the toggling of the output.
+        // Verify timeouts result in the toggling of the output.
 
-	assert_eq!(Some(false), timer.time_expired());
-	assert_eq!(Some(true), timer.time_expired());
-	assert_eq!(Some(false), timer.time_expired());
-	assert_eq!(Some(true), timer.time_expired());
+        assert_eq!(Some(false), timer.time_expired());
+        assert_eq!(Some(true), timer.time_expired());
+        assert_eq!(Some(false), timer.time_expired());
+        assert_eq!(Some(true), timer.time_expired());
 
-	// Verify that, while cycling, a `false` input brings us back
-	// to the Idle state.
+        // Verify that, while cycling, a `false` input brings us back
+        // to the Idle state.
 
         assert_eq!((false, Some(false)), timer.update_state(false));
         assert_eq!(timer.state, CycleState::Idle);

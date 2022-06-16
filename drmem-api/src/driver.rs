@@ -6,7 +6,7 @@ use crate::types::{
     Error,
 };
 use std::future::Future;
-use std::{pin::Pin, convert::Infallible};
+use std::{convert::Infallible, pin::Pin};
 use tokio::sync::{mpsc, oneshot};
 use toml::value;
 
@@ -19,13 +19,8 @@ pub type RxDeviceSetting =
     mpsc::Receiver<(Value, oneshot::Sender<Result<Value>>)>;
 
 pub type ReportReading = Box<
-    dyn Fn(
-            Value,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = ()> + Send + 'static,
-            >,
-        > + Send
+    dyn Fn(Value) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+        + Send
         + Sync
         + 'static,
 >;

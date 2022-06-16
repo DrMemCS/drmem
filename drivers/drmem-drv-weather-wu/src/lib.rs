@@ -3,7 +3,7 @@ use drmem_api::{
     types::{device::Base, Error},
     Result,
 };
-use std::convert::{TryFrom, Infallible};
+use std::convert::{Infallible, TryFrom};
 use std::{future::Future, pin::Pin};
 use tokio::time::{interval_at, Duration, Instant};
 use tracing::{debug, error, warn, Span};
@@ -290,7 +290,8 @@ impl driver::API for Instance {
 
                     let station = Instance::get_cfg_station(&cfg)?;
                     let (api_key, interval) =
-                        Instance::get_cfg_key_and_interval(&mut con, &cfg).await?;
+                        Instance::get_cfg_key_and_interval(&mut con, &cfg)
+                            .await?;
                     let units = Instance::get_cfg_units(&cfg)?;
 
                     let temp_unit = Some(if let wu::Unit::English = units {
@@ -457,44 +458,48 @@ impl driver::API for Instance {
                 .await;
 
                 match result {
-                    Ok(Some(response)) =>
-			match wu::ObservationResponse::try_from(response) {
+                    Ok(Some(response)) => {
+                        match wu::ObservationResponse::try_from(response) {
                             Ok(resp) => {
-				if let Some(obs) = resp.observations {
+                                if let Some(obs) = resp.observations {
                                     if !obs.is_empty() {
-					// The API we're using should
-					// only return 1 set of
-					// observations. If it, for
-					// some reason, changes and
-					// returns more, log it.
+                                        // The API we're using should
+                                        // only return 1 set of
+                                        // observations. If it, for
+                                        // some reason, changes and
+                                        // returns more, log it.
 
-					if obs.len() > 1 {
+                                        if obs.len() > 1 {
                                             warn!("ignoring {} extra weather observations", obs.len() - 1);
-					}
-					(self.d_state)(true.into()).await;
-					self.handle(&obs[0]).await;
-					continue
+                                        }
+                                        (self.d_state)(true.into()).await;
+                                        self.handle(&obs[0]).await;
+                                        continue;
                                     }
-				}
-				warn!("no weather data received")
-			    }
+                                }
+                                warn!("no weather data received")
+                            }
 
-			    Err(e) => {
-				(self.d_state)(false.into()).await;
-				panic!("error response from Weather Underground -- {:?}", &e)
-			    }
-			}
+                            Err(e) => {
+                                (self.d_state)(false.into()).await;
+                                panic!("error response from Weather Underground -- {:?}", &e)
+                            }
+                        }
+                    }
 
                     Ok(None) => {
-			(self.d_state)(false.into()).await;
+                        (self.d_state)(false.into()).await;
                         panic!("no response from Weather Underground")
                     }
 
-		    Err(e) => {
-			(self.d_state)(false.into()).await;
-			panic!("error accessing Weather Underground -- {:?}", &e)
+                    Err(e) => {
+                        (self.d_state)(false.into()).await;
+                        panic!(
+                            "error accessing Weather Underground -- {:?}",
+                            &e
+                        )
                     }
-		}
+                }
             }
         };
 

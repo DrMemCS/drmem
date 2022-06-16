@@ -6,8 +6,8 @@ use futures::TryFutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{server::Server, Body, Method, Response, StatusCode};
 use juniper::{
-    self, executor::FieldError, graphql_value, EmptySubscription, RootNode,
-    Value,
+    self, FieldResult, executor::FieldError, graphql_value, EmptySubscription,
+    GraphQLInputObject, RootNode, Value,
 };
 use std::{convert::Infallible, result, sync::Arc};
 use tracing::Instrument;
@@ -286,15 +286,15 @@ pub async fn server(
     let db = Arc::new(ConfigDb(db, cchan));
 
     loop {
-	let root_node =
+        let root_node =
             Arc::new(RootNode::new(Config, MutRoot, EmptySubscription::new()));
-	let db = db.clone();
-	let make_svc = make_service_fn(move |_| {
+        let db = db.clone();
+        let make_svc = make_service_fn(move |_| {
             let root_node = root_node.clone();
             let ctx = db.clone();
 
             async {
-		Ok::<_, Infallible>(service_fn(move |req| {
+                Ok::<_, Infallible>(service_fn(move |req| {
                     let root_node = root_node.clone();
                     let ctx = ctx.clone();
 
@@ -308,29 +308,31 @@ pub async fn server(
                             }
 
                             (&Method::GET, "/graphql")
-				| (&Method::POST, "/graphql") => Ok::<_, hyper::Error>(
-				    juniper_hyper::graphql(root_node, ctx, req)
-					.instrument(info_span!("graphql"))
-					.await,
-				),
+                            | (&Method::POST, "/graphql") => {
+                                Ok::<_, hyper::Error>(
+                                    juniper_hyper::graphql(root_node, ctx, req)
+                                        .instrument(info_span!("graphql"))
+                                        .await,
+                                )
+                            }
 
                             _ => {
-				let mut resp = Response::new(Body::empty());
+                                let mut resp = Response::new(Body::empty());
 
-				*resp.status_mut() = StatusCode::NOT_FOUND;
-				Ok::<_, hyper::Error>(resp)
+                                *resp.status_mut() = StatusCode::NOT_FOUND;
+                                Ok::<_, hyper::Error>(resp)
                             }
-			}
+                        }
                     }
-		}))
+                }))
             }
-	});
+        });
 
-	Server::bind(&addr)
+        Server::bind(&addr)
             .serve(make_svc)
             .map_err(|e| {
-		error!("web server stopped -- {}", &e);
-		Error::UnknownError
+                error!("web server stopped -- {}", &e);
+                Error::UnknownError
             })
             .await?
     }

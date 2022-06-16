@@ -8,7 +8,7 @@ use drmem_api::{
 };
 use std::{convert::Infallible, future::Future, pin::Pin};
 use tokio::time;
-use tracing::{self, debug, info, error, warn};
+use tracing::{self, debug, error, info, warn};
 
 // This enum represents the four states in which the timer can
 // be. They are a combination of the `enable` input and whether we're
@@ -194,10 +194,9 @@ impl driver::API for Instance {
             let (d_enable, rx_set, _) =
                 core.add_rw_device("enable".parse::<Base>()?, None).await?;
 
-            Ok(
-                Box::new(Instance::new(level, millis, d_output, d_enable, rx_set))
-                    as driver::DriverType,
-            )
+            Ok(Box::new(Instance::new(
+                level, millis, d_output, d_enable, rx_set,
+            )) as driver::DriverType)
         };
 
         Box::pin(fut)

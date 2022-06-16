@@ -1,9 +1,9 @@
 use drmem_api::{client, driver, types::Error, Result, Store};
 use drmem_config::{backend, Config};
+use std::convert::Infallible;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{info, info_span, warn};
 use tracing_futures::Instrument;
-use std::convert::Infallible;
 
 // Define a `store` module that pulls in the appropriate backend.
 
@@ -124,10 +124,10 @@ impl State {
             }
         }
 
-	const ERR_MSG: &str = "no drivers or clients left";
+        const ERR_MSG: &str = "no drivers or clients left";
 
         warn!(ERR_MSG);
-	Err(Error::MissingPeer(ERR_MSG.to_string()))
+        Err(Error::MissingPeer(ERR_MSG.to_string()))
     }
 }
 

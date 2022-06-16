@@ -288,56 +288,57 @@ impl driver::API for Instance {
     fn run<'a>(
         &'a mut self,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut =
-            async {
-                // Record the peer's address in the "cfg" field of the
-                // span.
+        let fut = async {
+            // Record the peer's address in the "cfg" field of the
+            // span.
 
-                {
-                    let addr = self
-                        .rx
-                        .peer_addr()
-                        .map(|v| format!("{}", v))
-                        .unwrap_or_else(|_| String::from("**unknown**"));
+            {
+                let addr = self
+                    .rx
+                    .peer_addr()
+                    .map(|v| format!("{}", v))
+                    .unwrap_or_else(|_| String::from("**unknown**"));
 
-                    Span::current().record("cfg", &addr.as_str());
-                }
+                Span::current().record("cfg", &addr.as_str());
+            }
 
-                (self.d_service)(true.into()).await;
+            (self.d_service)(true.into()).await;
 
-                loop {
-                    match self.get_reading().await {
-                        Ok((stamp, true)) => {
-                            if self.state.on_event(stamp) {
-                                (self.d_state)(true.into()).await;
-                            }
-                        }
-
-                        Ok((stamp, false)) => {
-                            let gpm = self.gpm;
-
-                            if let Some((cycle, duty, in_flow)) =
-                                self.state.off_event(stamp, gpm)
-                            {
-                                info!(
-                                    "cycle: {}, duty: {:.1}%, inflow: {:.2} gpm",
-                                    Instance::elapsed(cycle), duty, in_flow
-				);
-
-                                (self.d_state)(false.into()).await;
-                                (self.d_duty)(duty.into()).await;
-                                (self.d_inflow)(in_flow.into()).await;
-                            }
-                        }
-
-                        Err(e) => {
-                            (self.d_state)(false.into()).await;
-                            (self.d_service)(false.into()).await;
-                            panic!("couldn't read sump state -- {:?}", e);
+            loop {
+                match self.get_reading().await {
+                    Ok((stamp, true)) => {
+                        if self.state.on_event(stamp) {
+                            (self.d_state)(true.into()).await;
                         }
                     }
+
+                    Ok((stamp, false)) => {
+                        let gpm = self.gpm;
+
+                        if let Some((cycle, duty, in_flow)) =
+                            self.state.off_event(stamp, gpm)
+                        {
+                            info!(
+                                "cycle: {}, duty: {:.1}%, inflow: {:.2} gpm",
+                                Instance::elapsed(cycle),
+                                duty,
+                                in_flow
+                            );
+
+                            (self.d_state)(false.into()).await;
+                            (self.d_duty)(duty.into()).await;
+                            (self.d_inflow)(in_flow.into()).await;
+                        }
+                    }
+
+                    Err(e) => {
+                        (self.d_state)(false.into()).await;
+                        (self.d_service)(false.into()).await;
+                        panic!("couldn't read sump state -- {:?}", e);
+                    }
                 }
-            };
+            }
+        };
 
         Box::pin(fut)
     }
