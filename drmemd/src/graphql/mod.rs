@@ -317,14 +317,7 @@ pub async fn server(
                     let ctx = ctx.clone();
 
                     async {
-			match (req.method(), req.uri().path()) {
-                            (&Method::GET, "/") => {
-				let resp =
-                                    juniper_hyper::graphiql("/graphql", None).await;
-
-				Ok::<_, hyper::Error>(resp)
-                            }
-
+                        match (req.method(), req.uri().path()) {
                             (&Method::GET, "/graphql")
                             | (&Method::POST, "/graphql") => {
                                 Ok::<_, hyper::Error>(
