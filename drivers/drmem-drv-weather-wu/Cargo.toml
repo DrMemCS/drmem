@@ -13,7 +13,4 @@ tokio = { version = "1", features = ["time", "net", "io-util"] }
 drmem-api = { path = "../../drmem-api", version = "0.1" }
 drmem-config = { path = "../../drmem-config", version = "0.1" }
 reqwest = { default-features = false, version = "0.11" }
-
-[dependencies.weather-underground]
-git = "https://github.com/rneswold/weather-underground.git"
-branch = "pull-request"
+weather-underground = "0.1"
