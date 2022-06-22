@@ -6,7 +6,7 @@ use futures::TryFutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{server::Server, Body, Method, Response, StatusCode};
 use juniper::{
-    self, FieldResult, executor::FieldError, graphql_value, EmptySubscription,
+    self, executor::FieldError, graphql_value, EmptySubscription, FieldResult,
     GraphQLInputObject, RootNode, Value,
 };
 use std::{convert::Infallible, result, sync::Arc};
