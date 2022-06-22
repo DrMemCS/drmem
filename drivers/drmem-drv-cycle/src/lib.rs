@@ -34,7 +34,7 @@ impl Instance {
     pub const NAME: &'static str = "cycle";
 
     pub const SUMMARY: &'static str =
-        "Provides a cycling output that can be enableda nd disable.";
+        "Provides a cycling output that can be enabled and disable.";
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
 
