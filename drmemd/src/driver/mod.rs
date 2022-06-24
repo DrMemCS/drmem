@@ -9,6 +9,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, field, info, info_span};
 use tracing_futures::Instrument;
 
+mod drv_cycle;
 mod drv_timer;
 
 type Factory = fn(
@@ -123,7 +124,7 @@ impl DriverDb {
         }
 
         {
-            use drmem_drv_cycle::Instance;
+            use drv_cycle::Instance;
 
             table.insert(
                 Instance::NAME,

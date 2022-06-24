@@ -36,7 +36,7 @@ impl Instance {
     pub const SUMMARY: &'static str =
         "Provides a cycling output that can be enabled and disable.";
 
-    pub const DESCRIPTION: &'static str = include_str!("../README.md");
+    pub const DESCRIPTION: &'static str = include_str!("drv_cycle.md");
 
     /// Creates a new, idle `Instance`.
 
