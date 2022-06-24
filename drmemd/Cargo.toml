@@ -99,7 +99,7 @@ optional = true
 # These are features that can be enabled for drmem.
 
 [features]
-default = ["simple-backend", "graphql"]
+default = ["simple-backend"]
 
 # Backends
 
