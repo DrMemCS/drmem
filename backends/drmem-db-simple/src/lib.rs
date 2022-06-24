@@ -18,7 +18,10 @@ use drmem_api::{
 };
 use drmem_config::backend;
 use std::collections::{hash_map, HashMap};
-use std::{time, sync::{Arc, Mutex}};
+use std::{
+    sync::{Arc, Mutex},
+    time,
+};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::error;
 
@@ -69,9 +72,9 @@ fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
     let name = name.to_string();
 
     Box::new(move |v| {
-	// Determine the timestamp *before* we take the mutex. The
-	// timing shouldn't pay the price of waiting for the mutex so
-	// we grab it right away.
+        // Determine the timestamp *before* we take the mutex. The
+        // timing shouldn't pay the price of waiting for the mutex so
+        // we grab it right away.
 
         let mut ts = time::SystemTime::now();
 
@@ -83,33 +86,40 @@ fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
         // ever get displayed.
 
         if let Ok(mut data) = reading.lock() {
+            // At this point, we have access to the previous
+            // timestamp. If the new timestamp is *before* the
+            // previous, then we fudge the timestamp to be 1 𝜇s later
+            // (DrMem doesn't allow data values to be inserted in
+            // random order.) If, somehow, the timestamp will exceed
+            // the range of the `SystemTime` type, the maxmimum
+            // timestamp will be used for this sample (as well as
+            // future samples.)
 
-	    // At this point, we have access to the previous
-	    // timestamp. If the new timestamp is *before* the
-	    // previous, then we fudge the timestamp to be 1 𝜇s later
-	    // (DrMem doesn't allow data values to be inserted in
-	    // random order.) If, somehow, the timestamp will exceed
-	    // the range of the `SystemTime` type, the maxmimum
-	    // timestamp will be used for this sample (as well as
-	    // future samples.)
+            if ts <= data.2 {
+                if let Some(nts) =
+                    data.2.checked_add(time::Duration::from_micros(1))
+                {
+                    ts = nts
+                } else {
+                    ts = time::UNIX_EPOCH
+                        .checked_add(time::Duration::new(
+                            i64::MAX as u64,
+                            999_999_999,
+                        ))
+                        .unwrap()
+                }
+            }
 
-	    if ts <= data.2 {
-		if let Some(nts) = data.2.checked_add(time::Duration::from_micros(1)) {
-		    ts = nts
-		} else {
-		    ts = time::UNIX_EPOCH.checked_add(
-			time::Duration::new(i64::MAX as u64, 999_999_999)
-		    ).unwrap()
-		}
-	    }
-
-	    let reading = device::Reading { ts, value: v.clone() };
+            let reading = device::Reading {
+                ts,
+                value: v.clone(),
+            };
             let _ = data.0.send(reading.clone());
 
-	    // Update the device's state.
+            // Update the device's state.
 
             data.1 = Some(reading);
-	    data.2 = ts
+            data.2 = ts
         } else {
             error!("couldn't set current value of {}", &name)
         }
@@ -297,16 +307,14 @@ impl Store for SimpleStore {
 mod tests {
     use crate::{mk_report_func, DeviceInfo, SimpleStore};
     use drmem_api::{types::device, Store};
-    use std::{time, collections::HashMap};
+    use std::{collections::HashMap, time};
     use tokio::sync::{mpsc::error::TryRecvError, oneshot};
 
     #[test]
     fn test_timestamp() {
-	assert!(
-	    time::UNIX_EPOCH.checked_add(
-		time::Duration::new(i64::MAX as u64, 999_999_999)
-	    ).is_some()
-	)
+        assert!(time::UNIX_EPOCH
+            .checked_add(time::Duration::new(i64::MAX as u64, 999_999_999))
+            .is_some())
     }
 
     #[tokio::test]
@@ -471,7 +479,7 @@ mod tests {
         );
 
         {
-	    let ts1 = di.reading.lock().unwrap().1.as_ref().unwrap().ts;
+            let ts1 = di.reading.lock().unwrap().1.as_ref().unwrap().ts;
             let mut rx = di.reading.lock().unwrap().0.subscribe();
 
             f(device::Value::Int(2)).await;
@@ -480,7 +488,7 @@ mod tests {
                 di.reading.lock().unwrap().1.as_ref().unwrap().value,
                 device::Value::Int(2)
             );
-	    assert!(ts1 < di.reading.lock().unwrap().1.as_ref().unwrap().ts);
+            assert!(ts1 < di.reading.lock().unwrap().1.as_ref().unwrap().ts);
         }
 
         f(device::Value::Int(3)).await;
