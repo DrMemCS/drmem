@@ -9,6 +9,8 @@ use tokio::task::JoinHandle;
 use tracing::{error, field, info, info_span};
 use tracing_futures::Instrument;
 
+mod drv_timer;
+
 type Factory = fn(
     DriverConfig,
     RequestChan,
@@ -108,7 +110,7 @@ impl DriverDb {
         let mut table = HashMap::new();
 
         {
-            use drmem_drv_timer::Instance;
+            use drv_timer::Instance;
 
             table.insert(
                 Instance::NAME,

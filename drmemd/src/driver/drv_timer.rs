@@ -37,7 +37,7 @@ impl Instance {
     pub const SUMMARY: &'static str =
         "Activates an output for a length of time.";
 
-    pub const DESCRIPTION: &'static str = include_str!("../README.md");
+    pub const DESCRIPTION: &'static str = include_str!("drv_timer.md");
 
     /// Creates a new `Instance` instance. It is assumed the external
     /// input is `false` so the initial timer state is `Armed`.

@@ -15,6 +15,7 @@ keywords = ["control-system", "automation"]
 maintenance = { status = "actively-developed" }
 
 [dependencies]
+toml = "0.5.6"
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["std"] }
@@ -24,7 +25,6 @@ futures = "0.3"
 drmem-api = { path = "../drmem-api", version = "0.1" }
 drmem-config = { path = "../drmem-config", version = "0.1" }
 drmem-drv-cycle = { path = "../drivers/drmem-drv-cycle", version = "0.1" }
-drmem-drv-timer = { path = "../drivers/drmem-drv-timer", version = "0.1" }
 
 # This section defines the driver dependencies. Most drivers are
 # optional, but a few drivers define common devices for a `drmem`
