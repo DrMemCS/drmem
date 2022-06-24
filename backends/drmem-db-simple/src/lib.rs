@@ -27,17 +27,17 @@ use tracing::error;
 
 const CHAN_SIZE: usize = 20;
 
+type ReadingState = (
+    broadcast::Sender<device::Reading>,
+    Option<device::Reading>,
+    time::SystemTime,
+);
+
 struct DeviceInfo {
     owner: String,
     units: Option<String>,
     tx_setting: Option<TxDeviceSetting>,
-    reading: Arc<
-        Mutex<(
-            broadcast::Sender<device::Reading>,
-            Option<device::Reading>,
-            time::SystemTime,
-        )>,
-    >,
+    reading: Arc<Mutex<ReadingState>>,
 }
 
 impl DeviceInfo {
@@ -110,10 +110,7 @@ fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
                 }
             }
 
-            let reading = device::Reading {
-                ts,
-                value: v.clone(),
-            };
+            let reading = device::Reading { ts, value: v };
             let _ = data.0.send(reading.clone());
 
             // Update the device's state.
@@ -123,7 +120,7 @@ fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
         } else {
             error!("couldn't set current value of {}", &name)
         }
-        Box::pin(async { () })
+        Box::pin(async {})
     })
 }
 
