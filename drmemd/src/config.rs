@@ -1,7 +1,7 @@
 use super::store;
 use serde_derive::Deserialize;
 use std::env;
-use toml::value;
+use toml::{self, value};
 use tracing::Level;
 
 use drmem_api::{driver::DriverConfig, types::device::Path};
@@ -15,6 +15,7 @@ pub struct Config {
     pub graphql: Option<std::net::SocketAddr>,
     pub backend: Option<store::config::Config>,
     pub driver: Vec<Driver>,
+    pub logic: Option<Vec<Logic>>,
 }
 
 impl<'a> Config {
@@ -59,6 +60,7 @@ impl Default for Config {
             graphql: None,
             backend: Some(store::config::Config::new()),
             driver: vec![],
+            logic: None,
         }
     }
 }
@@ -69,6 +71,12 @@ pub struct Driver {
     pub prefix: Path,
     pub max_history: Option<usize>,
     pub cfg: Option<DriverConfig>,
+}
+
+#[derive(Deserialize)]
+pub struct Logic {
+    pub name: String,
+    pub cfg: Option<toml::map::Map<String, value::Value>>,
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
