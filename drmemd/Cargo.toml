@@ -67,10 +67,14 @@ optional = true
 version = "0.8"
 optional = true
 
+[dependencies.juniper_subscriptions]
+version = "0.16"
+optional = true
+
 [dependencies.hyper]
 version = "0.14"
 default-features = false
-features = ["runtime", "server", "http1", "http2"]
+features = ["runtime", "server", "http2"]
 optional = true
 
 # This section defines the optional dependencies for the 'gRPC'
@@ -107,7 +111,7 @@ redis-backend = ["drmem-db-redis"]
 
 # Client APIs
 
-graphql = ["hyper", "juniper", "juniper_hyper"]
+graphql = ["hyper", "juniper", "juniper_hyper", "juniper_subscriptions"]
 grpc = ["tonic", "prost", "tonic-build", "tokio-stream"]
 
 # Drivers

@@ -2,14 +2,14 @@ use drmem_api::{
     client,
     types::{device, Error},
 };
-use futures::TryFutureExt;
+use futures::{Stream, TryFutureExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{server::Server, Body, Method, Response, StatusCode};
 use juniper::{
-    self, executor::FieldError, graphql_value, EmptySubscription, FieldResult,
-    GraphQLInputObject, RootNode, Value,
+    self, executor::FieldError, graphql_subscription, graphql_value,
+    FieldResult, GraphQLInputObject, RootNode, Value,
 };
-use std::{convert::Infallible, result, sync::Arc};
+use std::{convert::Infallible, pin::Pin, result, sync::Arc};
 use tracing::Instrument;
 use tracing::{error, info_span};
 
@@ -297,6 +297,22 @@ impl MutRoot {
     }
 }
 
+struct Subscription;
+
+type StringStream =
+    Pin<Box<dyn Stream<Item = Result<String, FieldError>> + Send>>;
+
+#[graphql_subscription(context = ConfigDb)]
+impl Subscription {
+    async fn hello_world() -> StringStream {
+        let stream = futures::stream::iter(vec![
+            Ok(String::from("Hello")),
+            Ok(String::from("World!")),
+        ]);
+        Box::pin(stream)
+    }
+}
+
 pub async fn server(
     db: crate::driver::DriverDb, cchan: client::RequestChan,
 ) -> Result<Infallible, Error> {
@@ -305,7 +321,7 @@ pub async fn server(
 
     loop {
         let root_node =
-            Arc::new(RootNode::new(Config, MutRoot, EmptySubscription::new()));
+            Arc::new(RootNode::new(Config {}, MutRoot {}, Subscription {}));
         let db = db.clone();
         let make_svc = make_service_fn(move |_| {
             let root_node = root_node.clone();
