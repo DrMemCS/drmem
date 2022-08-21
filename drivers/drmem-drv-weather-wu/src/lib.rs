@@ -342,7 +342,7 @@ impl driver::API for Instance {
                         .add_ro_device(
                             "pressure".parse::<Base>()?,
                             Some(if let wu::Unit::English = units {
-                                "in:Hg"
+                                "inHg"
                             } else {
                                 "hPa"
                             }),
