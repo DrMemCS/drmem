@@ -14,7 +14,7 @@ pub mod backend {
     #[derive(Deserialize, Clone)]
     pub struct Config {}
 
-    impl<'a> Config {
+    impl Config {
         pub const fn new() -> Config {
             Config {}
         }

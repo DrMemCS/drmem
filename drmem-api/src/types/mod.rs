@@ -12,7 +12,7 @@ use tokio::sync::{oneshot, mpsc};
 /// error value that is specific to Redis. Add a more general value
 /// and use the associated description string to explain the details.
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     /// Returned whenever a resource cannot be found.
     NotFound,
