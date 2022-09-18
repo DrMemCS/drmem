@@ -5,11 +5,12 @@ use crate::{
     types::{device, Error},
     Result,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, broadcast};
 
 pub struct DevInfoReply {
     pub name: device::Name,
     pub units: Option<String>,
+    pub settable: bool,
     pub driver: String,
 }
 

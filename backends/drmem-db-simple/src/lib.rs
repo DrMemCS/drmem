@@ -266,6 +266,7 @@ impl Store for SimpleStore {
             .map(|(k, v)| client::DevInfoReply {
                 name: k.clone(),
                 units: v.units.clone(),
+                settable: v.tx_setting.is_some(),
                 driver: v.owner.clone(),
             })
             .collect();

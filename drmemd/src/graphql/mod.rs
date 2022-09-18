@@ -77,6 +77,7 @@ struct Data {
 struct DeviceInfo {
     device_name: String,
     units: Option<String>,
+    settable: bool,
     driver_name: String,
     db: crate::driver::DriverDb,
 }
@@ -95,6 +96,13 @@ impl DeviceInfo {
     #[graphql(description = "The engineering units of the device's value.")]
     fn units(&self) -> &Option<String> {
         &self.units
+    }
+
+    #[graphql(
+        description = "Indicates whether the device is read-only or can be controlled."
+    )]
+    fn settable(&self) -> bool {
+        self.settable
     }
 
     #[graphql(
@@ -181,6 +189,7 @@ impl Config {
                     .map(|e| DeviceInfo {
                         device_name: e.name.to_string(),
                         units: e.units.clone(),
+                        settable: e.settable,
                         driver_name: e.driver.clone(),
                         db: db.0.clone(),
                     })
