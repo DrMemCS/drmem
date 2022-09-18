@@ -1,6 +1,7 @@
 //! Defines fundamental types used throughout the DrMem codebase.
 
 use std::fmt;
+use tokio::sync::{oneshot, mpsc};
 
 /// Enumerates all the errors that can be reported in DrMem. Authors
 /// for new drivers or storage backends should try to map their errors
@@ -79,6 +80,23 @@ impl fmt::Display for Error {
             Error::BadConfig => write!(f, "bad configuration"),
             Error::UnknownError => write!(f, "unhandled error"),
         }
+    }
+}
+
+// Defining these trait implementations allows any code that sends
+// requests over an `mpsc` channel and expects the reply in a
+// `oneshot` to easily translate the channel errors into a DrMem
+// error.
+
+impl<T> From<mpsc::error::SendError<T>> for Error {
+    fn from(_error: mpsc::error::SendError<T>) -> Self {
+        Error::MissingPeer(String::from("request channel is closed"))
+    }
+}
+
+impl From<oneshot::error::RecvError> for Error {
+    fn from(_error: oneshot::error::RecvError) -> Self {
+        Error::MissingPeer(String::from("request dropped"))
     }
 }
 
