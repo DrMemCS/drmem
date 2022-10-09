@@ -299,6 +299,30 @@ impl Store for SimpleStore {
             Err(Error::NotFound)
         }
     }
+
+    // Handles a request to monitor a device's changing value. The
+    // caller must pass in the name of the device.
+
+    async fn monitor_device(
+        &self, name: device::Name,
+    ) -> Result<broadcast::Receiver<device::Reading>> {
+        // Look-up the name of the device. If it doesn't exist, return
+        // an error.
+
+        if let Some(di) = self.0.get(&name) {
+            // Lock the mutex which protects the broadcast channel and
+            // the device's last values. Return a new receiver handle
+            // for the broadcasts.
+
+            if let Ok(guard) = di.reading.lock() {
+                Ok(guard.0.subscribe())
+            } else {
+                Err(Error::OperationError)
+            }
+        } else {
+            Err(Error::NotFound)
+        }
+    }
 }
 
 #[cfg(test)]

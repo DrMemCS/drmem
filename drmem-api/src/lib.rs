@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use tokio::sync::broadcast;
 
 pub mod types;
 
@@ -51,6 +52,10 @@ pub trait Store {
     async fn set_device(
         &self, name: types::device::Name, value: types::device::Value,
     ) -> Result<types::device::Value>;
+
+    async fn monitor_device(
+        &self, name: types::device::Name,
+    ) -> Result<broadcast::Receiver<types::device::Reading>>;
 }
 
 pub mod client;

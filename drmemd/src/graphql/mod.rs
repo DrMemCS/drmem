@@ -2,19 +2,20 @@ use drmem_api::{
     client,
     types::{device, Error},
 };
-use futures::{Stream, TryFutureExt};
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{server::Server, Body, Method, Response, StatusCode};
+use futures::{Future, FutureExt, Stream};
 use juniper::{
     self, executor::FieldError, graphql_subscription, graphql_value,
-    FieldResult, GraphQLInputObject, RootNode, Value,
+    FieldResult, GraphQLInputObject, GraphQLObject, RootNode, Value,
 };
-use std::{convert::Infallible, pin::Pin, result, sync::Arc};
-use tracing::Instrument;
-use tracing::{error, info_span};
+use juniper_graphql_ws::ConnectionConfig;
+use juniper_warp::{playground_filter, subscriptions::serve_graphql_ws};
+use std::{pin::Pin, result, sync::Arc};
+use tracing::{error, info};
+use warp::Filter;
 
 // The Context parameter for Queries.
 
+#[derive(Clone)]
 struct ConfigDb(crate::driver::DriverDb, client::RequestChan);
 
 impl juniper::Context for ConfigDb {}
@@ -58,7 +59,7 @@ impl DriverInfo {
 #[graphql(description = "Describes data that can be sent to devices. When \
 			 specifying data, one -- and only one -- field \
 			 must be set.")]
-struct Data {
+struct SettingData {
     #[graphql(name = "int", description = "Placeholder for integer values.")]
     f_int: Option<i32>,
     #[graphql(name = "flt", description = "Placeholder for float values.")]
@@ -68,8 +69,6 @@ struct Data {
     #[graphql(name = "str", description = "Placeholder for string values.")]
     f_string: Option<String>,
 }
-
-//mod data;
 
 // `DeviceInfo` is a GraphQL object which contains information about a
 // device.
@@ -248,45 +247,45 @@ impl Control {
 			     set. It is an error to have all fields `null` \
 			     or more than one field non-`null`.")]
     async fn set_device(
-        #[graphql(context)] db: &ConfigDb, name: String, value: Data,
+        #[graphql(context)] db: &ConfigDb, name: String, value: SettingData,
     ) -> FieldResult<Option<bool>> {
         match value {
-            Data {
+            SettingData {
                 f_int: None,
                 f_float: None,
                 f_bool: None,
                 f_string: None,
             } => Err(FieldError::new("no data provided", Value::null())),
 
-            Data {
+            SettingData {
                 f_int: Some(v),
                 f_float: None,
                 f_bool: None,
                 f_string: None,
             } => Control::perform_setting(db, &name, v).await.map(|_| None),
 
-            Data {
+            SettingData {
                 f_int: None,
                 f_float: Some(v),
                 f_bool: None,
                 f_string: None,
             } => Control::perform_setting(db, &name, v).await.map(|_| None),
 
-            Data {
+            SettingData {
                 f_int: None,
                 f_float: None,
                 f_bool: Some(v),
                 f_string: None,
             } => Control::perform_setting(db, &name, v).await.map(|_| None),
 
-            Data {
+            SettingData {
                 f_int: None,
                 f_float: None,
                 f_bool: None,
                 f_string: Some(v),
             } => Control::perform_setting(db, &name, v).await.map(|_| None),
 
-            Data { .. } => Err(FieldError::new(
+            SettingData { .. } => Err(FieldError::new(
                 "must only specify one item of data",
                 Value::null(),
             )),
@@ -306,70 +305,96 @@ impl MutRoot {
     }
 }
 
+#[derive(GraphQLObject)]
+#[graphql(
+    description = "Represents a value of a device at an instant of time."
+)]
+struct Reading {
+    device: String,
+    stamp: f64,
+    #[graphql(description = "Placeholder for integer values.")]
+    int_value: Option<i32>,
+    #[graphql(description = "Placeholder for float values.")]
+    float_value: Option<f64>,
+    #[graphql(description = "Placeholder for boolean values.")]
+    bool_value: Option<bool>,
+    #[graphql(description = "Placeholder for string values.")]
+    string_value: Option<String>,
+}
+
 struct Subscription;
 
-type StringStream =
-    Pin<Box<dyn Stream<Item = Result<String, FieldError>> + Send>>;
+type DataStream =
+    Pin<Box<dyn Stream<Item = Result<Reading, FieldError>> + Send>>;
 
 #[graphql_subscription(context = ConfigDb)]
 impl Subscription {
-    async fn hello_world() -> StringStream {
-        let stream = futures::stream::iter(vec![
-            Ok(String::from("Hello")),
-            Ok(String::from("World!")),
-        ]);
+    async fn monitor_device() -> DataStream {
+        let stream = futures::stream::iter(vec![]);
+
         Box::pin(stream)
     }
 }
 
-pub async fn server(
+type Schema = RootNode<'static, Config, MutRoot, Subscription>;
+
+fn schema() -> Schema {
+    Schema::new(Config {}, MutRoot {}, Subscription {})
+}
+
+pub fn server(
     db: crate::driver::DriverDb, cchan: client::RequestChan,
-) -> Result<Infallible, Error> {
-    let addr = ([0, 0, 0, 0], 3000).into();
-    let db = Arc::new(ConfigDb(db, cchan));
+) -> impl Future<Output = ()> {
+    let context = ConfigDb(db, cchan);
 
-    loop {
-        let root_node =
-            Arc::new(RootNode::new(Config {}, MutRoot {}, Subscription {}));
-        let db = db.clone();
-        let make_svc = make_service_fn(move |_| {
-            let root_node = root_node.clone();
-            let ctx = db.clone();
+    // Create filter that handles GraphQL queries and mutations.
 
-            async {
-                Ok::<_, Infallible>(service_fn(move |req| {
-                    let root_node = root_node.clone();
-                    let ctx = ctx.clone();
+    let ctxt = context.clone();
+    let state = warp::any().map(move || ctxt.clone());
+    let graphql_filter =
+        juniper_warp::make_graphql_filter(schema(), state.boxed());
 
-                    async {
-                        match (req.method(), req.uri().path()) {
-                            (&Method::GET, "/graphql")
-                            | (&Method::POST, "/graphql") => {
-                                Ok::<_, hyper::Error>(
-                                    juniper_hyper::graphql(root_node, ctx, req)
-                                        .instrument(info_span!("graphql"))
-                                        .await,
-                                )
-                            }
+    // Create filter that handle the interactive GraphQL app.
 
-                            _ => {
-                                let mut resp = Response::new(Body::empty());
+    let graphiql_filter = playground_filter("/graphql", Some("/subscriptions"));
 
-                                *resp.status_mut() = StatusCode::NOT_FOUND;
-                                Ok::<_, hyper::Error>(resp)
-                            }
-                        }
+    // Create the filter that handles subscriptions.
+
+    let sub_filter = warp::ws()
+        .map(move |ws: warp::ws::Ws| {
+            let ctxt = context.clone();
+            let root_node = schema();
+
+            ws.on_upgrade(move |websocket| async move {
+                info!("got a websocket request");
+
+                serve_graphql_ws(
+                    websocket,
+                    Arc::new(root_node),
+                    ConnectionConfig::new(ctxt.clone()),
+                )
+                .map(|r| {
+                    if let Err(e) = r {
+                        error!("Websocket error: {}", &e);
                     }
-                }))
-            }
+                })
+                .await
+            })
+        })
+        .map(|reply| {
+            warp::reply::with_header(
+                reply,
+                "Sec-WebSocket-Protocol",
+                "graphql-ws",
+            )
         });
 
-        Server::bind(&addr)
-            .serve(make_svc)
-            .map_err(|e| {
-                error!("web server stopped -- {}", &e);
-                Error::UnknownError
-            })
-            .await?
-    }
+    // Stitch the filters together to build the map of the web
+    // interface.
+
+    let filter = (warp::path("graphiql").and(graphiql_filter))
+        .or(warp::path("subscriptions").and(sub_filter))
+        .or(warp::path("graphql").and(graphql_filter));
+
+    warp::serve(filter).run(([0, 0, 0, 0], 3000))
 }

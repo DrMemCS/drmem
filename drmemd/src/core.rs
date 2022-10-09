@@ -103,6 +103,14 @@ impl State {
                     warn!("driver exited before a reply could be sent")
                 }
             }
+
+            client::Request::MonitorDevice { name, rpy_chan } => {
+                let fut = self.backend.monitor_device(name);
+
+                if rpy_chan.send(fut.await).is_err() {
+                    warn!("driver exited before a reply could be sent")
+                }
+            }
         }
     }
 

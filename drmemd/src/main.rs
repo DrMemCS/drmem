@@ -1,6 +1,6 @@
 use drmem_api::{driver::RequestChan, types::Error, Result};
 use drmem_config::Config;
-use futures::future;
+use futures::{future, FutureExt};
 use std::convert::Infallible;
 use tokio::task::JoinHandle;
 use tracing::{error, trace, warn};
@@ -87,14 +87,17 @@ async fn run() -> Result<()> {
         // Build initial vector of required tasks. Crate features will
         // enable more required tasks.
 
-        let mut tasks = vec![
-            wrap_task(core_task),
-            #[cfg(feature = "graphql")]
-            wrap_task(tokio::spawn(graphql::server(
-                drv_tbl.clone(),
-                tx_clnt_req.clone(),
-            ))),
-        ];
+        let mut tasks = vec![wrap_task(core_task)];
+
+        #[cfg(feature = "graphql")]
+        {
+            let f = Box::pin(
+                graphql::server(drv_tbl.clone(), tx_clnt_req.clone())
+                    .then(|_| async { Err(Error::OperationError) }),
+            );
+
+            tasks.push(wrap_task(tokio::spawn(f)));
+        }
 
         // Iterate through the list of drivers specified in the
         // configuration file.
