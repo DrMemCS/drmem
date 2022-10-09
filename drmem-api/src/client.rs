@@ -5,7 +5,7 @@ use crate::{
     types::{device, Error},
     Result,
 };
-use tokio::sync::{mpsc, oneshot, broadcast};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 pub struct DevInfoReply {
     pub name: device::Name,
@@ -79,48 +79,43 @@ impl RequestChan {
     >(
         &self, name: device::Name, value: T,
     ) -> Result<T> {
+        // Create the reply channel and the request message that will
+        // be sent.
+
         let (tx, rx) = oneshot::channel();
         let msg = Request::SetDevice {
             name,
             value: value.into(),
             rpy_chan: tx,
         };
-        let result = self.req_chan.send(msg).await;
 
-        if result.is_ok() {
-            if let Ok(reply) = rx.await {
-                match reply {
-                    Ok(v) => T::try_from(v),
-                    Err(e) => Err(e),
-                }
-            } else {
-                Err(Error::MissingPeer(String::from(
-                    "core didn't reply to request",
-                )))
-            }
-        } else {
-            Err(Error::MissingPeer(String::from(
-                "core didn't accept request",
-            )))
-        }
+        // Send the request to the driver.
+
+        self.req_chan.send(msg).await?;
+
+        // Wait for the reply and try to convert the set value back
+        // into the type that was used.
+
+        rx.await?.and_then(T::try_from)
     }
+
+    // Requests device information for devices whose name matches the
+    // provided pattern.
 
     pub async fn get_device_info(
         &self, pattern: Option<String>,
     ) -> Result<Vec<DevInfoReply>> {
         let (rpy_chan, rx) = oneshot::channel();
-        let result = self
-            .req_chan
-            .send(Request::QueryDeviceInfo { pattern, rpy_chan })
-            .await;
 
-        if result.is_ok() {
-            return rx.await.map_err(|_| {
-                Error::MissingPeer(String::from("core didn't reply to request"))
-            });
-        }
-        Err(Error::MissingPeer(String::from(
-            "core didn't accept request",
-        )))
+        // Send the request to the service (i.e. the backend) that has
+        // the device information.
+
+        self.req_chan
+            .send(Request::QueryDeviceInfo { pattern, rpy_chan })
+            .await?;
+
+        // Return the reply from the request.
+
+        rx.await.map_err(|e| e.into())
     }
 }
