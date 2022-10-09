@@ -209,16 +209,26 @@ impl EditConfig {
     }
 }
 
+// The `Control` mutation is used to group queries that attempt to
+// control devices by sending them settings.
+
 struct Control;
 
 impl Control {
+    // Sends a new value to a device.
+
     async fn perform_setting<
         T: Into<device::Value> + TryFrom<device::Value, Error = Error>,
     >(
         db: &ConfigDb, device: &str, value: T,
     ) -> result::Result<T, FieldError> {
+        // Make sure the device name is properly formed.
+
         if let Ok(name) = device.parse::<device::Name>() {
             let tx = db.1.clone();
+
+            // Send the setting to the driver. Map the error, if any,
+            // to a `FieldError` type.
 
             tx.set_device::<T>(name, value).await.map_err(|e| {
                 let errmsg = format!("{}", &e);
