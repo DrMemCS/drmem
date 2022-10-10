@@ -120,6 +120,20 @@ impl DeviceInfo {
 
 struct Config;
 
+impl Config {
+    fn is_settable(e: &&client::DevInfoReply) -> bool {
+        e.settable
+    }
+
+    fn is_not_settable(e: &&client::DevInfoReply) -> bool {
+        !e.settable
+    }
+
+    fn is_true(_e: &&client::DevInfoReply) -> bool {
+        true
+    }
+}
+
 #[juniper::graphql_object(
     context = ConfigDb,
     description = "Reports configuration information for `drmemd`."
@@ -170,21 +184,57 @@ impl Config {
         }
     }
 
-    #[graphql(description = "Returns information about devices that match \
-			     the specified `pattern`. If no pattern is \
-			     provided, all devices are returned.\n\n\
-			     NOTE: At this point, the only supported pattern \
-			     is the entire device name. Proper pattern \
-			     handling will be added soon.")]
+    #[graphql(
+        description = "Returns information associated with the devices that \
+			     are active in the running system. Arguments to the \
+			     query will filter the results.\n\n\
+			     \
+			     If the argument `pattern` is provided, only the devices \
+			     whose name matches the pattern will be included in the \
+			     results. The pattern follows the shell \"glob\" style.\n\n\
+			     \
+			     If the argument `settable` is provided, it returns \
+			     devices that are or aren't settable, depending on the \
+			     value of the agument.\n\n\
+			     \
+			     NOTE: At this point, the only supported pattern is the \
+			     entire device name. Proper pattern handling will be \
+			     added soon."
+    )]
     async fn device_info(
-        #[graphql(context)] db: &ConfigDb, pattern: Option<String>,
+        #[graphql(context)] db: &ConfigDb,
+        #[graphql(
+            name = "pattern",
+            description = "If this argument is provided, the query returns information \
+			   for devices whose name matches the pattern. The pattern uses \
+			   \"globbing\" grammar: '?' matches one character, '*' matches \
+			   zero or more, '**' matches arbtrary levels of the path \
+			   (between ':'s)."
+        )]
+        pattern: Option<String>,
+        #[graphql(
+            name = "settable",
+            description = "If this argument is provided, the query filters the result \
+			   based on whether the device can be set or not."
+        )]
+        settable: Option<bool>,
     ) -> result::Result<Vec<DeviceInfo>, FieldError> {
         let tx = db.1.clone();
+        let filt = settable
+            .map(|v| {
+                if v {
+                    Config::is_settable
+                } else {
+                    Config::is_not_settable
+                }
+            })
+            .unwrap_or(Config::is_true);
 
         tx.get_device_info(pattern)
             .await
             .map(|v| {
                 v.iter()
+                    .filter(filt)
                     .map(|e| DeviceInfo {
                         device_name: e.name.to_string(),
                         units: e.units.clone(),
