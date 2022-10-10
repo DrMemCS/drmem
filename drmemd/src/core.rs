@@ -115,6 +115,7 @@ impl State {
     ) -> Result<Infallible> {
         info!("starting");
         loop {
+            #[rustfmt::skip]
             tokio::select! {
 		Some(req) = rx_drv_req.recv() =>
                     self.handle_driver_request(req).await,

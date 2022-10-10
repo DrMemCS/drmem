@@ -214,6 +214,7 @@ impl driver::API for Instance {
             loop {
                 info!("state {:?} : waiting for event", &self.state);
 
+                #[rustfmt::skip]
                 tokio::select! {
                     // If the driver is in a timing cycle, add the
                     // sleep future to the list of futures to await.
