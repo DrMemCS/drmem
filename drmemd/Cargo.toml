@@ -20,6 +20,7 @@ tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio-stream = { version = "0.1", features = ["sync", "net"] }
 futures = "0.3"
 
 drmem-api = { path = "../drmem-api", version = "0.1" }
@@ -79,11 +80,6 @@ optional = true
 # This section defines the optional dependencies for the 'gRPC'
 # feature.
 
-[dependencies.tokio-stream]
-version = "0.1"
-features = ["net"]
-optional = true
-
 [dependencies.tonic]
 version = "0.6"
 features = ["prost", "compression"]
@@ -111,7 +107,7 @@ redis-backend = ["drmem-db-redis"]
 # Client APIs
 
 graphql = ["warp", "juniper", "juniper_graphql_ws", "juniper_warp"]
-grpc = ["tonic", "prost", "tonic-build", "tokio-stream"]
+grpc = ["tonic", "prost", "tonic-build"]
 
 # Drivers
 

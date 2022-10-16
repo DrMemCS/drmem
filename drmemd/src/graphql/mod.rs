@@ -2,7 +2,7 @@ use drmem_api::{
     client,
     types::{device, Error},
 };
-use futures::{Future, FutureExt, Stream};
+use futures::{Future, FutureExt};
 use juniper::{
     self, executor::FieldError, graphql_subscription, graphql_value,
     FieldResult, GraphQLInputObject, GraphQLObject, RootNode, Value,
@@ -10,7 +10,10 @@ use juniper::{
 use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::{playground_filter, subscriptions::serve_graphql_ws};
 use std::{pin::Pin, result, sync::Arc};
-use tracing::{error, info};
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tokio_stream::Stream;
+use tracing::{error, info, info_span};
+use tracing_futures::Instrument;
 use warp::Filter;
 
 // The Context parameter for Queries.
@@ -365,7 +368,7 @@ impl MutRoot {
     }
 }
 
-#[derive(GraphQLObject)]
+#[derive(GraphQLObject, Default)]
 #[graphql(
     description = "Represents a value of a device at an instant of time."
 )]
@@ -385,14 +388,92 @@ struct Reading {
 struct Subscription;
 
 type DataStream =
-    Pin<Box<dyn Stream<Item = Result<Reading, FieldError>> + Send>>;
+    Pin<Box<dyn Stream<Item = Result<Reading, FieldError>> + Send + Sync>>;
+
+impl Subscription {
+    fn xlat(name: String) ->
+	impl Fn(Result<device::Reading, BroadcastStreamRecvError>) -> FieldResult<Reading>
+    {
+	move |e: Result<device::Reading, BroadcastStreamRecvError>| {
+            if let Ok(e) = e {
+		let ns = e.ts
+		    .duration_since(std::time::UNIX_EPOCH)
+		    .map(|v| v.as_nanos())
+		    .unwrap_or(0u128);
+		let stamp = (ns as f64) / 1_000_000_000.0;
+		let device = name.clone();
+
+		match e.value {
+                    device::Value::Bool(v) => Ok(Reading {
+			device,
+			stamp,
+			bool_value: Some(v),
+			..Reading::default()
+                    }),
+                    device::Value::Int(v) => Ok(Reading {
+			device,
+			stamp,
+			int_value: Some(v),
+			..Reading::default()
+                    }),
+                    device::Value::Flt(v) => Ok(Reading {
+			device,
+			stamp,
+			float_value: Some(v),
+			..Reading::default()
+                    }),
+                    device::Value::Str(v) => Ok(Reading {
+			device,
+			stamp,
+			string_value: Some(v),
+			..Reading::default()
+                    }),
+		}
+            } else {
+		Err(FieldError::new("bad channel", Value::null()))
+            }
+	}
+    }
+}
 
 #[graphql_subscription(context = ConfigDb)]
 impl Subscription {
-    async fn monitor_device() -> DataStream {
-        let stream = futures::stream::iter(vec![]);
+    #[graphql(description = "Sets up a connection to receive all \
+			     updates to a device. The GraphQL request \
+			     must provide the name of a device. This \
+			     method returns a stream which generates a \
+			     reply each time a device's value changes.")]
+    async fn monitor_device(
+        #[graphql(context)] db: &ConfigDb, device: String,
+    ) -> DataStream {
+        use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
-        Box::pin(stream)
+        if let Ok(name) = device.parse::<device::Name>() {
+            info!("setting monitor for '{}'", &name);
+
+            if let Ok(rx) = db.1.monitor_device(name.clone()).await {
+                let stream = StreamExt::map(
+                    BroadcastStream::new(rx),
+                    Subscription::xlat(device),
+                );
+
+                Box::pin(stream) as DataStream
+            } else {
+                let stream = tokio_stream::once(Err(FieldError::new(
+                    "device not found",
+                    Value::null(),
+                )));
+
+                Box::pin(stream) as DataStream
+            }
+        } else {
+            let stream = tokio_stream::once(Err(FieldError::new(
+                "badly formed device name",
+                Value::null(),
+            )));
+
+            Box::pin(stream) as DataStream
+        }
     }
 }
 
@@ -421,26 +502,39 @@ pub fn server(
     // Create the filter that handles subscriptions.
 
     let sub_filter = warp::ws()
-        .map(move |ws: warp::ws::Ws| {
-            let ctxt = context.clone();
-            let root_node = schema();
+        .and(warp::addr::remote())
+        .map(
+            move |ws: warp::ws::Ws, addr: Option<std::net::SocketAddr>| {
+                let ctxt = context.clone();
+                let root_node = schema();
 
-            ws.on_upgrade(move |websocket| async move {
-                info!("got a websocket request");
+                ws.on_upgrade(move |websocket| {
+                    async move {
+                        info!("subscription context created");
 
-                serve_graphql_ws(
-                    websocket,
-                    Arc::new(root_node),
-                    ConnectionConfig::new(ctxt.clone()),
-                )
-                .map(|r| {
-                    if let Err(e) = r {
-                        error!("Websocket error: {}", &e);
+                        serve_graphql_ws(
+                            websocket,
+                            Arc::new(root_node),
+                            ConnectionConfig::new(ctxt.clone()),
+                        )
+                        .map(|r| {
+                            if let Err(e) = r {
+                                error!("Websocket error: {}", &e);
+                            }
+                        })
+                        .await;
+
+                        info!("subscription context canceled")
                     }
+                    .instrument(info_span!(
+                        "ws",
+                        client = addr
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| String::from("*unknown*"))
+                    ))
                 })
-                .await
-            })
-        })
+            },
+        )
         .map(|reply| {
             warp::reply::with_header(
                 reply,
