@@ -1,4 +1,4 @@
-<img src="https://github.com/rneswold/drmem/raw/master/assets/logo/drmem-header-small.png" alt="DrMem Logo"/>
+![DrMem logo](assets/logo/drmem-header-small.png)
 
 _A small, capable control system for the hobbyist_
 
