@@ -2,6 +2,8 @@
 
 _A small, capable control system for the hobbyist_
 
+[![Rust](https://github.com/DrMem-Control-System/drmem/actions/workflows/rust.yml/badge.svg)](https://github.com/DrMem-Control-System/drmem/actions/workflows/rust.yml)
+
 ---
 
 The DrMem Project strives to be a complete, easy-to-use control system
