@@ -531,6 +531,7 @@ pub fn server(
                         client = addr
                             .map(|v| v.to_string())
                             .unwrap_or_else(|| String::from("*unknown*"))
+			    .as_str()
                     ))
                 })
             },
