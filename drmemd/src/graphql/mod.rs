@@ -369,7 +369,7 @@ impl MutRoot {
     }
 }
 
-#[derive(GraphQLObject, Default)]
+#[derive(GraphQLObject)]
 #[graphql(
     description = "Represents a value of a device at an instant of time."
 )]
@@ -407,25 +407,33 @@ impl Subscription {
                         device,
                         stamp,
                         bool_value: Some(v),
-                        ..Reading::default()
+                        int_value: None,
+                        float_value: None,
+                        string_value: None,
                     }),
                     device::Value::Int(v) => Ok(Reading {
                         device,
                         stamp,
+                        bool_value: None,
                         int_value: Some(v),
-                        ..Reading::default()
+                        float_value: None,
+                        string_value: None,
                     }),
                     device::Value::Flt(v) => Ok(Reading {
                         device,
                         stamp,
+                        bool_value: None,
+                        int_value: None,
                         float_value: Some(v),
-                        ..Reading::default()
+                        string_value: None,
                     }),
                     device::Value::Str(v) => Ok(Reading {
                         device,
                         stamp,
+                        bool_value: None,
+                        int_value: None,
+                        float_value: None,
                         string_value: Some(v),
-                        ..Reading::default()
                     }),
                 }
             } else {
