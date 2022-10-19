@@ -1,7 +1,7 @@
 //! Defines fundamental types used throughout the DrMem codebase.
 
 use std::fmt;
-use tokio::sync::{oneshot, mpsc};
+use tokio::sync::{mpsc, oneshot};
 
 /// Enumerates all the errors that can be reported in DrMem. Authors
 /// for new drivers or storage backends should try to map their errors

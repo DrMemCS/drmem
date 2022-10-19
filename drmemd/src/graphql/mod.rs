@@ -392,44 +392,46 @@ type DataStream =
     Pin<Box<dyn Stream<Item = Result<Reading, FieldError>> + Send + Sync>>;
 
 impl Subscription {
-    fn xlat(name: String) ->
-	impl Fn(Result<device::Reading, BroadcastStreamRecvError>) -> FieldResult<Reading>
-    {
-	move |e: Result<device::Reading, BroadcastStreamRecvError>| {
+    fn xlat(
+        name: String,
+    ) -> impl Fn(
+        Result<device::Reading, BroadcastStreamRecvError>,
+    ) -> FieldResult<Reading> {
+        move |e: Result<device::Reading, BroadcastStreamRecvError>| {
             if let Ok(e) = e {
                 let stamp = DateTime::<Utc>::from(e.ts);
                 let device = name.clone();
 
-		match e.value {
+                match e.value {
                     device::Value::Bool(v) => Ok(Reading {
-			device,
-			stamp,
-			bool_value: Some(v),
-			..Reading::default()
+                        device,
+                        stamp,
+                        bool_value: Some(v),
+                        ..Reading::default()
                     }),
                     device::Value::Int(v) => Ok(Reading {
-			device,
-			stamp,
-			int_value: Some(v),
-			..Reading::default()
+                        device,
+                        stamp,
+                        int_value: Some(v),
+                        ..Reading::default()
                     }),
                     device::Value::Flt(v) => Ok(Reading {
-			device,
-			stamp,
-			float_value: Some(v),
-			..Reading::default()
+                        device,
+                        stamp,
+                        float_value: Some(v),
+                        ..Reading::default()
                     }),
                     device::Value::Str(v) => Ok(Reading {
-			device,
-			stamp,
-			string_value: Some(v),
-			..Reading::default()
+                        device,
+                        stamp,
+                        string_value: Some(v),
+                        ..Reading::default()
                     }),
-		}
+                }
             } else {
-		Err(FieldError::new("bad channel", Value::null()))
+                Err(FieldError::new("bad channel", Value::null()))
             }
-	}
+        }
     }
 }
 
@@ -528,7 +530,7 @@ pub fn server(
                         client = addr
                             .map(|v| v.to_string())
                             .unwrap_or_else(|| String::from("*unknown*"))
-			    .as_str()
+                            .as_str()
                     ))
                 })
             },
