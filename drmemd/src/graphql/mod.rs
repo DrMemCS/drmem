@@ -1,3 +1,4 @@
+use chrono::prelude::*;
 use drmem_api::{
     client,
     types::{device, Error},
@@ -374,7 +375,7 @@ impl MutRoot {
 )]
 struct Reading {
     device: String,
-    stamp: f64,
+    stamp: DateTime<Utc>,
     #[graphql(description = "Placeholder for integer values.")]
     int_value: Option<i32>,
     #[graphql(description = "Placeholder for float values.")]
@@ -396,12 +397,8 @@ impl Subscription {
     {
 	move |e: Result<device::Reading, BroadcastStreamRecvError>| {
             if let Ok(e) = e {
-		let ns = e.ts
-		    .duration_since(std::time::UNIX_EPOCH)
-		    .map(|v| v.as_nanos())
-		    .unwrap_or(0u128);
-		let stamp = (ns as f64) / 1_000_000_000.0;
-		let device = name.clone();
+                let stamp = DateTime::<Utc>::from(e.ts);
+                let device = name.clone();
 
 		match e.value {
                     device::Value::Bool(v) => Ok(Reading {
