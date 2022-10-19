@@ -1,3 +1,4 @@
+use chrono::prelude::*;
 use drmem_api::{
     client,
     types::{device, Error},
@@ -368,13 +369,13 @@ impl MutRoot {
     }
 }
 
-#[derive(GraphQLObject, Default)]
+#[derive(GraphQLObject)]
 #[graphql(
     description = "Represents a value of a device at an instant of time."
 )]
 struct Reading {
     device: String,
-    stamp: f64,
+    stamp: DateTime<Utc>,
     #[graphql(description = "Placeholder for integer values.")]
     int_value: Option<i32>,
     #[graphql(description = "Placeholder for float values.")]
@@ -391,48 +392,54 @@ type DataStream =
     Pin<Box<dyn Stream<Item = Result<Reading, FieldError>> + Send + Sync>>;
 
 impl Subscription {
-    fn xlat(name: String) ->
-	impl Fn(Result<device::Reading, BroadcastStreamRecvError>) -> FieldResult<Reading>
-    {
-	move |e: Result<device::Reading, BroadcastStreamRecvError>| {
+    fn xlat(
+        name: String,
+    ) -> impl Fn(
+        Result<device::Reading, BroadcastStreamRecvError>,
+    ) -> FieldResult<Reading> {
+        move |e: Result<device::Reading, BroadcastStreamRecvError>| {
             if let Ok(e) = e {
-		let ns = e.ts
-		    .duration_since(std::time::UNIX_EPOCH)
-		    .map(|v| v.as_nanos())
-		    .unwrap_or(0u128);
-		let stamp = (ns as f64) / 1_000_000_000.0;
-		let device = name.clone();
+                let stamp = DateTime::<Utc>::from(e.ts);
+                let device = name.clone();
 
-		match e.value {
+                match e.value {
                     device::Value::Bool(v) => Ok(Reading {
-			device,
-			stamp,
-			bool_value: Some(v),
-			..Reading::default()
+                        device,
+                        stamp,
+                        bool_value: Some(v),
+                        int_value: None,
+                        float_value: None,
+                        string_value: None,
                     }),
                     device::Value::Int(v) => Ok(Reading {
-			device,
-			stamp,
-			int_value: Some(v),
-			..Reading::default()
+                        device,
+                        stamp,
+                        bool_value: None,
+                        int_value: Some(v),
+                        float_value: None,
+                        string_value: None,
                     }),
                     device::Value::Flt(v) => Ok(Reading {
-			device,
-			stamp,
-			float_value: Some(v),
-			..Reading::default()
+                        device,
+                        stamp,
+                        bool_value: None,
+                        int_value: None,
+                        float_value: Some(v),
+                        string_value: None,
                     }),
                     device::Value::Str(v) => Ok(Reading {
-			device,
-			stamp,
-			string_value: Some(v),
-			..Reading::default()
+                        device,
+                        stamp,
+                        bool_value: None,
+                        int_value: None,
+                        float_value: None,
+                        string_value: Some(v),
                     }),
-		}
+                }
             } else {
-		Err(FieldError::new("bad channel", Value::null()))
+                Err(FieldError::new("bad channel", Value::null()))
             }
-	}
+        }
     }
 }
 
@@ -531,7 +538,7 @@ pub fn server(
                         client = addr
                             .map(|v| v.to_string())
                             .unwrap_or_else(|| String::from("*unknown*"))
-			    .as_str()
+                            .as_str()
                     ))
                 })
             },
