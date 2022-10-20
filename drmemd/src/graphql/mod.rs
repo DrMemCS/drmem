@@ -399,43 +399,23 @@ impl Subscription {
     ) -> FieldResult<Reading> {
         move |e: Result<device::Reading, BroadcastStreamRecvError>| {
             if let Ok(e) = e {
-                let stamp = DateTime::<Utc>::from(e.ts);
-                let device = name.clone();
+                let mut reading = Reading {
+                    device: name.clone(),
+                    stamp: DateTime::<Utc>::from(e.ts),
+                    bool_value: None,
+                    int_value: None,
+                    float_value: None,
+                    string_value: None,
+                };
 
                 match e.value {
-                    device::Value::Bool(v) => Ok(Reading {
-                        device,
-                        stamp,
-                        bool_value: Some(v),
-                        int_value: None,
-                        float_value: None,
-                        string_value: None,
-                    }),
-                    device::Value::Int(v) => Ok(Reading {
-                        device,
-                        stamp,
-                        bool_value: None,
-                        int_value: Some(v),
-                        float_value: None,
-                        string_value: None,
-                    }),
-                    device::Value::Flt(v) => Ok(Reading {
-                        device,
-                        stamp,
-                        bool_value: None,
-                        int_value: None,
-                        float_value: Some(v),
-                        string_value: None,
-                    }),
-                    device::Value::Str(v) => Ok(Reading {
-                        device,
-                        stamp,
-                        bool_value: None,
-                        int_value: None,
-                        float_value: None,
-                        string_value: Some(v),
-                    }),
+                    device::Value::Bool(v) => reading.bool_value = Some(v),
+                    device::Value::Int(v) => reading.int_value = Some(v),
+                    device::Value::Flt(v) => reading.float_value = Some(v),
+                    device::Value::Str(v) => reading.string_value = Some(v),
                 }
+
+                Ok(reading)
             } else {
                 Err(FieldError::new("bad channel", Value::null()))
             }
