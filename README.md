@@ -2,7 +2,16 @@
 
 _A small, capable control system for the hobbyist_
 
-[![Rust](https://github.com/DrMem-Control-System/drmem/actions/workflows/rust.yml/badge.svg)](https://github.com/DrMem-Control-System/drmem/actions/workflows/rust.yml)
+[![MIT licensed][mit-badge]][mit-url]
+[![Crates.io][crates-badge]][crates-url]
+[![Build Status][actions-badge]][actions-url]
+
+[mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
+[mit-url]: https://github.com/tokio-rs/tokio/blob/master/LICENSE
+[crates-badge]: https://img.shields.io/crates/v/drmemd.svg
+[crates-url]: https://crates.io/crates/drmemd
+[actions-badge]: workflows/CI/badge.svg
+[actions-url]: actions?query=workflow%3ACI+branch%3Amain
 
 ---
 
@@ -43,24 +52,13 @@ that applications can use to provide dashboards, etc. for viewing and
 controlling DrMem devices. This is provided by a built-in HTTP
 server hosting a gRPC interface.
 
-NOTE: This project provides a general purpose control system. Meeting
-timing constraints depends on how fast your system is and how many
-devices are being accessed/controlled. It is *your* responsibility to
-determine whether you need another node to handle the extra load. If
-you write your own driver, *you* need to verify it works and meets
-your requirements.
-
-*THIS SOFTWARE IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
-WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.*
-
 ## Other Control System / Home Automation Projects
 
 DrMem is a young project. If you're looking for more complete
 solutions that are available now, here's a few options:
 
-- [EPICS](https://epics.anl.gov) is a professional control system used
-  in particle accelerators and observatories around the world.
+- [EPICS](https://epics-controls.org/) is a professional control system used
+  by particle accelerators and observatories around the world.
 - [Mister House](https://github.com/hollie/misterhouse) is a home
   automation system, written in Perl, that has been around for
   decades.
@@ -69,7 +67,7 @@ solutions that are available now, here's a few options:
 - Many devices can also be controlled by [Google's Home app](https://play.google.com/store/apps/details?id=com.google.android.apps.chromecast.app)
   or [Apple's Home app](https://www.apple.com/ios/home/)
 
-But be sure to check back occasionally as `drmem ` matures!
+But be sure to check back occasionally as `drmem` matures!
 
 ## Preparation
 
