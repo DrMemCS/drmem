@@ -1,17 +1,17 @@
 use async_trait::async_trait;
 use drmem_api::{
+    client,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
     types::{
-        device::{Name, Value},
+        device::{self, Value},
         Error,
     },
     Result, Store,
 };
 use drmem_config::backend;
-use futures_util::FutureExt;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
 // Translates a Redis error into a DrMem error. The translation is
@@ -170,7 +170,7 @@ fn from_value(v: &redis::Value) -> Result<Value> {
 pub struct RedisStore {
     /// This connection is used for interacting with the database.
     db_con: redis::aio::MultiplexedConnection,
-    table: HashMap<Name, TxDeviceSetting>,
+    table: HashMap<device::Name, TxDeviceSetting>,
 }
 
 impl RedisStore {
@@ -346,18 +346,24 @@ impl RedisStore {
     fn mk_report_func(&self, name: &str) -> ReportReading {
         let hist_key = self.history_key(name);
         let db_con = self.db_con.clone();
+        let name = String::from(name);
 
         Box::new(move |v| {
             let mut db_con = db_con.clone();
             let hist_key = hist_key.clone();
             let data = [("value", to_redis(&v))];
+            let name = name.clone();
 
             Box::pin(async move {
-                redis::pipe()
+                if let Err(e) = redis::pipe()
                     .xadd(&hist_key, "*", &data)
-                    .query_async(&mut db_con)
-                    .map(xlat_result)
+                    .query_async::<redis::aio::MultiplexedConnection, ()>(
+                        &mut db_con,
+                    )
                     .await
+                {
+                    warn!("couldn't save {} data to redis ... {}", name, e)
+                }
             })
         })
     }
@@ -368,7 +374,8 @@ impl Store for RedisStore {
     /// Registers a device in the redis backend.
 
     async fn register_read_only_device(
-        &mut self, _driver_name: &str, name: &Name, units: &Option<String>,
+        &mut self, _driver_name: &str, name: &device::Name,
+        units: &Option<String>,
     ) -> Result<(ReportReading, Option<Value>)> {
         let name = name.to_string();
 
@@ -383,7 +390,8 @@ impl Store for RedisStore {
     }
 
     async fn register_read_write_device(
-        &mut self, _driver_name: &str, name: &Name, units: &Option<String>,
+        &mut self, _driver_name: &str, name: &device::Name,
+        units: &Option<String>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
         let sname = name.to_string();
 
