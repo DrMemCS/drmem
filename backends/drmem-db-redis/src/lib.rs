@@ -412,6 +412,24 @@ impl Store for RedisStore {
             self.last_value(&sname).await,
         ))
     }
+
+    async fn get_device_info(
+        &self, pattern: &Option<String>,
+    ) -> Result<Vec<client::DevInfoReply>> {
+        todo!()
+    }
+
+    async fn set_device(
+        &self, name: device::Name, value: Value,
+    ) -> Result<Value> {
+        todo!()
+    }
+
+    async fn monitor_device(
+        &self, name: device::Name,
+    ) -> Result<broadcast::Receiver<device::Reading>> {
+        todo!()
+    }
 }
 
 #[cfg(test)]
