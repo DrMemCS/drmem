@@ -96,13 +96,13 @@ fn to_redis(val: &Value) -> Vec<u8> {
     }
 }
 
-// Decodes an `i64` from an 8-byte buffer.
+// Decodes an `i32` from an 4-byte buffer.
 
 fn decode_integer(buf: &[u8]) -> Result<Value> {
-    if buf.len() >= 8 {
-        let buf = buf[..8].try_into().unwrap();
+    if buf.len() >= 4 {
+        let buf = buf[..4].try_into().unwrap();
 
-        return Ok(Value::Int(i64::from_be_bytes(buf)));
+        return Ok(Value::Int(i32::from_be_bytes(buf)));
     }
     Err(Error::TypeError)
 }
@@ -453,31 +453,13 @@ mod tests {
         assert_eq!(vec!['T' as u8], to_redis(&device::Value::Bool(true)));
     }
 
-    const INT_TEST_CASES: &[(i64, &[u8])] = &[
-        (
-            0,
-            &['I' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-        ),
-        (
-            1,
-            &['I' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01],
-        ),
-        (
-            -1,
-            &['I' as u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
-        ),
-        (
-            0x7fffffffffffffff,
-            &['I' as u8, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
-        ),
-        (
-            -0x8000000000000000,
-            &['I' as u8, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-        ),
-        (
-            0x0123456789abcdef,
-            &['I' as u8, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef],
-        ),
+    const INT_TEST_CASES: &[(i32, &[u8])] = &[
+        (0, &['I' as u8, 0x00, 0x00, 0x00, 0x00]),
+        (1, &['I' as u8, 0x00, 0x00, 0x00, 0x01]),
+        (-1, &['I' as u8, 0xff, 0xff, 0xff, 0xff]),
+        (0x7fffffff, &['I' as u8, 0x7f, 0xff, 0xff, 0xff]),
+        (-0x80000000, &['I' as u8, 0x80, 0x00, 0x00, 0x00]),
+        (0x01234567, &['I' as u8, 0x01, 0x23, 0x45, 0x67]),
     ];
 
     // Test correct encoding of Value::Int values.
