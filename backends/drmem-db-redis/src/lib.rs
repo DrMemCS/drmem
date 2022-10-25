@@ -515,6 +515,69 @@ mod tests {
             assert_eq!(Ok(device::Value::Int(*v)), from_value(&data));
         }
     }
+
+    const STR_TEST_CASES: &[(&str, &[u8])] = &[
+        ("", &['S' as u8, 0u8, 0u8, 0u8, 0u8]),
+        (
+            "ABC",
+            &[
+                'S' as u8, 0u8, 0u8, 0u8, 3u8, 'A' as u8, 'B' as u8, 'C' as u8,
+            ],
+        ),
+    ];
+
+    // Test correct encoding of Value::Str values.
+
+    #[tokio::test]
+    async fn test_string_encoder() {
+        for (v, rv) in STR_TEST_CASES {
+            assert_eq!(*rv, to_redis(&device::Value::Str(String::from(*v))));
+        }
+    }
+
+    // Test correct decoding of Value::Str values.
+
+    #[tokio::test]
+    async fn test_string_decoder() {
+        // Buffers smaller than 5 bytes are an error.
+
+        assert!(from_value(&Value::Data(vec![])).is_err());
+        assert!(from_value(&Value::Data(vec!['S' as u8])).is_err());
+        assert!(from_value(&Value::Data(vec!['S' as u8, 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec!['S' as u8, 0u8, 0u8])).is_err());
+        assert!(
+            from_value(&Value::Data(vec!['S' as u8, 0u8, 0u8, 0u8])).is_err()
+        );
+
+        // Loop through the test cases.
+
+        for (v, rv) in STR_TEST_CASES {
+            let data = Value::Data(rv.to_vec());
+
+            assert_eq!(
+                Ok(device::Value::Str(String::from(*v))),
+                from_value(&data)
+            );
+        }
+
+        // Verify proper response (both good and bad) when the buffer
+        // doesn't match the size of the string.
+
+        assert!(
+            from_value(&Value::Data(vec!['S' as u8, 0u8, 0u8, 0u8, 1u8]))
+                .is_err()
+        );
+        assert!(from_value(&Value::Data(vec![
+            'S' as u8, 0u8, 0u8, 0u8, 2u8, 'A' as u8
+        ]))
+        .is_err());
+        assert_eq!(
+            Ok(device::Value::Str(String::from("AB"))),
+            from_value(&Value::Data(vec![
+                'S' as u8, 0u8, 0u8, 0u8, 2u8, 'A' as u8, 'B' as u8, 0, 0
+            ]))
+        );
+    }
 }
 
 pub async fn open(cfg: &backend::Config) -> Result<impl Store> {
