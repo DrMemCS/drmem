@@ -516,6 +516,55 @@ mod tests {
         }
     }
 
+    const FLT_TEST_CASES: &[(f64, &[u8])] = &[
+        (0.0, &['D' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+        (-0.0, &['D' as u8, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+        (1.0, &['D' as u8, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+        (-1.0, &['D' as u8, 0xbf, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+        (9007199254740991.0, &['D' as u8, 67, 63, 255, 255, 255, 255, 255, 255]),
+	(9007199254740992.0, &['D' as u8, 67, 64, 0, 0, 0, 0, 0, 0]),
+    ];
+
+    // Test correct encoding of Value::Flt values.
+
+    #[test]
+    fn test_float_encoder() {
+        for (v, rv) in FLT_TEST_CASES {
+            assert_eq!(*rv, to_redis(&device::Value::Flt(*v)));
+        }
+    }
+
+    // Test correct decoding of Value::Int values.
+
+    #[test]
+    fn test_float_decoder() {
+        assert!(from_value(&Value::Data(vec![])).is_err());
+        assert!(from_value(&Value::Data(vec!['D' as u8])).is_err());
+        assert!(from_value(&Value::Data(vec!['D' as u8, 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8])).is_err());
+        assert!(
+            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8])).is_err()
+        );
+        assert!(
+            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8, 0u8])).is_err()
+        );
+        assert!(
+            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8, 0u8, 0u8])).is_err()
+        );
+        assert!(
+            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8])).is_err()
+        );
+        assert!(
+            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8])).is_err()
+        );
+
+        for (v, rv) in FLT_TEST_CASES {
+            let data = Value::Data(rv.to_vec());
+
+            assert_eq!(Ok(device::Value::Flt(*v)), from_value(&data));
+        }
+    }
+
     const STR_TEST_CASES: &[(&str, &[u8])] = &[
         ("", &['S' as u8, 0u8, 0u8, 0u8, 0u8]),
         (
