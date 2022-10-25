@@ -441,8 +441,8 @@ mod tests {
     // We only want to convert Value::Data() forms. These tests make
     // sure the other variants don't translate.
 
-    #[tokio::test]
-    async fn test_reject_invalid_forms() {
+    #[test]
+    fn test_reject_invalid_forms() {
         if let Ok(v) = from_value(&Value::Int(0)) {
             panic!("Value::Int incorrectly translated to {:?}", v);
         }
@@ -459,8 +459,8 @@ mod tests {
 
     // Test correct decoding of Value::Bool values.
 
-    #[tokio::test]
-    async fn test_bool_decoder() {
+    #[test]
+    fn test_bool_decoder() {
         assert_eq!(
             Ok(device::Value::Bool(false)),
             from_value(&Value::Data(vec!['F' as u8]))
@@ -473,8 +473,8 @@ mod tests {
 
     // Test correct encoding of Value::Bool values.
 
-    #[tokio::test]
-    async fn test_bool_encoder() {
+    #[test]
+    fn test_bool_encoder() {
         assert_eq!(vec!['F' as u8], to_redis(&device::Value::Bool(false)));
         assert_eq!(vec!['T' as u8], to_redis(&device::Value::Bool(true)));
     }
@@ -490,8 +490,8 @@ mod tests {
 
     // Test correct encoding of Value::Int values.
 
-    #[tokio::test]
-    async fn test_int_encoder() {
+    #[test]
+    fn test_int_encoder() {
         for (v, rv) in INT_TEST_CASES {
             assert_eq!(*rv, to_redis(&device::Value::Int(*v)));
         }
@@ -499,8 +499,8 @@ mod tests {
 
     // Test correct decoding of Value::Int values.
 
-    #[tokio::test]
-    async fn test_int_decoder() {
+    #[test]
+    fn test_int_decoder() {
         assert!(from_value(&Value::Data(vec![])).is_err());
         assert!(from_value(&Value::Data(vec!['I' as u8])).is_err());
         assert!(from_value(&Value::Data(vec!['I' as u8, 0u8])).is_err());
@@ -528,8 +528,8 @@ mod tests {
 
     // Test correct encoding of Value::Str values.
 
-    #[tokio::test]
-    async fn test_string_encoder() {
+    #[test]
+    fn test_string_encoder() {
         for (v, rv) in STR_TEST_CASES {
             assert_eq!(*rv, to_redis(&device::Value::Str(String::from(*v))));
         }
@@ -537,8 +537,8 @@ mod tests {
 
     // Test correct decoding of Value::Str values.
 
-    #[tokio::test]
-    async fn test_string_decoder() {
+    #[test]
+    fn test_string_decoder() {
         // Buffers smaller than 5 bytes are an error.
 
         assert!(from_value(&Value::Data(vec![])).is_err());
