@@ -463,11 +463,11 @@ mod tests {
     fn test_bool_decoder() {
         assert_eq!(
             Ok(device::Value::Bool(false)),
-            from_value(&Value::Data(vec!['F' as u8]))
+            from_value(&Value::Data(vec![b'B', b'F']))
         );
         assert_eq!(
             Ok(device::Value::Bool(true)),
-            from_value(&Value::Data(vec!['T' as u8]))
+            from_value(&Value::Data(vec![b'B', b'T']))
         );
     }
 
@@ -475,17 +475,17 @@ mod tests {
 
     #[test]
     fn test_bool_encoder() {
-        assert_eq!(vec!['F' as u8], to_redis(&device::Value::Bool(false)));
-        assert_eq!(vec!['T' as u8], to_redis(&device::Value::Bool(true)));
+        assert_eq!(vec![b'B', b'F'], to_redis(&device::Value::Bool(false)));
+        assert_eq!(vec![b'B', b'T'], to_redis(&device::Value::Bool(true)));
     }
 
     const INT_TEST_CASES: &[(i32, &[u8])] = &[
-        (0, &['I' as u8, 0x00, 0x00, 0x00, 0x00]),
-        (1, &['I' as u8, 0x00, 0x00, 0x00, 0x01]),
-        (-1, &['I' as u8, 0xff, 0xff, 0xff, 0xff]),
-        (0x7fffffff, &['I' as u8, 0x7f, 0xff, 0xff, 0xff]),
-        (-0x80000000, &['I' as u8, 0x80, 0x00, 0x00, 0x00]),
-        (0x01234567, &['I' as u8, 0x01, 0x23, 0x45, 0x67]),
+        (0, &[b'I', 0x00, 0x00, 0x00, 0x00]),
+        (1, &[b'I', 0x00, 0x00, 0x00, 0x01]),
+        (-1, &[b'I', 0xff, 0xff, 0xff, 0xff]),
+        (0x7fffffff, &[b'I', 0x7f, 0xff, 0xff, 0xff]),
+        (-0x80000000, &[b'I', 0x80, 0x00, 0x00, 0x00]),
+        (0x01234567, &[b'I', 0x01, 0x23, 0x45, 0x67]),
     ];
 
     // Test correct encoding of Value::Int values.
@@ -502,12 +502,10 @@ mod tests {
     #[test]
     fn test_int_decoder() {
         assert!(from_value(&Value::Data(vec![])).is_err());
-        assert!(from_value(&Value::Data(vec!['I' as u8])).is_err());
-        assert!(from_value(&Value::Data(vec!['I' as u8, 0u8])).is_err());
-        assert!(from_value(&Value::Data(vec!['I' as u8, 0u8, 0u8])).is_err());
-        assert!(
-            from_value(&Value::Data(vec!['I' as u8, 0u8, 0u8, 0u8])).is_err()
-        );
+        assert!(from_value(&Value::Data(vec![b'I'])).is_err());
+        assert!(from_value(&Value::Data(vec![b'I', 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec![b'I', 0u8, 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec![b'I', 0u8, 0u8, 0u8])).is_err());
 
         for (v, rv) in INT_TEST_CASES {
             let data = Value::Data(rv.to_vec());
@@ -517,12 +515,21 @@ mod tests {
     }
 
     const FLT_TEST_CASES: &[(f64, &[u8])] = &[
-        (0.0, &['D' as u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-        (-0.0, &['D' as u8, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-        (1.0, &['D' as u8, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-        (-1.0, &['D' as u8, 0xbf, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-        (9007199254740991.0, &['D' as u8, 67, 63, 255, 255, 255, 255, 255, 255]),
-	(9007199254740992.0, &['D' as u8, 67, 64, 0, 0, 0, 0, 0, 0]),
+        (0.0, &[b'D', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+        (
+            -0.0,
+            &[b'D', 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        ),
+        (1.0, &[b'D', 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+        (
+            -1.0,
+            &[b'D', 0xbf, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        ),
+        (
+            9007199254740991.0,
+            &[b'D', 67, 63, 255, 255, 255, 255, 255, 255],
+        ),
+        (9007199254740992.0, &[b'D', 67, 64, 0, 0, 0, 0, 0, 0]),
     ];
 
     // Test correct encoding of Value::Flt values.
@@ -539,24 +546,25 @@ mod tests {
     #[test]
     fn test_float_decoder() {
         assert!(from_value(&Value::Data(vec![])).is_err());
-        assert!(from_value(&Value::Data(vec!['D' as u8])).is_err());
-        assert!(from_value(&Value::Data(vec!['D' as u8, 0u8])).is_err());
-        assert!(from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec![b'D'])).is_err());
+        assert!(from_value(&Value::Data(vec![b'D', 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec![b'D', 0u8, 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec![b'D', 0u8, 0u8, 0u8])).is_err());
         assert!(
-            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8])).is_err()
+            from_value(&Value::Data(vec![b'D', 0u8, 0u8, 0u8, 0u8])).is_err()
         );
         assert!(
-            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8, 0u8])).is_err()
+            from_value(&Value::Data(vec![b'D', 0u8, 0u8, 0u8, 0u8, 0u8]))
+                .is_err()
         );
-        assert!(
-            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8, 0u8, 0u8])).is_err()
-        );
-        assert!(
-            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8])).is_err()
-        );
-        assert!(
-            from_value(&Value::Data(vec!['D' as u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8])).is_err()
-        );
+        assert!(from_value(&Value::Data(vec![
+            b'D', 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
+        ]))
+        .is_err());
+        assert!(from_value(&Value::Data(vec![
+            b'D', 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
+        ]))
+        .is_err());
 
         for (v, rv) in FLT_TEST_CASES {
             let data = Value::Data(rv.to_vec());
@@ -566,13 +574,8 @@ mod tests {
     }
 
     const STR_TEST_CASES: &[(&str, &[u8])] = &[
-        ("", &['S' as u8, 0u8, 0u8, 0u8, 0u8]),
-        (
-            "ABC",
-            &[
-                'S' as u8, 0u8, 0u8, 0u8, 3u8, 'A' as u8, 'B' as u8, 'C' as u8,
-            ],
-        ),
+        ("", &[b'S', 0u8, 0u8, 0u8, 0u8]),
+        ("ABC", &[b'S', 0u8, 0u8, 0u8, 3u8, b'A', b'B', b'C']),
     ];
 
     // Test correct encoding of Value::Str values.
@@ -591,12 +594,10 @@ mod tests {
         // Buffers smaller than 5 bytes are an error.
 
         assert!(from_value(&Value::Data(vec![])).is_err());
-        assert!(from_value(&Value::Data(vec!['S' as u8])).is_err());
-        assert!(from_value(&Value::Data(vec!['S' as u8, 0u8])).is_err());
-        assert!(from_value(&Value::Data(vec!['S' as u8, 0u8, 0u8])).is_err());
-        assert!(
-            from_value(&Value::Data(vec!['S' as u8, 0u8, 0u8, 0u8])).is_err()
-        );
+        assert!(from_value(&Value::Data(vec![b'S'])).is_err());
+        assert!(from_value(&Value::Data(vec![b'S', 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec![b'S', 0u8, 0u8])).is_err());
+        assert!(from_value(&Value::Data(vec![b'S', 0u8, 0u8, 0u8])).is_err());
 
         // Loop through the test cases.
 
@@ -613,17 +614,16 @@ mod tests {
         // doesn't match the size of the string.
 
         assert!(
-            from_value(&Value::Data(vec!['S' as u8, 0u8, 0u8, 0u8, 1u8]))
+            from_value(&Value::Data(vec![b'S', 0u8, 0u8, 0u8, 1u8])).is_err()
+        );
+        assert!(
+            from_value(&Value::Data(vec![b'S', 0u8, 0u8, 0u8, 2u8, b'A']))
                 .is_err()
         );
-        assert!(from_value(&Value::Data(vec![
-            'S' as u8, 0u8, 0u8, 0u8, 2u8, 'A' as u8
-        ]))
-        .is_err());
         assert_eq!(
             Ok(device::Value::Str(String::from("AB"))),
             from_value(&Value::Data(vec![
-                'S' as u8, 0u8, 0u8, 0u8, 2u8, 'A' as u8, 'B' as u8, 0, 0
+                b'S', 0u8, 0u8, 0u8, 2u8, b'A', b'B', 0, 0
             ]))
         );
     }
