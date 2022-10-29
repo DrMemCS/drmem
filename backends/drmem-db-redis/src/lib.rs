@@ -241,7 +241,7 @@ impl RedisStore {
         if let Ok(v) = result {
             if let Some((_k, m)) = v.iter().next() {
                 if let Some(val) = m.get("value") {
-                    return from_value(&val).ok();
+                    return from_value(val).ok();
                 } else {
                     debug!("no 'value' field for {}", name);
                 }
