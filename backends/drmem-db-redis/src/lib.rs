@@ -215,14 +215,14 @@ impl RedisStore {
 
     // Returns the key that returns meta information for the device.
 
-    fn info_key(&self, name: &str) -> String {
+    fn info_key(name: &str) -> String {
         format!("{}#info", name)
     }
 
     // Returns the key that returns time-series information for the
     // device.
 
-    fn history_key(&self, name: &str) -> String {
+    fn history_key(name: &str) -> String {
         format!("{}#hist", name)
     }
 
@@ -259,7 +259,7 @@ impl RedisStore {
         // is a hash map.
 
         {
-            let info_key = self.info_key(name);
+            let info_key = RedisStore::info_key(name);
             let result: Result<String> = xlat_result(
                 redis::cmd("TYPE")
                     .arg(&info_key)
@@ -284,7 +284,7 @@ impl RedisStore {
         // is a time-series stream.
 
         {
-            let hist_key = self.history_key(name);
+            let hist_key = RedisStore::history_key(name);
             let result: Result<String> = xlat_result(
                 redis::cmd("TYPE")
                     .arg(&hist_key)
@@ -318,8 +318,8 @@ impl RedisStore {
     ) -> Result<()> {
         debug!("initializing {}", name);
 
-        let hist_key = self.history_key(name);
-        let info_key = self.info_key(name);
+        let hist_key = RedisStore::history_key(name);
+        let info_key = RedisStore::info_key(name);
 
         // Create a command pipeline that deletes the two keys and
         // then creates them properly with default values.
@@ -344,7 +344,7 @@ impl RedisStore {
     }
 
     fn mk_report_func(&self, name: &str) -> ReportReading {
-        let hist_key = self.history_key(name);
+        let hist_key = RedisStore::history_key(name);
         let db_con = self.db_con.clone();
         let name = String::from(name);
 
