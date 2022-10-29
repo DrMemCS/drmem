@@ -65,8 +65,8 @@ fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
 
 fn to_redis(val: &Value) -> Vec<u8> {
     match val {
-        Value::Bool(false) => vec![b'F'],
-        Value::Bool(true) => vec![b'T'],
+        Value::Bool(false) => vec![b'B', b'F'],
+        Value::Bool(true) => vec![b'B', b'T'],
 
         Value::Int(v) => {
             let mut buf: Vec<u8> = Vec::with_capacity(9);
@@ -148,8 +148,11 @@ fn from_value(v: &redis::Value) -> Result<Value> {
 
         if !buf.is_empty() {
             match buf[0] as char {
-                'F' => Ok(Value::Bool(false)),
-                'T' => Ok(Value::Bool(true)),
+                'B' if buf.len() > 1 => match buf[1] {
+                    b'F' => Ok(Value::Bool(false)),
+                    b'T' => Ok(Value::Bool(true)),
+                    _ => Err(Error::TypeError),
+                },
                 'I' => decode_integer(&buf[1..]),
                 'D' => decode_float(&buf[1..]),
                 'S' => decode_string(&buf[1..]),
