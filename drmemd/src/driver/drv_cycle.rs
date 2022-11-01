@@ -59,8 +59,16 @@ impl Instance {
     fn get_cfg_millis(cfg: &DriverConfig) -> Result<time::Duration> {
         match cfg.get("millis") {
             Some(toml::value::Value::Integer(millis)) => {
-                if (50..=3_600_000).contains(millis) {
-                    return Ok(time::Duration::from_millis(*millis as u64));
+		// DrMem's official sample rate is 20 Hz, so the cycle
+		// shouldn't change faster than that. Limit the
+		// `cycle` driver's output to 10 hz so we can see the
+		// output change 20 times a second.
+		//
+		// XXX: Should there be a global constant in the
+		// drmem-api crate indicating the max sample rate?
+
+                if (100..=3_600_000).contains(millis) {
+                    return Ok(time::Duration::from_millis(*millis as u64 / 2));
                 } else {
                     error!("'millis' out of range")
                 }
