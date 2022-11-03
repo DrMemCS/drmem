@@ -247,7 +247,7 @@ impl Store for SimpleStore {
     }
 
     async fn get_device_info(
-        &self, pattern: &Option<String>,
+        &mut self, pattern: &Option<String>,
     ) -> Result<Vec<client::DevInfoReply>> {
         let pred: Box<dyn FnMut(&(&device::Name, &DeviceInfo)) -> bool> =
             if let Some(pattern) = pattern {

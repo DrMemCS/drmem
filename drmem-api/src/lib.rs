@@ -46,7 +46,7 @@ pub trait Store {
     )>;
 
     async fn get_device_info(
-        &self, pattern: &Option<String>,
+        &mut self, pattern: &Option<String>,
     ) -> Result<Vec<client::DevInfoReply>>;
 
     async fn set_device(
