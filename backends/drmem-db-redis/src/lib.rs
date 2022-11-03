@@ -466,7 +466,24 @@ impl Store for RedisStore {
     async fn get_device_info(
         &mut self, pattern: &Option<String>,
     ) -> Result<Vec<client::DevInfoReply>> {
-        todo!()
+        let result: Vec<String> = RedisStore::match_pattern_cmd(pattern)
+            .query_async(&mut self.db_con)
+            .await
+            .map_err(xlat_err)?;
+
+        let mut devices = vec![];
+
+        // Loop through the results and pull all the device
+        // information. Strip off the trailing "#info" before getting
+        // the device information.
+
+        for key in result {
+            let name = key.trim_end_matches("#info");
+            let dev_info = self.lookup_device(name).await?;
+
+            devices.push(dev_info)
+        }
+        Ok(devices)
     }
 
     async fn set_device(
