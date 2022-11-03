@@ -125,6 +125,9 @@ impl DeviceInfo {
 struct Config;
 
 impl Config {
+    // These helper functions are used by a call to `Iterator::filter`
+    // to select a set of devices.
+
     fn is_settable(e: &&client::DevInfoReply) -> bool {
         e.settable
     }

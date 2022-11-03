@@ -68,6 +68,7 @@ fn to_redis(val: &Value) -> Vec<u8> {
         Value::Bool(false) => vec![b'B', b'F'],
         Value::Bool(true) => vec![b'B', b'T'],
 
+        // Integers start with an 'I' followed by 4 bytes.
         Value::Int(v) => {
             let mut buf: Vec<u8> = Vec::with_capacity(9);
 
@@ -76,6 +77,8 @@ fn to_redis(val: &Value) -> Vec<u8> {
             buf
         }
 
+        // Floating point values start with a 'D' and are followed by
+        // 8 bytes.
         Value::Flt(v) => {
             let mut buf: Vec<u8> = Vec::with_capacity(9);
 
@@ -84,6 +87,8 @@ fn to_redis(val: &Value) -> Vec<u8> {
             buf
         }
 
+        // Strings start with an 'S', followed by a 4-byte length
+        // field, and then followed by the string content.
         Value::Str(s) => {
             let s = s.as_bytes();
             let mut buf: Vec<u8> = Vec::with_capacity(5 + s.len());
@@ -455,6 +460,8 @@ impl Store for RedisStore {
             self.last_value(&sname).await,
         ))
     }
+
+    // Implement the GraphQL query to pull device information.
 
     async fn get_device_info(
         &self, pattern: &Option<String>,
