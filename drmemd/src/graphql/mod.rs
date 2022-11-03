@@ -303,7 +303,7 @@ impl Control {
 
 #[juniper::graphql_object(
     context = ConfigDb,
-    description = "These queries allow devices to be modified."
+    description = "This group of queries perform modifications to devices."
 )]
 impl Control {
     #[graphql(description = "Submits `value` to be applied to the device \
