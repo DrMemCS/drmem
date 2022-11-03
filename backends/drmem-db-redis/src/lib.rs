@@ -55,10 +55,6 @@ fn xlat_err(e: redis::RedisError) -> Error {
     }
 }
 
-fn xlat_result<T>(res: redis::RedisResult<T>) -> Result<T> {
-    res.map_err(xlat_err)
-}
-
 // Encodes a `Value` into a binary which gets stored in redis. This
 // encoding lets us store type information in redis so there's no
 // rounding errors or misinterpretation of the data.
@@ -202,7 +198,10 @@ impl RedisStore {
 
         let client = redis::Client::open(ci).unwrap();
 
-        xlat_result(client.get_multiplexed_tokio_connection().await)
+        client
+            .get_multiplexed_tokio_connection()
+            .await
+            .map_err(xlat_err)
     }
 
     /// Builds a new backend context which interacts with `redis`.
@@ -277,11 +276,10 @@ impl RedisStore {
 
     async fn last_value(&mut self, name: &str) -> Option<Value> {
         let result: Result<HashMap<String, HashMap<String, redis::Value>>> =
-            xlat_result(
-                RedisStore::last_value_cmd(name)
-                    .query_async(&mut self.db_con)
-                    .await,
-            );
+            RedisStore::last_value_cmd(name)
+                .query_async(&mut self.db_con)
+                .await
+                .map_err(xlat_err);
 
         if let Ok(v) = result {
             if let Some((_k, m)) = v.iter().next() {
@@ -308,8 +306,8 @@ impl RedisStore {
 
         {
             let cmd = RedisStore::type_cmd(name);
-            let result: Result<String> =
-                xlat_result(cmd.query_async(&mut self.db_con).await);
+            let result: redis::RedisResult<String> =
+                cmd.query_async(&mut self.db_con).await;
 
             match result {
                 Ok(data_type) if data_type.as_str() == "hash" => (),
@@ -329,12 +327,11 @@ impl RedisStore {
 
         {
             let hist_key = RedisStore::history_key(name);
-            let result: Result<String> = xlat_result(
-                redis::cmd("TYPE")
-                    .arg(&hist_key)
-                    .query_async(&mut self.db_con)
-                    .await,
-            );
+            let result: Result<String> = redis::cmd("TYPE")
+                .arg(&hist_key)
+                .query_async(&mut self.db_con)
+                .await
+                .map_err(xlat_err);
 
             match result {
                 Ok(data_type) if data_type.as_str() == "stream" => Ok(()),
@@ -374,17 +371,16 @@ impl RedisStore {
             vec![]
         };
 
-        xlat_result(
-            redis::pipe()
-                .atomic()
-                .del(&hist_key)
-                .xadd(&hist_key, "1", &[("value", &[1u8])])
-                .xdel(&hist_key, &["1"])
-                .del(&info_key)
-                .hset_multiple(&info_key, &fields)
-                .query_async(&mut self.db_con)
-                .await,
-        )
+        redis::pipe()
+            .atomic()
+            .del(&hist_key)
+            .xadd(&hist_key, "1", &[("value", &[1u8])])
+            .xdel(&hist_key, &["1"])
+            .del(&info_key)
+            .hset_multiple(&info_key, &fields)
+            .query_async(&mut self.db_con)
+            .await
+            .map_err(xlat_err)
     }
 
     fn report_new_value_cmd(key: &str, val: &device::Value) -> redis::Pipeline {
