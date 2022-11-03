@@ -229,11 +229,51 @@ impl RedisStore {
         format!("{}#hist", name)
     }
 
+    // Builds the low-level command that returns the last value of the
+    // device.
+
+    fn last_value_cmd(name: &str) -> redis::Pipeline {
+        let name = RedisStore::history_key(name);
+
+        redis::pipe()
+            .xrevrange_count(name, "+", "-", 1usize)
+            .clone()
+    }
+
+    fn match_pattern_cmd(pattern: &Option<String>) -> redis::Pipeline {
+        // Take the pattern from the caller and append "#info" since
+        // we only want to look at device information keys.
+
+        let pattern = pattern
+            .as_ref()
+            .map(|v| RedisStore::info_key(v))
+            .unwrap_or_else(|| String::from("*#info"));
+
+        // Query REDIS to return all keys that match our pattern.
+
+        redis::pipe().keys(pattern).clone()
+    }
+
+    // Builds the low-level command that returns the type of the
+    // device's meta record.
+
+    fn type_cmd(name: &str) -> redis::Cmd {
+        let key = RedisStore::info_key(name);
+
+        redis::cmd("TYPE").arg(&key).clone()
+    }
+
+    async fn lookup_device(&self, name: &str) -> Result<client::DevInfoReply> {
+        todo!()
+    }
+
+    // Obtains the last value reported for a device, or `None` if
+    // there is no history for it.
+
     async fn last_value(&mut self, name: &str) -> Option<Value> {
         let result: Result<HashMap<String, HashMap<String, redis::Value>>> =
             xlat_result(
-                redis::pipe()
-                    .xrevrange_count(name, "-", "+", 1usize)
+                RedisStore::last_value_cmd(name)
                     .query_async(&mut self.db_con)
                     .await,
             );
@@ -262,22 +302,18 @@ impl RedisStore {
         // is a hash map.
 
         {
-            let info_key = RedisStore::info_key(name);
-            let result: Result<String> = xlat_result(
-                redis::cmd("TYPE")
-                    .arg(&info_key)
-                    .query_async(&mut self.db_con)
-                    .await,
-            );
+            let cmd = RedisStore::type_cmd(name);
+            let result: Result<String> =
+                xlat_result(cmd.query_async(&mut self.db_con).await);
 
             match result {
                 Ok(data_type) if data_type.as_str() == "hash" => (),
                 Ok(_) => {
-                    warn!("{} is of the wrong key type", &info_key);
+                    warn!("{} is of the wrong key type", name);
                     return Err(Error::TypeError);
                 }
                 Err(_) => {
-                    warn!("{} doesn't exist", &info_key);
+                    warn!("{} doesn't exist", name);
                     return Err(Error::NotFound);
                 }
             }
@@ -346,26 +382,30 @@ impl RedisStore {
         )
     }
 
+    fn report_new_value_cmd(key: &str, val: &device::Value) -> redis::Pipeline {
+        let data = [("value", to_redis(val))];
+
+        redis::pipe().xadd(key, "*", &data).clone()
+    }
+
     fn mk_report_func(&self, name: &str) -> ReportReading {
-        let hist_key = RedisStore::history_key(name);
         let db_con = self.db_con.clone();
         let name = String::from(name);
 
         Box::new(move |v| {
             let mut db_con = db_con.clone();
-            let hist_key = hist_key.clone();
-            let data = [("value", to_redis(&v))];
+            let hist_key = RedisStore::history_key(&name);
             let name = name.clone();
+            let data = [("value", to_redis(&v))];
 
             Box::pin(async move {
-                if let Err(e) = redis::pipe()
-                    .xadd(&hist_key, "*", &data)
+                if let Err(e) = RedisStore::report_new_value_cmd(&hist_key, &v)
                     .query_async::<redis::aio::MultiplexedConnection, ()>(
                         &mut db_con,
                     )
                     .await
                 {
-                    warn!("couldn't save {} data to redis ... {}", name, e)
+                    warn!("couldn't save {} data to redis ... {}", &name, e)
                 }
             })
         })
@@ -628,6 +668,108 @@ mod tests {
             from_value(&Value::Data(vec![
                 b'S', 0u8, 0u8, 0u8, 2u8, b'A', b'B', 0, 0
             ]))
+        );
+    }
+
+    #[test]
+    fn test_pattern_cmd() {
+        assert_eq!(
+            &RedisStore::match_pattern_cmd(&None).get_packed_pipeline(),
+            b"*2\r
+$4\r\nKEYS\r
+$6\r\n*#info\r\n"
+        );
+        assert_eq!(
+            &RedisStore::match_pattern_cmd(&Some(String::from("device")))
+                .get_packed_pipeline(),
+            b"*2\r
+$4\r\nKEYS\r
+$11\r\ndevice#info\r\n"
+        );
+    }
+
+    #[test]
+    fn test_type_cmd() {
+        let cmd = RedisStore::type_cmd("device");
+
+        assert_eq!(
+            &cmd.get_packed_command(),
+            b"*2\r
+$4\r\nTYPE\r
+$11\r\ndevice#info\r\n"
+        );
+    }
+
+    #[test]
+    fn test_last_value() {
+        let pipe = RedisStore::last_value_cmd("device");
+
+        assert_eq!(
+            &pipe.get_packed_pipeline(),
+            b"*6\r
+$9\r\nXREVRANGE\r
+$11\r\ndevice#hist\r
+$1\r\n+\r
+$1\r\n-\r
+$5\r\nCOUNT\r
+$1\r\n1\r\n"
+        );
+    }
+
+    #[test]
+    fn test_report_value_cmd() {
+        assert_eq!(
+            &RedisStore::report_new_value_cmd("key", &(true.into()))
+                .get_packed_pipeline(),
+            b"*5\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$1\r\n*\r
+$5\r\nvalue\r
+$2\r\nBT\r\n"
+        );
+        assert_eq!(
+            &RedisStore::report_new_value_cmd("key", &(0x00010203i32.into()))
+                .get_packed_pipeline(),
+            b"*5\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$1\r\n*\r
+$5\r\nvalue\r
+$5\r\nI\x00\x01\x02\x03\r\n"
+        );
+        assert_eq!(
+            &RedisStore::report_new_value_cmd("key", &(0x12345678i32.into()))
+                .get_packed_pipeline(),
+            b"*5\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$1\r\n*\r
+$5\r\nvalue\r
+$5\r\nI\x12\x34\x56\x78\r\n"
+        );
+        assert_eq!(
+            &RedisStore::report_new_value_cmd("key", &(1.0.into()))
+                .get_packed_pipeline(),
+            b"*5\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$1\r\n*\r
+$5\r\nvalue\r
+$9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
+        );
+        assert_eq!(
+            &RedisStore::report_new_value_cmd(
+                "key",
+                &(String::from("hello").into())
+            )
+            .get_packed_pipeline(),
+            b"*5\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$1\r\n*\r
+$5\r\nvalue\r
+$10\r\nS\x00\x00\x00\x05hello\r\n"
         );
     }
 }
