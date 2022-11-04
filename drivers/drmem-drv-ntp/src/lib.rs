@@ -147,46 +147,62 @@ impl Instance {
 
         self.seq += 1;
 
-        match self.sock.send(&req).await {
-            Ok(_) => {
-                let mut buf = [0u8; 500];
+        // Try to send the request. If there's a failure with the
+        // socket, report the error and return `None`.
 
-                match self.sock.recv(&mut buf).await {
-                    // The packet has to be at least 12 bytes so we can
-                    // use all parts of the header without worrying about
-                    // panicking.
-                    Ok(len) if len < 12 => {
-                        warn!("response from ntpd < 12 bytes -> {}", len)
-                    }
-
-                    Ok(len) => {
-                        let total = Instance::read_u16(&buf[10..=11]) as usize;
-                        let expected_len = total + 12 + (4 - total % 4) % 4;
-
-                        // Make sure the incoming buffer is as large as
-                        // the length field says it is (so we can safely
-                        // access the entire payload.)
-
-                        if expected_len == len {
-                            for ii in buf[12..len].chunks_exact(4) {
-                                if (ii[2] & 0x7) == 6 {
-                                    return Some(Instance::read_u16(
-                                        &ii[0..=1],
-                                    ));
-                                }
-                            }
-                        } else {
-                            warn!(
-                                "bad packet length -> expected {}, got {}",
-                                expected_len, len
-                            );
-                        }
-                    }
-                    Err(e) => error!("couldn't receive data -> {}", e),
-                }
-            }
-            Err(e) => error!("couldn't send request -> {}", e),
+        if let Err(e) = self.sock.send(&req).await {
+            error!("couldn't send \"synced hosts\" request -> {}", e);
+            return None;
         }
+
+        let mut buf = [0u8; 500];
+
+        #[rustfmt::skip]
+	tokio::select! {
+	    result = self.sock.recv(&mut buf) => {
+		match result {
+		    // The packet has to be at least 12 bytes so we
+		    // can use all parts of the header without
+		    // worrying about panicking.
+
+		    Ok(len) if len < 12 => {
+			warn!(
+			    "response from ntpd < 12 bytes -> only {} bytes",
+			    len
+			)
+		    }
+
+		    Ok(len) => {
+			let total = Instance::read_u16(&buf[10..=11]) as usize;
+			let expected_len = total + 12 + (4 - total % 4) % 4;
+
+			// Make sure the incoming buffer is as large
+			// as the length field says it is (so we can
+			// safely access the entire payload.)
+
+			if expected_len == len {
+			    for ii in buf[12..len].chunks_exact(4) {
+				if (ii[2] & 0x7) == 6 {
+				    return Some(Instance::read_u16(
+					&ii[0..=1],
+				    ));
+				}
+			    }
+			} else {
+			    warn!(
+				"bad packet length -> expected {}, got {}",
+				expected_len, len
+			    );
+			}
+		    }
+		    Err(e) => error!("couldn't receive data -> {}", e),
+		}
+	    },
+	    _ = tokio::time::sleep(std::time::Duration::from_millis(1_000)) => {
+		warn!("timed-out waiting for reply to \"get synced host\" request")
+	    }
+	}
+
         None
     }
 
@@ -212,100 +228,113 @@ impl Instance {
         self.seq += 1;
 
         if let Err(e) = self.sock.send(req).await {
-            error!("couldn't send request -> {}", e)
-        } else {
-            let mut buf = [0u8; 500];
-            let mut payload = [0u8; 2048];
-            let mut next_offset = 0;
+            error!("couldn't send \"host info\" request -> {}", e);
+            return None;
+        }
 
-            loop {
-                match self.sock.recv(&mut buf).await {
-                    // The packet has to be at least 12 bytes so we
-                    // can use all parts of the header without
-                    // worrying about panicking.
-                    Ok(len) if len < 12 => {
-                        warn!("response from ntpd < 12 bytes -> {}", len);
-                        break;
-                    }
+        let mut buf = [0u8; 500];
+        let mut payload = [0u8; 2048];
+        let mut next_offset = 0;
 
-                    Ok(len) => {
-                        let offset = Instance::read_u16(&buf[8..=9]) as usize;
+        loop {
+            #[rustfmt::skip]
+	    tokio::select! {
+		result = self.sock.recv(&mut buf) => {
+		    match result {
+			// The packet has to be at least 12 bytes so
+			// we can use all parts of the header without
+			// worrying about panicking.
 
-                        // We don't keep track of which of the
-                        // multiple packets we've already received.
-                        // Instead, we require the packets are sent in
-                        // order. This warning has never been emitted.
+			Ok(len) if len < 12 => {
+			    warn!("response from ntpd < 12 bytes -> {}", len);
+			    break;
+			}
 
-                        if offset != next_offset {
-                            warn!("dropped packet (incorrect offset)");
-                            break;
-                        }
+			Ok(len) => {
+			    let offset = Instance::read_u16(&buf[8..=9]) as usize;
 
-                        let total = Instance::read_u16(&buf[10..=11]) as usize;
-                        let expected_len = total + 12 + (4 - total % 4) % 4;
+			    // We don't keep track of which of the
+			    // multiple packets we've already
+			    // received. Instead, we require the
+			    // packets are sent in order. This warning
+			    // has never been emitted.
 
-                        // Make sure the incoming buffer is as large
-                        // as the length field says it is (so we can
-                        // safely access the entire payload.)
+			    if offset != next_offset {
+				warn!("dropped packet (incorrect offset)");
+				break;
+			    }
 
-                        if expected_len != len {
-                            warn!(
-                                "bad packet length -> expected {}, got {}",
-                                expected_len, len
-                            );
-                            break;
-                        }
+			    let total = Instance::read_u16(&buf[10..=11]) as usize;
+			    let expected_len = total + 12 + (4 - total % 4) % 4;
 
-                        // Make sure the reply's offset and total
-                        // won't push us past the end of our buffer.
+			    // Make sure the incoming buffer is as
+			    // large as the length field says it is
+			    // (so we can safely access the entire
+			    // payload.)
 
-                        if offset + total > payload.len() {
-                            warn!(
-                                "payload too big (offset {}, total {}
+			    if expected_len != len {
+				warn!(
+				    "bad packet length -> expected {}, got {}",
+				    expected_len, len
+				);
+				break;
+			    }
+
+			    // Make sure the reply's offset and total
+			    // won't push us past the end of our
+			    // buffer.
+
+			    if offset + total > payload.len() {
+				warn!(
+				    "payload too big (offset {}, total {}
                                  , target buf: {}",
-                                offset,
-                                total,
-                                payload.len()
-                            );
-                            break;
-                        }
+				    offset,
+				    total,
+				    payload.len()
+				);
+				break;
+			    }
 
-                        // Update the next, expected offset.
+			    // Update the next, expected offset.
 
-                        next_offset += total;
+			    next_offset += total;
 
-                        // Copy the fragment into the final buffer.
+			    // Copy the fragment into the final buffer.
 
-                        let dst_range = offset..offset + total;
-                        let src_range = 12..12 + total;
+			    let dst_range = offset..offset + total;
+			    let src_range = 12..12 + total;
 
-                        debug!(
-                            "copying {} bytes into {} through {}",
-                            dst_range.len(),
-                            dst_range.start,
-                            dst_range.end - 1
-                        );
+			    debug!(
+				"copying {} bytes into {} through {}",
+				dst_range.len(),
+				dst_range.start,
+				dst_range.end - 1
+			    );
 
-                        payload[dst_range].clone_from_slice(&buf[src_range]);
+			    payload[dst_range].clone_from_slice(&buf[src_range]);
 
-                        // If this is the last packet, we can process
-                        // it. Convert the byte buffer to text and
-                        // decode it.
+			    // If this is the last packet, we can
+			    // process it. Convert the byte buffer to
+			    // text and decode it.
 
-                        if (buf[1] & 0x20) == 0 {
-                            let payload = &payload[..next_offset];
+			    if (buf[1] & 0x20) == 0 {
+				let payload = &payload[..next_offset];
 
-                            return str::from_utf8(payload)
-                                .map(server::decode_info)
-                                .ok();
-                        }
-                    }
-                    Err(e) => {
-                        error!("couldn't receive data -> {}", e);
-                        break;
-                    }
-                }
-            }
+				return str::from_utf8(payload)
+				    .map(server::decode_info)
+				    .ok();
+			    }
+			}
+			Err(e) => {
+			    error!("couldn't receive data -> {}", e);
+			    break;
+			}
+		    }
+		},
+		_ = tokio::time::sleep(std::time::Duration::from_millis(1_000)) => {
+		    warn!("timed-out waiting for reply to \"get host info\" request")
+		}
+	    }
         }
         None
     }
