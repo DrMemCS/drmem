@@ -22,33 +22,40 @@ mod server {
     // Holds interesting state information for an NTP server.
 
     #[derive(PartialEq)]
-    pub struct Info((String, f64, f64));
+    pub struct Info(String, f64, f64);
 
     impl Info {
         // Creates a new, initialized `Info` type.
 
-        pub fn new() -> Info {
-            Info((String::from(""), 0.0, 0.0))
+        pub fn new(host: String, offset: f64, delay: f64) -> Info {
+            Info(host, offset, delay)
+        }
+
+        // Creates a value which will never match any value returned
+        // by an NTP server (because the host will never be blank.)
+
+        pub fn bad_value() -> Info {
+            Info(String::from(""), 0.0, 0.0)
         }
 
         // Returns the IP address of the NTP server.
 
         pub fn get_host(&self) -> &String {
-            &self.0 .0
+            &self.0
         }
 
         // Returns the estimated offset (in milliseconds) of the
         // system time compared to the NTP server.
 
         pub fn get_offset(&self) -> f64 {
-            self.0 .1
+            self.1
         }
 
         // Returns the estimated time-of-flight delay (in
         // milliseconds) to the NTP server.
 
         pub fn get_delay(&self) -> f64 {
-            self.0 .2
+            self.2
         }
 
         // Updates the `Info` object using up to three "interesting"
@@ -58,20 +65,14 @@ mod server {
 
         fn update_host_info(mut self, item: &str) -> Info {
             match item.split('=').collect::<Vec<&str>>()[..] {
-                ["srcadr", adr] => self.0 .0 = String::from(adr),
+                ["srcadr", adr] => self.0 = String::from(adr),
                 ["offset", offset] => {
-                    self.0 .1 = offset.parse::<f64>().unwrap()
+                    self.1 = offset.parse::<f64>().unwrap()
                 }
-                ["delay", delay] => self.0 .2 = delay.parse::<f64>().unwrap(),
+                ["delay", delay] => self.2 = delay.parse::<f64>().unwrap(),
                 _ => (),
             }
             self
-        }
-    }
-
-    impl Default for Info {
-        fn default() -> Self {
-            Self::new()
         }
     }
 
@@ -83,7 +84,7 @@ mod server {
             .split(',')
             .filter(|v| !v.is_empty())
             .map(|v| v.trim_start())
-            .fold(Info::new(), Info::update_host_info)
+            .fold(Info::bad_value(), Info::update_host_info)
     }
 }
 
@@ -402,8 +403,12 @@ impl driver::API for Instance {
                 Span::current().record("cfg", &addr.as_str());
             }
 
-            let mut info = server::Info::new();
-            let mut warning_printed = false;
+            // Set `info` to an initial, unmatchable value. `None`
+            // would be preferrable here but, if DrMem had a problem
+            // at startup getting the NTP state, it wouldn't print the
+            // warning(s).
+
+            let mut info = Some(server::Info::bad_value());
             let mut interval = time::interval(Duration::from_millis(20_000));
 
             loop {
@@ -412,29 +417,36 @@ impl driver::API for Instance {
                 if let Some(id) = self.get_synced_host().await {
                     debug!("synced to host ID: {:#04x}", id);
 
-                    if let Some(inf) = self.get_host_info(id).await {
-                        if inf != info {
-                            info!(
-                                "host: {}, offset: {} ms, delay: {} ms",
-                                inf.get_host(),
-                                inf.get_offset(),
-                                inf.get_delay()
-                            );
-                            info = inf;
-                            warning_printed = false;
-                            (self.d_source)(info.get_host().into()).await;
-                            (self.d_offset)(info.get_offset().into()).await;
-                            (self.d_delay)(info.get_delay().into()).await;
-                            (self.d_state)(true.into()).await;
+                    let host_info = self.get_host_info(id).await;
+
+                    match host_info {
+                        Some(ref tmp) => {
+                            if info != host_info {
+                                info!(
+                                    "host: {}, offset: {} ms, delay: {} ms",
+                                    tmp.get_host(),
+                                    tmp.get_offset(),
+                                    tmp.get_delay()
+                                );
+                                (self.d_source)(tmp.get_host().into()).await;
+                                (self.d_offset)(tmp.get_offset().into()).await;
+                                (self.d_delay)(tmp.get_delay().into()).await;
+                                (self.d_state)(true.into()).await;
+                                info = host_info;
+                            }
+                            continue;
                         }
-                    } else if !warning_printed {
-                        warn!("no synced host information found");
-                        warning_printed = true;
-                        (self.d_state)(false.into()).await;
+                        None => {
+                            if info.is_some() {
+                                warn!("no synced host information found");
+                                info = None;
+                                (self.d_state)(false.into()).await;
+                            }
+                        }
                     }
-                } else if !warning_printed {
+                } else if info.is_some() {
                     warn!("we're not synced to any host");
-                    warning_printed = true;
+                    info = None;
                     (self.d_state)(false.into()).await;
                 }
             }
