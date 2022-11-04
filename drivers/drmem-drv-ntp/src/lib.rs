@@ -21,7 +21,7 @@ mod server {
 
     // Holds interesting state information for an NTP server.
 
-    #[derive(PartialEq)]
+    #[derive(Debug, PartialEq)]
     pub struct Info(String, f64, f64);
 
     impl Info {
@@ -57,34 +57,48 @@ mod server {
         pub fn get_delay(&self) -> f64 {
             self.2
         }
+    }
 
-        // Updates the `Info` object using up to three "interesting"
-        // parameters from text consisting of comma-separated,
-        // key/value pairs. The original `Info` is consumed by this
-        // method.
+    // Updates the `Info` object using up to three "interesting"
+    // parameters from text consisting of comma-separated,
+    // key/value pairs. The original `Info` is consumed by this
+    // method.
 
-        fn update_host_info(mut self, item: &str) -> Info {
-            match item.split('=').collect::<Vec<&str>>()[..] {
-                ["srcadr", adr] => self.0 = String::from(adr),
-                ["offset", offset] => {
-                    self.1 = offset.parse::<f64>().unwrap()
+    fn update_host_info(
+        mut state: (Option<String>, Option<f64>, Option<f64>), item: &str,
+    ) -> (Option<String>, Option<f64>, Option<f64>) {
+        match item.split('=').collect::<Vec<&str>>()[..] {
+            ["srcadr", adr] => state.0 = Some(String::from(adr)),
+            ["offset", offset] => {
+                if let Ok(o) = offset.parse::<f64>() {
+                    state.1 = Some(o)
                 }
-                ["delay", delay] => self.2 = delay.parse::<f64>().unwrap(),
-                _ => (),
             }
-            self
+            ["delay", delay] => {
+                if let Ok(d) = delay.parse::<f64>() {
+                    state.2 = Some(d)
+                }
+            }
+            _ => (),
         }
+        state
     }
 
     // Returns an `Info` type that has been initialized with the
     // parameters defined in `input`.
 
-    pub fn decode_info(input: &str) -> Info {
-        input
+    pub fn decode_info(input: &str) -> Option<Info> {
+        let result = input
             .split(',')
             .filter(|v| !v.is_empty())
             .map(|v| v.trim_start())
-            .fold(Info::bad_value(), Info::update_host_info)
+            .fold((None, None, None), update_host_info);
+
+        if let (Some(a), Some(o), Some(d)) = result {
+            Some(Info::new(a, o, d))
+        } else {
+            None
+        }
     }
 }
 
@@ -287,8 +301,7 @@ impl Instance {
 
 			    if offset + total > payload.len() {
 				warn!(
-				    "payload too big (offset {}, total {}
-                                 , target buf: {}",
+				    "payload too big (offset {}, total {}, target buf: {})",
 				    offset,
 				    total,
 				    payload.len()
@@ -322,8 +335,8 @@ impl Instance {
 				let payload = &payload[..next_offset];
 
 				return str::from_utf8(payload)
-				    .map(server::decode_info)
-				    .ok();
+				    .ok()
+				    .and_then(server::decode_info)
 			    }
 			}
 			Err(e) => {
@@ -457,4 +470,34 @@ impl driver::API for Instance {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decoding() {
+        assert_eq!(
+            server::decode_info("srcadr=192.168.1.1,offset=0.0,delay=0.0"),
+            Some(server::Info::new(String::from("192.168.1.1"), 0.0, 0.0))
+        );
+        assert_eq!(
+            server::decode_info(" srcadr=192.168.1.1, offset=0.0, delay=0.0"),
+            Some(server::Info::new(String::from("192.168.1.1"), 0.0, 0.0))
+        );
+
+        // Should return `None` if fields are missing.
+
+        assert_eq!(server::decode_info(" offset=0.0, delay=0.0"), None);
+        assert_eq!(server::decode_info(" srcadr=192.168.1.1, delay=0.0"), None);
+        assert_eq!(
+            server::decode_info(" srcadr=192.168.1.1, offset=0.0"),
+            None
+        );
+
+        // Test badly formed input.
+
+        assert!(server::decode_info("srcadr=192.168.1.1,offset=b,delay=0.0")
+            .is_none());
+        assert!(server::decode_info("srcadr=192.168.1.1,offset=0.0,delay=b")
+            .is_none());
+    }
+}
