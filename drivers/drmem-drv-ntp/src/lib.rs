@@ -21,69 +21,84 @@ mod server {
 
     // Holds interesting state information for an NTP server.
 
-    #[derive(PartialEq)]
-    pub struct Info((String, f64, f64));
+    #[derive(Debug, PartialEq)]
+    pub struct Info(String, f64, f64);
 
     impl Info {
         // Creates a new, initialized `Info` type.
 
-        pub fn new() -> Info {
-            Info((String::from(""), 0.0, 0.0))
+        pub fn new(host: String, offset: f64, delay: f64) -> Info {
+            Info(host, offset, delay)
+        }
+
+        // Creates a value which will never match any value returned
+        // by an NTP server (because the host will never be blank.)
+
+        pub fn bad_value() -> Info {
+            Info(String::from(""), 0.0, 0.0)
         }
 
         // Returns the IP address of the NTP server.
 
         pub fn get_host(&self) -> &String {
-            &self.0 .0
+            &self.0
         }
 
         // Returns the estimated offset (in milliseconds) of the
         // system time compared to the NTP server.
 
         pub fn get_offset(&self) -> f64 {
-            self.0 .1
+            self.1
         }
 
         // Returns the estimated time-of-flight delay (in
         // milliseconds) to the NTP server.
 
         pub fn get_delay(&self) -> f64 {
-            self.0 .2
-        }
-
-        // Updates the `Info` object using up to three "interesting"
-        // parameters from text consisting of comma-separated,
-        // key/value pairs. The original `Info` is comsumed by this
-        // method.
-
-        fn update_host_info(mut self, item: &str) -> Info {
-            match item.split('=').collect::<Vec<&str>>()[..] {
-                ["srcadr", adr] => self.0 .0 = String::from(adr),
-                ["offset", offset] => {
-                    self.0 .1 = offset.parse::<f64>().unwrap()
-                }
-                ["delay", delay] => self.0 .2 = delay.parse::<f64>().unwrap(),
-                _ => (),
-            }
-            self
+            self.2
         }
     }
 
-    impl Default for Info {
-        fn default() -> Self {
-            Self::new()
+    // Updates the `Info` object using up to three "interesting"
+    // parameters from text consisting of comma-separated,
+    // key/value pairs. The original `Info` is consumed by this
+    // method.
+
+    fn update_host_info(
+        mut state: (Option<String>, Option<f64>, Option<f64>), item: &str,
+    ) -> (Option<String>, Option<f64>, Option<f64>) {
+        match item.split('=').collect::<Vec<&str>>()[..] {
+            ["srcadr", adr] => state.0 = Some(String::from(adr)),
+            ["offset", offset] => {
+                if let Ok(o) = offset.parse::<f64>() {
+                    state.1 = Some(o)
+                }
+            }
+            ["delay", delay] => {
+                if let Ok(d) = delay.parse::<f64>() {
+                    state.2 = Some(d)
+                }
+            }
+            _ => (),
         }
+        state
     }
 
     // Returns an `Info` type that has been initialized with the
     // parameters defined in `input`.
 
-    pub fn decode_info(input: &str) -> Info {
-        input
+    pub fn decode_info(input: &str) -> Option<Info> {
+        let result = input
             .split(',')
             .filter(|v| !v.is_empty())
             .map(|v| v.trim_start())
-            .fold(Info::new(), Info::update_host_info)
+            .fold((None, None, None), update_host_info);
+
+        if let (Some(a), Some(o), Some(d)) = result {
+            Some(Info::new(a, o, d))
+        } else {
+            None
+        }
     }
 }
 
@@ -147,46 +162,62 @@ impl Instance {
 
         self.seq += 1;
 
-        match self.sock.send(&req).await {
-            Ok(_) => {
-                let mut buf = [0u8; 500];
+        // Try to send the request. If there's a failure with the
+        // socket, report the error and return `None`.
 
-                match self.sock.recv(&mut buf).await {
-                    // The packet has to be at least 12 bytes so we can
-                    // use all parts of the header without worrying about
-                    // panicking.
-                    Ok(len) if len < 12 => {
-                        warn!("response from ntpd < 12 bytes -> {}", len)
-                    }
-
-                    Ok(len) => {
-                        let total = Instance::read_u16(&buf[10..=11]) as usize;
-                        let expected_len = total + 12 + (4 - total % 4) % 4;
-
-                        // Make sure the incoming buffer is as large as
-                        // the length field says it is (so we can safely
-                        // access the entire payload.)
-
-                        if expected_len == len {
-                            for ii in buf[12..len].chunks_exact(4) {
-                                if (ii[2] & 0x7) == 6 {
-                                    return Some(Instance::read_u16(
-                                        &ii[0..=1],
-                                    ));
-                                }
-                            }
-                        } else {
-                            warn!(
-                                "bad packet length -> expected {}, got {}",
-                                expected_len, len
-                            );
-                        }
-                    }
-                    Err(e) => error!("couldn't receive data -> {}", e),
-                }
-            }
-            Err(e) => error!("couldn't send request -> {}", e),
+        if let Err(e) = self.sock.send(&req).await {
+            error!("couldn't send \"synced hosts\" request -> {}", e);
+            return None;
         }
+
+        let mut buf = [0u8; 500];
+
+        #[rustfmt::skip]
+	tokio::select! {
+	    result = self.sock.recv(&mut buf) => {
+		match result {
+		    // The packet has to be at least 12 bytes so we
+		    // can use all parts of the header without
+		    // worrying about panicking.
+
+		    Ok(len) if len < 12 => {
+			warn!(
+			    "response from ntpd < 12 bytes -> only {} bytes",
+			    len
+			)
+		    }
+
+		    Ok(len) => {
+			let total = Instance::read_u16(&buf[10..=11]) as usize;
+			let expected_len = total + 12 + (4 - total % 4) % 4;
+
+			// Make sure the incoming buffer is as large
+			// as the length field says it is (so we can
+			// safely access the entire payload.)
+
+			if expected_len == len {
+			    for ii in buf[12..len].chunks_exact(4) {
+				if (ii[2] & 0x7) == 6 {
+				    return Some(Instance::read_u16(
+					&ii[0..=1],
+				    ));
+				}
+			    }
+			} else {
+			    warn!(
+				"bad packet length -> expected {}, got {}",
+				expected_len, len
+			    );
+			}
+		    }
+		    Err(e) => error!("couldn't receive data -> {}", e),
+		}
+	    },
+	    _ = tokio::time::sleep(std::time::Duration::from_millis(1_000)) => {
+		warn!("timed-out waiting for reply to \"get synced host\" request")
+	    }
+	}
+
         None
     }
 
@@ -212,100 +243,112 @@ impl Instance {
         self.seq += 1;
 
         if let Err(e) = self.sock.send(req).await {
-            error!("couldn't send request -> {}", e)
-        } else {
-            let mut buf = [0u8; 500];
-            let mut payload = [0u8; 2048];
-            let mut next_offset = 0;
+            error!("couldn't send \"host info\" request -> {}", e);
+            return None;
+        }
 
-            loop {
-                match self.sock.recv(&mut buf).await {
-                    // The packet has to be at least 12 bytes so we
-                    // can use all parts of the header without
-                    // worrying about panicking.
-                    Ok(len) if len < 12 => {
-                        warn!("response from ntpd < 12 bytes -> {}", len);
-                        break;
-                    }
+        let mut buf = [0u8; 500];
+        let mut payload = [0u8; 2048];
+        let mut next_offset = 0;
 
-                    Ok(len) => {
-                        let offset = Instance::read_u16(&buf[8..=9]) as usize;
+        loop {
+            #[rustfmt::skip]
+	    tokio::select! {
+		result = self.sock.recv(&mut buf) => {
+		    match result {
+			// The packet has to be at least 12 bytes so
+			// we can use all parts of the header without
+			// worrying about panicking.
 
-                        // We don't keep track of which of the
-                        // multiple packets we've already received.
-                        // Instead, we require the packets are sent in
-                        // order. This warning has never been emitted.
+			Ok(len) if len < 12 => {
+			    warn!("response from ntpd < 12 bytes -> {}", len);
+			    break;
+			}
 
-                        if offset != next_offset {
-                            warn!("dropped packet (incorrect offset)");
-                            break;
-                        }
+			Ok(len) => {
+			    let offset = Instance::read_u16(&buf[8..=9]) as usize;
 
-                        let total = Instance::read_u16(&buf[10..=11]) as usize;
-                        let expected_len = total + 12 + (4 - total % 4) % 4;
+			    // We don't keep track of which of the
+			    // multiple packets we've already
+			    // received. Instead, we require the
+			    // packets are sent in order. This warning
+			    // has never been emitted.
 
-                        // Make sure the incoming buffer is as large
-                        // as the length field says it is (so we can
-                        // safely access the entire payload.)
+			    if offset != next_offset {
+				warn!("dropped packet (incorrect offset)");
+				break;
+			    }
 
-                        if expected_len != len {
-                            warn!(
-                                "bad packet length -> expected {}, got {}",
-                                expected_len, len
-                            );
-                            break;
-                        }
+			    let total = Instance::read_u16(&buf[10..=11]) as usize;
+			    let expected_len = total + 12 + (4 - total % 4) % 4;
 
-                        // Make sure the reply's offset and total
-                        // won't push us past the end of our buffer.
+			    // Make sure the incoming buffer is as
+			    // large as the length field says it is
+			    // (so we can safely access the entire
+			    // payload.)
 
-                        if offset + total > payload.len() {
-                            warn!(
-                                "payload too big (offset {}, total {}
-                                 , target buf: {}",
-                                offset,
-                                total,
-                                payload.len()
-                            );
-                            break;
-                        }
+			    if expected_len != len {
+				warn!(
+				    "bad packet length -> expected {}, got {}",
+				    expected_len, len
+				);
+				break;
+			    }
 
-                        // Update the next, expected offset.
+			    // Make sure the reply's offset and total
+			    // won't push us past the end of our
+			    // buffer.
 
-                        next_offset += total;
+			    if offset + total > payload.len() {
+				warn!(
+				    "payload too big (offset {}, total {}, target buf: {})",
+				    offset,
+				    total,
+				    payload.len()
+				);
+				break;
+			    }
 
-                        // Copy the fragment into the final buffer.
+			    // Update the next, expected offset.
 
-                        let dst_range = offset..offset + total;
-                        let src_range = 12..12 + total;
+			    next_offset += total;
 
-                        debug!(
-                            "copying {} bytes into {} through {}",
-                            dst_range.len(),
-                            dst_range.start,
-                            dst_range.end - 1
-                        );
+			    // Copy the fragment into the final buffer.
 
-                        payload[dst_range].clone_from_slice(&buf[src_range]);
+			    let dst_range = offset..offset + total;
+			    let src_range = 12..12 + total;
 
-                        // If this is the last packet, we can process
-                        // it. Convert the byte buffer to text and
-                        // decode it.
+			    debug!(
+				"copying {} bytes into {} through {}",
+				dst_range.len(),
+				dst_range.start,
+				dst_range.end - 1
+			    );
 
-                        if (buf[1] & 0x20) == 0 {
-                            let payload = &payload[..next_offset];
+			    payload[dst_range].clone_from_slice(&buf[src_range]);
 
-                            return str::from_utf8(payload)
-                                .map(server::decode_info)
-                                .ok();
-                        }
-                    }
-                    Err(e) => {
-                        error!("couldn't receive data -> {}", e);
-                        break;
-                    }
-                }
-            }
+			    // If this is the last packet, we can
+			    // process it. Convert the byte buffer to
+			    // text and decode it.
+
+			    if (buf[1] & 0x20) == 0 {
+				let payload = &payload[..next_offset];
+
+				return str::from_utf8(payload)
+				    .ok()
+				    .and_then(server::decode_info)
+			    }
+			}
+			Err(e) => {
+			    error!("couldn't receive data -> {}", e);
+			    break;
+			}
+		    }
+		},
+		_ = tokio::time::sleep(std::time::Duration::from_millis(1_000)) => {
+		    warn!("timed-out waiting for reply to \"get host info\" request")
+		}
+	    }
         }
         None
     }
@@ -373,8 +416,12 @@ impl driver::API for Instance {
                 Span::current().record("cfg", &addr.as_str());
             }
 
-            let mut info = server::Info::new();
-            let mut warning_printed = false;
+            // Set `info` to an initial, unmatchable value. `None`
+            // would be preferrable here but, if DrMem had a problem
+            // at startup getting the NTP state, it wouldn't print the
+            // warning(s).
+
+            let mut info = Some(server::Info::bad_value());
             let mut interval = time::interval(Duration::from_millis(20_000));
 
             loop {
@@ -383,29 +430,36 @@ impl driver::API for Instance {
                 if let Some(id) = self.get_synced_host().await {
                     debug!("synced to host ID: {:#04x}", id);
 
-                    if let Some(inf) = self.get_host_info(id).await {
-                        if inf != info {
-                            info!(
-                                "host: {}, offset: {} ms, delay: {} ms",
-                                inf.get_host(),
-                                inf.get_offset(),
-                                inf.get_delay()
-                            );
-                            info = inf;
-                            warning_printed = false;
-                            (self.d_source)(info.get_host().into()).await;
-                            (self.d_offset)(info.get_offset().into()).await;
-                            (self.d_delay)(info.get_delay().into()).await;
-                            (self.d_state)(true.into()).await;
+                    let host_info = self.get_host_info(id).await;
+
+                    match host_info {
+                        Some(ref tmp) => {
+                            if info != host_info {
+                                info!(
+                                    "host: {}, offset: {} ms, delay: {} ms",
+                                    tmp.get_host(),
+                                    tmp.get_offset(),
+                                    tmp.get_delay()
+                                );
+                                (self.d_source)(tmp.get_host().into()).await;
+                                (self.d_offset)(tmp.get_offset().into()).await;
+                                (self.d_delay)(tmp.get_delay().into()).await;
+                                (self.d_state)(true.into()).await;
+                                info = host_info;
+                            }
+                            continue;
                         }
-                    } else if !warning_printed {
-                        warn!("no synced host information found");
-                        warning_printed = true;
-                        (self.d_state)(false.into()).await;
+                        None => {
+                            if info.is_some() {
+                                warn!("no synced host information found");
+                                info = None;
+                                (self.d_state)(false.into()).await;
+                            }
+                        }
                     }
-                } else if !warning_printed {
+                } else if info.is_some() {
                     warn!("we're not synced to any host");
-                    warning_printed = true;
+                    info = None;
                     (self.d_state)(false.into()).await;
                 }
             }
@@ -416,4 +470,34 @@ impl driver::API for Instance {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decoding() {
+        assert_eq!(
+            server::decode_info("srcadr=192.168.1.1,offset=0.0,delay=0.0"),
+            Some(server::Info::new(String::from("192.168.1.1"), 0.0, 0.0))
+        );
+        assert_eq!(
+            server::decode_info(" srcadr=192.168.1.1, offset=0.0, delay=0.0"),
+            Some(server::Info::new(String::from("192.168.1.1"), 0.0, 0.0))
+        );
+
+        // Should return `None` if fields are missing.
+
+        assert_eq!(server::decode_info(" offset=0.0, delay=0.0"), None);
+        assert_eq!(server::decode_info(" srcadr=192.168.1.1, delay=0.0"), None);
+        assert_eq!(
+            server::decode_info(" srcadr=192.168.1.1, offset=0.0"),
+            None
+        );
+
+        // Test badly formed input.
+
+        assert!(server::decode_info("srcadr=192.168.1.1,offset=b,delay=0.0")
+            .is_none());
+        assert!(server::decode_info("srcadr=192.168.1.1,offset=0.0,delay=b")
+            .is_none());
+    }
+}
