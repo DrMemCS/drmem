@@ -60,7 +60,7 @@ mod server {
 
         // Updates the `Info` object using up to three "interesting"
         // parameters from text consisting of comma-separated,
-        // key/value pairs. The original `Info` is comsumed by this
+        // key/value pairs. The original `Info` is consumed by this
         // method.
 
         fn update_host_info(mut self, item: &str) -> Info {
