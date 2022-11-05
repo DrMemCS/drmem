@@ -7,13 +7,11 @@ use std::str::FromStr;
 struct Segment(String);
 
 impl Segment {
-    // Returns `true` is the character can be used in a segment of the
+    // Returns `true` if the character can be used in a segment of the
     // device name.
 
     fn is_valid_char((idx, ch): (usize, char), len: usize) -> bool {
-        ('a'..='z').contains(&ch)
-            || ('A'..='Z').contains(&ch)
-            || ('0'..='9').contains(&ch)
+	ch.is_alphanumeric()
             || (ch == '-' && idx != 0 && idx != len - 1)
     }
 
@@ -221,7 +219,14 @@ mod tests {
         assert!("a:b".parse::<Segment>().is_err());
         assert!("-a".parse::<Segment>().is_err());
         assert!("a-".parse::<Segment>().is_err());
+        assert!(" ".parse::<Segment>().is_err());
         assert_eq!(format!("{}", "a-b".parse::<Segment>().unwrap()), "a-b");
+
+	// Check non-ASCII entries.
+
+        assert!("٣".parse::<Segment>().is_ok());
+        assert!("温度".parse::<Segment>().is_ok());
+        assert!("🤖".parse::<Segment>().is_err());
     }
 
     #[test]
@@ -236,6 +241,7 @@ mod tests {
         assert_eq!(format!("{}", "a-b".parse::<Path>().unwrap()), "a-b");
         assert_eq!(format!("{}", "a:b".parse::<Path>().unwrap()), "a:b");
         assert_eq!(format!("{}", "a:b:c".parse::<Path>().unwrap()), "a:b:c");
+        assert_eq!(format!("{}", "家:温度".parse::<Path>().unwrap()), "家:温度");
     }
 
     #[test]
