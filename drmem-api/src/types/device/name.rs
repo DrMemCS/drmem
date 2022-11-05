@@ -7,13 +7,11 @@ use std::str::FromStr;
 struct Segment(String);
 
 impl Segment {
-    // Returns `true` is the character can be used in a segment of the
+    // Returns `true` if the character can be used in a segment of the
     // device name.
 
     fn is_valid_char((idx, ch): (usize, char), len: usize) -> bool {
-        ('a'..='z').contains(&ch)
-            || ('A'..='Z').contains(&ch)
-            || ('0'..='9').contains(&ch)
+	ch.is_alphanumeric()
             || (ch == '-' && idx != 0 && idx != len - 1)
     }
 
