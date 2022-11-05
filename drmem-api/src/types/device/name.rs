@@ -219,7 +219,14 @@ mod tests {
         assert!("a:b".parse::<Segment>().is_err());
         assert!("-a".parse::<Segment>().is_err());
         assert!("a-".parse::<Segment>().is_err());
+        assert!(" ".parse::<Segment>().is_err());
         assert_eq!(format!("{}", "a-b".parse::<Segment>().unwrap()), "a-b");
+
+	// Check non-ASCII entries.
+
+        assert!("٣".parse::<Segment>().is_ok());
+        assert!("温度".parse::<Segment>().is_ok());
+        assert!("🤖".parse::<Segment>().is_err());
     }
 
     #[test]
@@ -234,6 +241,7 @@ mod tests {
         assert_eq!(format!("{}", "a-b".parse::<Path>().unwrap()), "a-b");
         assert_eq!(format!("{}", "a:b".parse::<Path>().unwrap()), "a:b");
         assert_eq!(format!("{}", "a:b:c".parse::<Path>().unwrap()), "a:b:c");
+        assert_eq!(format!("{}", "家:温度".parse::<Path>().unwrap()), "家:温度");
     }
 
     #[test]
