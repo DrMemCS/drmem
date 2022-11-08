@@ -14,6 +14,8 @@ use std::convert::TryInto;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
+type SettingTable = HashMap<device::Name, TxDeviceSetting>;
+
 // Translates a Redis error into a DrMem error. The translation is
 // slightly lossy in that we lose the exact Redis error that occurred
 // and, instead map it into a more general "backend" error. We
@@ -174,7 +176,7 @@ fn from_value(v: &redis::Value) -> Result<Value> {
 pub struct RedisStore {
     /// This connection is used for interacting with the database.
     db_con: redis::aio::MultiplexedConnection,
-    table: HashMap<device::Name, TxDeviceSetting>,
+    table: SettingTable,
 }
 
 impl RedisStore {
@@ -229,15 +231,45 @@ impl RedisStore {
     // Returns the key that returns time-series information for the
     // device.
 
-    fn history_key(name: &str) -> String {
+    fn hist_key(name: &str) -> String {
         format!("{}#hist", name)
+    }
+
+    fn init_device_cmd(
+        name: &str, driver: &str, units: &Option<String>,
+    ) -> redis::Pipeline {
+        let hist_key = RedisStore::hist_key(name);
+        let info_key = RedisStore::info_key(name);
+
+        // Start an array of required fields.
+
+        let mut fields: Vec<(&str, String)> =
+            vec![("driver", String::from(driver))];
+
+        // Optionally add a "units" field.
+
+        if let Some(units) = units {
+            fields.push(("units", units.clone()))
+        };
+
+        // Create a command pipeline that deletes the two keys and
+        // then creates them properly with default values.
+
+        redis::pipe()
+            .atomic()
+            .del(&hist_key)
+            .xadd(&hist_key, "1", &[("value", &[1u8])])
+            .xdel(&hist_key, &["1"])
+            .del(&info_key)
+            .hset_multiple(&info_key, &fields)
+            .clone()
     }
 
     // Builds the low-level command that returns the last value of the
     // device.
 
     fn last_value_cmd(name: &str) -> redis::Pipeline {
-        let name = RedisStore::history_key(name);
+        let name = RedisStore::hist_key(name);
 
         redis::pipe()
             .xrevrange_count(name, "+", "-", 1usize)
@@ -261,14 +293,68 @@ impl RedisStore {
     // Builds the low-level command that returns the type of the
     // device's meta record.
 
-    fn type_cmd(name: &str) -> redis::Cmd {
+    fn info_type_cmd(name: &str) -> redis::Cmd {
         let key = RedisStore::info_key(name);
 
         redis::cmd("TYPE").arg(&key).clone()
     }
 
-    async fn lookup_device(&self, name: &str) -> Result<client::DevInfoReply> {
-        todo!()
+    // Builds the low-level command that returns the type of the
+    // device's history record.
+
+    fn hist_type_cmd(name: &str) -> redis::Cmd {
+        let key = RedisStore::hist_key(name);
+
+        redis::cmd("TYPE").arg(&key).clone()
+    }
+
+    // Creates a redis command pipeline which returns the standard,
+    // meta-data for a device.
+
+    fn device_info_cmd(name: &str) -> redis::Pipeline {
+        let info_key = RedisStore::info_key(name);
+
+        redis::pipe().hgetall(&info_key).clone()
+    }
+
+    fn hash_to_info(
+	st: &SettingTable, name: &device::Name, map: &HashMap<String, String>
+    ) -> Result<client::DevInfoReply> {
+        // Redis doesn't return an error if the key doesn't exist; it
+        // returns an empty array. So if our HashMap is empty, the key
+        // didn't exist.
+
+        if !map.is_empty() {
+            // If a "units" field exists and it's a string, we can
+            // save it in the `units` field of the reply.
+
+            let units = map.get("units");
+
+            Ok(client::DevInfoReply {
+                name: name.clone(),
+                units: units.map(String::clone),
+                settable: st.contains_key(&name),
+                driver: map
+                    .get("driver")
+                    .map(String::clone)
+                    .unwrap_or_else(|| String::from("*missing*")),
+            })
+        } else {
+            Err(Error::NotFound)
+        }
+    }
+
+    // Looks up a device in the redis store and, if found, returns a
+    // `client::DevInfoReply` containing the information.
+
+    async fn lookup_device(
+        &mut self, name: device::Name,
+    ) -> Result<client::DevInfoReply> {
+        RedisStore::device_info_cmd(name.to_string().as_str())
+            .query_async::<redis::aio::MultiplexedConnection, HashMap<String, String>>(&mut self.db_con)
+            .await
+            .map_err(xlat_err)
+	    .and_then(|v| RedisStore::hash_to_info(&self.table, &name, &v))
     }
 
     // Obtains the last value reported for a device, or `None` if
@@ -305,18 +391,18 @@ impl RedisStore {
         // is a hash map.
 
         {
-            let cmd = RedisStore::type_cmd(name);
+            let cmd = RedisStore::info_type_cmd(name);
             let result: redis::RedisResult<String> =
                 cmd.query_async(&mut self.db_con).await;
 
             match result {
                 Ok(data_type) if data_type.as_str() == "hash" => (),
                 Ok(_) => {
-                    warn!("{} is of the wrong key type", name);
+                    warn!("{} meta is of the wrong key type", name);
                     return Err(Error::TypeError);
                 }
                 Err(_) => {
-                    warn!("{} doesn't exist", name);
+                    warn!("{} meta doesn't exist", name);
                     return Err(Error::NotFound);
                 }
             }
@@ -326,21 +412,18 @@ impl RedisStore {
         // is a time-series stream.
 
         {
-            let hist_key = RedisStore::history_key(name);
-            let result: Result<String> = redis::cmd("TYPE")
-                .arg(&hist_key)
-                .query_async(&mut self.db_con)
-                .await
-                .map_err(xlat_err);
+            let cmd = RedisStore::hist_type_cmd(name);
+            let result: redis::RedisResult<String> =
+                cmd.query_async(&mut self.db_con).await;
 
             match result {
                 Ok(data_type) if data_type.as_str() == "stream" => Ok(()),
                 Ok(_) => {
-                    warn!("{} is of the wrong key type", &hist_key);
+                    warn!("{} history is of the wrong key type", name);
                     Err(Error::TypeError)
                 }
                 Err(_) => {
-                    warn!("{} doesn't exist", &hist_key);
+                    warn!("{} history doesn't exist", name);
                     Err(Error::NotFound)
                 }
             }
@@ -355,33 +438,17 @@ impl RedisStore {
     // values.
 
     async fn init_device(
-        &mut self, name: &str, units: &Option<String>,
+        &mut self, name: &str, driver: &str, units: &Option<String>,
     ) -> Result<()> {
         debug!("initializing {}", name);
-
-        let hist_key = RedisStore::history_key(name);
-        let info_key = RedisStore::info_key(name);
-
-        // Create a command pipeline that deletes the two keys and
-        // then creates them properly with default values.
-
-        let fields: Vec<(&str, String)> = if let Some(units) = units {
-            vec![("units", units.clone())]
-        } else {
-            vec![]
-        };
-
-        redis::pipe()
-            .atomic()
-            .del(&hist_key)
-            .xadd(&hist_key, "1", &[("value", &[1u8])])
-            .xdel(&hist_key, &["1"])
-            .del(&info_key)
-            .hset_multiple(&info_key, &fields)
+        RedisStore::init_device_cmd(name, driver, units)
             .query_async(&mut self.db_con)
             .await
             .map_err(xlat_err)
     }
+
+    // Generates a redis command pipeline that adds a value to a
+    // device's history.
 
     fn report_new_value_cmd(key: &str, val: &device::Value) -> redis::Pipeline {
         let data = [("value", to_redis(val))];
@@ -389,13 +456,16 @@ impl RedisStore {
         redis::pipe().xadd(key, "*", &data).clone()
     }
 
+    // Creates a closure for a driver to report a device's changing
+    // values.
+
     fn mk_report_func(&self, name: &str) -> ReportReading {
         let db_con = self.db_con.clone();
         let name = String::from(name);
 
         Box::new(move |v| {
             let mut db_con = db_con.clone();
-            let hist_key = RedisStore::history_key(&name);
+            let hist_key = RedisStore::hist_key(&name);
             let name = name.clone();
             let data = [("value", to_redis(&v))];
 
@@ -418,7 +488,7 @@ impl Store for RedisStore {
     /// Registers a device in the redis backend.
 
     async fn register_read_only_device(
-        &mut self, _driver_name: &str, name: &device::Name,
+        &mut self, driver_name: &str, name: &device::Name,
         units: &Option<String>,
     ) -> Result<(ReportReading, Option<Value>)> {
         let name = name.to_string();
@@ -426,7 +496,7 @@ impl Store for RedisStore {
         debug!("registering '{}' as read-only", &name);
 
         if self.validate_device(&name).await.is_err() {
-            self.init_device(&name, units).await?;
+            self.init_device(&name, driver_name, units).await?;
 
             info!("'{}' has been successfully created", &name);
         }
@@ -434,7 +504,7 @@ impl Store for RedisStore {
     }
 
     async fn register_read_write_device(
-        &mut self, _driver_name: &str, name: &device::Name,
+        &mut self, driver_name: &str, name: &device::Name,
         units: &Option<String>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
         let sname = name.to_string();
@@ -442,7 +512,7 @@ impl Store for RedisStore {
         debug!("registering '{}' as read-write", &sname);
 
         if self.validate_device(&sname).await.is_err() {
-            self.init_device(&sname, units).await?;
+            self.init_device(&sname, driver_name, units).await?;
 
             info!("'{}' has been successfully created", &sname);
         }
@@ -457,15 +527,22 @@ impl Store for RedisStore {
         ))
     }
 
-    // Implement the GraphQL query to pull device information.
+    // Implement the request to pull device information. Any task with
+    // a client channel can make this request although the primary
+    // client will be from GraphQL requests.
 
     async fn get_device_info(
         &mut self, pattern: &Option<String>,
     ) -> Result<Vec<client::DevInfoReply>> {
+        // Get a list of all the keys that match the pattern. For
+        // Redis, these keys will have "#info" appended at the end.
+
         let result: Vec<String> = RedisStore::match_pattern_cmd(pattern)
             .query_async(&mut self.db_con)
             .await
             .map_err(xlat_err)?;
+
+        // Create an empty container to hold the device info records.
 
         let mut devices = vec![];
 
@@ -474,10 +551,15 @@ impl Store for RedisStore {
         // the device information.
 
         for key in result {
-            let name = key.trim_end_matches("#info");
-            let dev_info = self.lookup_device(name).await?;
+            // Only process keys that are valid device names.
 
-            devices.push(dev_info)
+            if let Ok(name) =
+                key.trim_end_matches("#info").parse::<device::Name>()
+            {
+                let dev_info = self.lookup_device(name).await?;
+
+                devices.push(dev_info)
+            }
         }
         Ok(devices)
     }
@@ -709,13 +791,37 @@ $11\r\ndevice#info\r\n"
     }
 
     #[test]
-    fn test_type_cmd() {
-        let cmd = RedisStore::type_cmd("device");
+    fn test_info_type_cmd() {
+        let cmd = RedisStore::info_type_cmd("device");
 
         assert_eq!(
             &cmd.get_packed_command(),
             b"*2\r
 $4\r\nTYPE\r
+$11\r\ndevice#info\r\n"
+        );
+    }
+
+    #[test]
+    fn test_hist_type_cmd() {
+        let cmd = RedisStore::hist_type_cmd("device");
+
+        assert_eq!(
+            &cmd.get_packed_command(),
+            b"*2\r
+$4\r\nTYPE\r
+$11\r\ndevice#hist\r\n"
+        );
+    }
+
+    #[test]
+    fn test_dev_info_cmd() {
+        let cmd = RedisStore::device_info_cmd("device");
+
+        assert_eq!(
+            &cmd.get_packed_pipeline(),
+            b"*2\r
+$7\r\nHGETALL\r
 $11\r\ndevice#info\r\n"
         );
     }
@@ -791,6 +897,127 @@ $1\r\n*\r
 $5\r\nvalue\r
 $10\r\nS\x00\x00\x00\x05hello\r\n"
         );
+    }
+
+    #[test]
+    fn test_init_dev() {
+        assert_eq!(
+            String::from_utf8_lossy(
+                &RedisStore::init_device_cmd("device", "mem", &None)
+                    .get_packed_pipeline()
+            ),
+            "*1\r
+$5\r\nMULTI\r
+*2\r
+$3\r\nDEL\r
+$11\r\ndevice#hist\r
+*5\r
+$4\r\nXADD\r
+$11\r\ndevice#hist\r
+$1\r\n1\r
+$5\r\nvalue\r
+$1\r\n\x01\r
+*3\r
+$4\r\nXDEL\r
+$11\r\ndevice#hist\r
+$1\r\n1\r
+*2\r
+$3\r\nDEL\r
+$11\r\ndevice#info\r
+*4\r
+$5\r\nHMSET\r
+$11\r\ndevice#info\r
+$6\r\ndriver\r
+$3\r\nmem\r
+*1\r
+$4\r\nEXEC\r\n"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(
+                &RedisStore::init_device_cmd(
+                    "device",
+                    "pump",
+                    &Some(String::from("gpm"))
+                )
+                .get_packed_pipeline()
+            ),
+            "*1\r
+$5\r\nMULTI\r
+*2\r
+$3\r\nDEL\r
+$11\r\ndevice#hist\r
+*5\r
+$4\r\nXADD\r
+$11\r\ndevice#hist\r
+$1\r\n1\r
+$5\r\nvalue\r
+$1\r\n\x01\r
+*3\r
+$4\r\nXDEL\r
+$11\r\ndevice#hist\r
+$1\r\n1\r
+*2\r
+$3\r\nDEL\r
+$11\r\ndevice#info\r
+*6\r
+$5\r\nHMSET\r
+$11\r\ndevice#info\r
+$6\r\ndriver\r
+$4\r\npump\r
+$5\r\nunits\r
+$3\r\ngpm\r
+*1\r
+$4\r\nEXEC\r\n"
+        );
+    }
+
+    #[test]
+    fn test_hash_to_info() {
+	let device = "path:junk".parse::<device::Name>().unwrap();
+	let mut st = HashMap::new();
+	let mut fm = HashMap::new();
+
+	assert_eq!(
+	    RedisStore::hash_to_info(&st, &"path:junk".parse::<device::Name>().unwrap(), &fm),
+	    Err(Error::NotFound)
+	);
+
+	let _ = fm.insert("units".to_string(), "gpm".to_string());
+
+	assert_eq!(
+	    RedisStore::hash_to_info(&st, &device, &fm),
+	    Ok(client::DevInfoReply {
+		name: device.clone(),
+		units: Some(String::from("gpm")),
+		settable: false,
+		driver: String::from("*missing*"),
+	    })
+	);
+
+	let _ = fm.insert("driver".to_string(), "sump".to_string());
+
+	assert_eq!(
+	    RedisStore::hash_to_info(&st, &device, &fm),
+	    Ok(client::DevInfoReply {
+		name: device.clone(),
+		units: Some(String::from("gpm")),
+		settable: false,
+		driver: String::from("sump"),
+	    })
+	);
+
+	let (tx, _) = mpsc::channel(10);
+	let _ = st.insert(device.clone(), tx);
+
+	assert_eq!(
+	    RedisStore::hash_to_info(&st, &device, &fm),
+	    Ok(client::DevInfoReply {
+		name: device.clone(),
+		units: Some(String::from("gpm")),
+		settable: true,
+		driver: String::from("sump"),
+	    })
+	);
     }
 }
 
