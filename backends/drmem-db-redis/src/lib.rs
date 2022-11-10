@@ -479,7 +479,6 @@ impl RedisStore {
             let mut db_con = db_con.clone();
             let hist_key = RedisStore::hist_key(&name);
             let name = name.clone();
-            let data = [("value", to_redis(&v))];
 
             Box::pin(async move {
                 if let Err(e) = RedisStore::report_new_value_cmd(&hist_key, &v)
