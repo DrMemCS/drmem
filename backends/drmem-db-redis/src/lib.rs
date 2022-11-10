@@ -323,26 +323,31 @@ impl RedisStore {
     }
 
     fn hash_to_info(
-	st: &SettingTable, name: &device::Name, map: &HashMap<String, String>
+        st: &SettingTable, name: &device::Name, hmap: &HashMap<String, String>,
     ) -> Result<client::DevInfoReply> {
         // Redis doesn't return an error if the key doesn't exist; it
         // returns an empty array. So if our HashMap is empty, the key
         // didn't exist.
 
-        if !map.is_empty() {
+        if !hmap.is_empty() {
             // If a "units" field exists and it's a string, we can
             // save it in the `units` field of the reply.
 
-            let units = map.get("units");
+            let units = hmap.get("units").map(String::clone);
+
+            // If a "driver" field exists and it's a string, save it
+            // in the "drivers" field of the reply.
+
+            let driver = hmap
+                .get("driver")
+                .map(String::clone)
+                .unwrap_or_else(|| String::from("*missing*"));
 
             Ok(client::DevInfoReply {
                 name: name.clone(),
-                units: units.map(String::clone),
-                settable: st.contains_key(&name),
-                driver: map
-                    .get("driver")
-                    .map(String::clone)
-                    .unwrap_or_else(|| String::from("*missing*")),
+                units,
+                settable: st.contains_key(name),
+                driver,
             })
         } else {
             Err(Error::NotFound)
