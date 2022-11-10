@@ -5,6 +5,7 @@ _A small, capable control system for the hobbyist_
 [![MIT licensed][mit-badge]][mit-url]
 [![Crates.io][crates-badge]][crates-url]
 [![Build Status][actions-badge]][actions-url]
+[![Twitter Follow][twitter-badge]][twitter-url]
 
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: https://github.com/tokio-rs/tokio/blob/master/LICENSE
@@ -12,6 +13,8 @@ _A small, capable control system for the hobbyist_
 [crates-url]: https://crates.io/crates/drmemd
 [actions-badge]: workflows/CI/badge.svg
 [actions-url]: actions?query=workflow%3ACI+branch%3Amain
+[twitter-badge]: https://img.shields.io/twitter/follow/DrMemCS?style=social
+[twitter-url]: https://twitter.com/DrMemCS
 
 ---
 
