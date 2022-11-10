@@ -11,8 +11,9 @@ use drmem_api::{
 use drmem_config::backend;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, error, info, warn};
+use tokio::sync::{broadcast, mpsc, oneshot};
+use tracing::{debug, error, info, info_span, warn};
+use tracing_futures::Instrument;
 
 type AioConnection = redis::aio::MultiplexedConnection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;
@@ -199,16 +200,20 @@ impl RedisStore {
             },
         };
 
-        let client = redis::Client::open(ci).unwrap();
+        async {
+            let client = redis::Client::open(ci).map_err(xlat_err)?;
 
-        client
-            .get_multiplexed_tokio_connection()
-            .await
-            .map_err(|e| {
-                error!("redis error: {}", &e);
+            client
+                .get_multiplexed_tokio_connection()
+                .await
+                .map_err(|e| {
+                    error!("redis error: {}", &e);
 
-                xlat_err(e)
-            })
+                    xlat_err(e)
+                })
+        }
+        .instrument(info_span!("init"))
+        .await
     }
 
     /// Builds a new backend context which interacts with `redis`.
