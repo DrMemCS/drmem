@@ -361,12 +361,12 @@ impl RedisStore {
         &mut self, name: device::Name,
     ) -> Result<client::DevInfoReply> {
         RedisStore::device_info_cmd(name.to_string().as_str())
-            .query_async::<AioConnection, HashMap<String, String>)>(
+            .query_async::<AioConnection, (HashMap<String, String>,)>(
                 &mut self.db_con,
             )
             .await
             .map_err(xlat_err)
-	    .and_then(|v| RedisStore::hash_to_info(&self.table, &name, &v))
+            .and_then(|(v,)| RedisStore::hash_to_info(&self.table, &name, &v))
     }
 
     // Obtains the last value reported for a device, or `None` if
@@ -549,7 +549,7 @@ impl Store for RedisStore {
         // Get a list of all the keys that match the pattern. For
         // Redis, these keys will have "#info" appended at the end.
 
-        let result: Vec<String> = RedisStore::match_pattern_cmd(pattern)
+        let (result,): (Vec<String>,) = RedisStore::match_pattern_cmd(pattern)
             .query_async(&mut self.db_con)
             .await
             .map_err(xlat_err)?;
