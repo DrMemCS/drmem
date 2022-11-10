@@ -7,7 +7,7 @@ use crate::{
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DevInfoReply {
     pub name: device::Name,
     pub units: Option<String>,
