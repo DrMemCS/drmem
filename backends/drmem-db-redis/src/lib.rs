@@ -268,10 +268,15 @@ impl RedisStore {
         redis::pipe()
             .atomic()
             .del(&hist_key)
+            .ignore()
             .xadd(&hist_key, "1", &[("value", &[1u8])])
+            .ignore()
             .xdel(&hist_key, &["1"])
+            .ignore()
             .del(&info_key)
+            .ignore()
             .hset_multiple(&info_key, &fields)
+            .ignore()
             .clone()
     }
 
