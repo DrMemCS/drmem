@@ -83,10 +83,13 @@ impl State {
                 ref pattern,
                 rpy_chan,
             } => {
-                let fut = self.backend.get_device_info(pattern);
-                let result = fut.await;
+                let result = self.backend.get_device_info(pattern).await;
 
-                if rpy_chan.send(result.unwrap()).is_err() {
+                if let Err(ref e) = result {
+                    info!("get_device_info() returned {}", e);
+                }
+
+                if rpy_chan.send(result).is_err() {
                     warn!("driver exited before a reply could be sent")
                 }
             }

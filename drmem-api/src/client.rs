@@ -19,7 +19,7 @@ pub struct DevInfoReply {
 pub enum Request {
     QueryDeviceInfo {
         pattern: Option<String>,
-        rpy_chan: oneshot::Sender<Vec<DevInfoReply>>,
+        rpy_chan: oneshot::Sender<Result<Vec<DevInfoReply>>>,
     },
 
     SetDevice {
@@ -117,6 +117,6 @@ impl RequestChan {
 
         // Return the reply from the request.
 
-        rx.await.map_err(|e| e.into())
+        rx.await.map_err(|e| e.into()).and_then(|v| v)
     }
 }
