@@ -581,10 +581,33 @@ impl Store for RedisStore {
         Ok(devices)
     }
 
+    // This method implements the set_device mutation in the GraphQL
+    // API.
+
     async fn set_device(
         &self, name: device::Name, value: Value,
     ) -> Result<Value> {
-        todo!()
+        if let Some(tx) = self.table.get(&name) {
+            let (tx_rpy, rx_rpy) = oneshot::channel();
+
+            // Send the request and return from the function with the
+            // reply. If any error occurs during communication, fall
+            // through to report it.
+
+            if let Ok(()) = tx.send((value, tx_rpy)).await {
+                if let Ok(reply) = rx_rpy.await {
+                    return reply;
+                }
+            }
+
+            // Some portion of the RPC failed. Return an error.
+
+            Err(Error::MissingPeer(
+                "cannot communicate with driver".to_string(),
+            ))
+        } else {
+            Err(Error::NotFound)
+        }
     }
 
     async fn monitor_device(
