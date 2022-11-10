@@ -482,9 +482,7 @@ impl RedisStore {
 
             Box::pin(async move {
                 if let Err(e) = RedisStore::report_new_value_cmd(&hist_key, &v)
-                    .query_async::<AioConnection, ()>(
-                        &mut db_con,
-                    )
+                    .query_async::<AioConnection, ()>(&mut db_con)
                     .await
                 {
                     warn!("couldn't save {} data to redis ... {}", &name, e)
@@ -984,51 +982,55 @@ $4\r\nEXEC\r\n"
 
     #[test]
     fn test_hash_to_info() {
-	let device = "path:junk".parse::<device::Name>().unwrap();
-	let mut st = HashMap::new();
-	let mut fm = HashMap::new();
+        let device = "path:junk".parse::<device::Name>().unwrap();
+        let mut st = HashMap::new();
+        let mut fm = HashMap::new();
 
-	assert_eq!(
-	    RedisStore::hash_to_info(&st, &"path:junk".parse::<device::Name>().unwrap(), &fm),
-	    Err(Error::NotFound)
-	);
+        assert_eq!(
+            RedisStore::hash_to_info(
+                &st,
+                &"path:junk".parse::<device::Name>().unwrap(),
+                &fm
+            ),
+            Err(Error::NotFound)
+        );
 
-	let _ = fm.insert("units".to_string(), "gpm".to_string());
+        let _ = fm.insert("units".to_string(), "gpm".to_string());
 
-	assert_eq!(
-	    RedisStore::hash_to_info(&st, &device, &fm),
-	    Ok(client::DevInfoReply {
-		name: device.clone(),
-		units: Some(String::from("gpm")),
-		settable: false,
-		driver: String::from("*missing*"),
-	    })
-	);
+        assert_eq!(
+            RedisStore::hash_to_info(&st, &device, &fm),
+            Ok(client::DevInfoReply {
+                name: device.clone(),
+                units: Some(String::from("gpm")),
+                settable: false,
+                driver: String::from("*missing*"),
+            })
+        );
 
 	let _ = fm.insert("driver".to_string(), "sump".to_string());
 
-	assert_eq!(
-	    RedisStore::hash_to_info(&st, &device, &fm),
-	    Ok(client::DevInfoReply {
-		name: device.clone(),
-		units: Some(String::from("gpm")),
-		settable: false,
-		driver: String::from("sump"),
-	    })
-	);
+        assert_eq!(
+            RedisStore::hash_to_info(&st, &device, &fm),
+            Ok(client::DevInfoReply {
+                name: device.clone(),
+                units: Some(String::from("gpm")),
+                settable: false,
+                driver: String::from("sump"),
+            })
+        );
 
-	let (tx, _) = mpsc::channel(10);
-	let _ = st.insert(device.clone(), tx);
+        let (tx, _) = mpsc::channel(10);
+        let _ = st.insert(device.clone(), tx);
 
-	assert_eq!(
-	    RedisStore::hash_to_info(&st, &device, &fm),
-	    Ok(client::DevInfoReply {
-		name: device.clone(),
-		units: Some(String::from("gpm")),
-		settable: true,
-		driver: String::from("sump"),
-	    })
-	);
+        assert_eq!(
+            RedisStore::hash_to_info(&st, &device, &fm),
+            Ok(client::DevInfoReply {
+                name: device.clone(),
+                units: Some(String::from("gpm")),
+                settable: true,
+                driver: String::from("sump"),
+            })
+        );
     }
 }
 
