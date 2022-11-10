@@ -283,15 +283,13 @@ impl RedisStore {
     // Builds the low-level command that returns the last value of the
     // device.
 
-    fn last_value_cmd(name: &str) -> redis::Pipeline {
+    fn last_value_cmd(name: &str) -> redis::Cmd {
         let name = RedisStore::hist_key(name);
 
-        redis::pipe()
-            .xrevrange_count(name, "+", "-", 1usize)
-            .clone()
+        redis::Cmd::xrevrange_count(name, "+", "-", 1usize).clone()
     }
 
-    fn match_pattern_cmd(pattern: &Option<String>) -> redis::Pipeline {
+    fn match_pattern_cmd(pattern: &Option<String>) -> redis::Cmd {
         // Take the pattern from the caller and append "#info" since
         // we only want to look at device information keys.
 
@@ -302,7 +300,7 @@ impl RedisStore {
 
         // Query REDIS to return all keys that match our pattern.
 
-        redis::pipe().keys(pattern).clone()
+        redis::Cmd::keys(pattern).clone()
     }
 
     // Builds the low-level command that returns the type of the
@@ -326,10 +324,10 @@ impl RedisStore {
     // Creates a redis command pipeline which returns the standard,
     // meta-data for a device.
 
-    fn device_info_cmd(name: &str) -> redis::Pipeline {
+    fn device_info_cmd(name: &str) -> redis::Cmd {
         let info_key = RedisStore::info_key(name);
 
-        redis::pipe().hgetall(&info_key).clone()
+        redis::Cmd::hgetall(&info_key).clone()
     }
 
     fn hash_to_info(
@@ -371,12 +369,12 @@ impl RedisStore {
         &mut self, name: device::Name,
     ) -> Result<client::DevInfoReply> {
         RedisStore::device_info_cmd(name.to_string().as_str())
-            .query_async::<AioConnection, (HashMap<String, String>,)>(
+            .query_async::<AioConnection, HashMap<String, String>>(
                 &mut self.db_con,
             )
             .await
             .map_err(xlat_err)
-            .and_then(|(v,)| RedisStore::hash_to_info(&self.table, &name, &v))
+            .and_then(|v| RedisStore::hash_to_info(&self.table, &name, &v))
     }
 
     // Obtains the last value reported for a device, or `None` if
@@ -472,10 +470,10 @@ impl RedisStore {
     // Generates a redis command pipeline that adds a value to a
     // device's history.
 
-    fn report_new_value_cmd(key: &str, val: &device::Value) -> redis::Pipeline {
+    fn report_new_value_cmd(key: &str, val: &device::Value) -> redis::Cmd {
         let data = [("value", to_redis(val))];
 
-        redis::pipe().xadd(key, "*", &data).clone()
+        redis::Cmd::xadd(key, "*", &data).clone()
     }
 
     // Creates a closure for a driver to report a device's changing
@@ -556,7 +554,7 @@ impl Store for RedisStore {
         // Get a list of all the keys that match the pattern. For
         // Redis, these keys will have "#info" appended at the end.
 
-        let (result,): (Vec<String>,) = RedisStore::match_pattern_cmd(pattern)
+        let result: Vec<String> = RedisStore::match_pattern_cmd(pattern)
             .query_async(&mut self.db_con)
             .await
             .map_err(xlat_err)?;
@@ -795,17 +793,24 @@ mod tests {
     #[test]
     fn test_pattern_cmd() {
         assert_eq!(
-            &RedisStore::match_pattern_cmd(&None).get_packed_pipeline(),
+            &RedisStore::match_pattern_cmd(&None).get_packed_command(),
             b"*2\r
 $4\r\nKEYS\r
 $6\r\n*#info\r\n"
         );
         assert_eq!(
             &RedisStore::match_pattern_cmd(&Some(String::from("device")))
-                .get_packed_pipeline(),
+                .get_packed_command(),
             b"*2\r
 $4\r\nKEYS\r
 $11\r\ndevice#info\r\n"
+        );
+        assert_eq!(
+            &RedisStore::match_pattern_cmd(&Some(String::from("*weather*")))
+                .get_packed_command(),
+            b"*2\r
+$4\r\nKEYS\r
+$14\r\n*weather*#info\r\n"
         );
     }
 
@@ -838,7 +843,7 @@ $11\r\ndevice#hist\r\n"
         let cmd = RedisStore::device_info_cmd("device");
 
         assert_eq!(
-            &cmd.get_packed_pipeline(),
+            &cmd.get_packed_command(),
             b"*2\r
 $7\r\nHGETALL\r
 $11\r\ndevice#info\r\n"
@@ -850,7 +855,7 @@ $11\r\ndevice#info\r\n"
         let pipe = RedisStore::last_value_cmd("device");
 
         assert_eq!(
-            &pipe.get_packed_pipeline(),
+            &pipe.get_packed_command(),
             b"*6\r
 $9\r\nXREVRANGE\r
 $11\r\ndevice#hist\r
@@ -865,7 +870,7 @@ $1\r\n1\r\n"
     fn test_report_value_cmd() {
         assert_eq!(
             &RedisStore::report_new_value_cmd("key", &(true.into()))
-                .get_packed_pipeline(),
+                .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
 $3\r\nkey\r
@@ -875,7 +880,7 @@ $2\r\nBT\r\n"
         );
         assert_eq!(
             &RedisStore::report_new_value_cmd("key", &(0x00010203i32.into()))
-                .get_packed_pipeline(),
+                .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
 $3\r\nkey\r
@@ -885,7 +890,7 @@ $5\r\nI\x00\x01\x02\x03\r\n"
         );
         assert_eq!(
             &RedisStore::report_new_value_cmd("key", &(0x12345678i32.into()))
-                .get_packed_pipeline(),
+                .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
 $3\r\nkey\r
@@ -895,7 +900,7 @@ $5\r\nI\x12\x34\x56\x78\r\n"
         );
         assert_eq!(
             &RedisStore::report_new_value_cmd("key", &(1.0.into()))
-                .get_packed_pipeline(),
+                .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
 $3\r\nkey\r
@@ -908,7 +913,7 @@ $9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
                 "key",
                 &(String::from("hello").into())
             )
-            .get_packed_pipeline(),
+            .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
 $3\r\nkey\r
