@@ -1007,7 +1007,7 @@ $4\r\nEXEC\r\n"
             })
         );
 
-	let _ = fm.insert("driver".to_string(), "sump".to_string());
+        let _ = fm.insert("driver".to_string(), "sump".to_string().into());
 
         assert_eq!(
             RedisStore::hash_to_info(&st, &device, &fm),
