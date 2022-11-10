@@ -12,8 +12,9 @@ use drmem_config::backend;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
+type AioConnection = redis::aio::MultiplexedConnection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;
 
 // Translates a Redis error into a DrMem error. The translation is
@@ -175,7 +176,7 @@ fn from_value(v: &redis::Value) -> Result<Value> {
 /// Defines a context that uses redis for the back-end storage.
 pub struct RedisStore {
     /// This connection is used for interacting with the database.
-    db_con: redis::aio::MultiplexedConnection,
+    db_con: AioConnection,
     table: SettingTable,
 }
 
@@ -184,7 +185,7 @@ impl RedisStore {
 
     async fn make_connection(
         cfg: &backend::Config, name: Option<String>, pword: Option<String>,
-    ) -> Result<redis::aio::MultiplexedConnection> {
+    ) -> Result<AioConnection> {
         use redis::{ConnectionAddr, ConnectionInfo, RedisConnectionInfo};
 
         let addr = cfg.get_addr();
@@ -203,7 +204,11 @@ impl RedisStore {
         client
             .get_multiplexed_tokio_connection()
             .await
-            .map_err(xlat_err)
+            .map_err(|e| {
+                error!("redis error: {}", &e);
+
+                xlat_err(e)
+            })
     }
 
     /// Builds a new backend context which interacts with `redis`.
@@ -351,7 +356,9 @@ impl RedisStore {
         &mut self, name: device::Name,
     ) -> Result<client::DevInfoReply> {
         RedisStore::device_info_cmd(name.to_string().as_str())
-            .query_async::<redis::aio::MultiplexedConnection, HashMap<String, String>>(&mut self.db_con)
+            .query_async::<AioConnection, HashMap<String, String>)>(
+                &mut self.db_con,
+            )
             .await
             .map_err(xlat_err)
 	    .and_then(|v| RedisStore::hash_to_info(&self.table, &name, &v))
@@ -471,7 +478,7 @@ impl RedisStore {
 
             Box::pin(async move {
                 if let Err(e) = RedisStore::report_new_value_cmd(&hist_key, &v)
-                    .query_async::<redis::aio::MultiplexedConnection, ()>(
+                    .query_async::<AioConnection, ()>(
                         &mut db_con,
                     )
                     .await
