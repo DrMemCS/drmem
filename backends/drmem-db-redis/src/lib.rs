@@ -381,24 +381,40 @@ impl RedisStore {
     // there is no history for it.
 
     async fn last_value(&mut self, name: &str) -> Option<Value> {
-        let result: Result<HashMap<String, HashMap<String, redis::Value>>> =
-            RedisStore::last_value_cmd(name)
-                .query_async(&mut self.db_con)
-                .await
-                .map_err(xlat_err);
+        let result: redis::RedisResult<
+            HashMap<String, HashMap<String, redis::Value>>,
+        > = RedisStore::last_value_cmd(name)
+            .query_async(&mut self.db_con)
+            .await;
 
-        if let Ok(v) = result {
-            if let Some((_k, m)) = v.iter().next() {
-                if let Some(val) = m.get("value") {
-                    return from_value(val).ok();
+        match result {
+            Ok(result) => {
+                if let Some((_k, m)) = result.iter().next() {
+                    if let Some(val) = m.get("value") {
+                        if let Ok(val) = from_value(val) {
+                            return Some(val);
+                        } else {
+                            error!(
+                                "last value for {} is in an unknown format",
+                                name
+                            );
+                        }
+                    } else {
+                        error!(
+                            "last value for {} doesn't have a \"value\" field",
+                            name
+                        );
+                    }
                 } else {
-                    debug!("no 'value' field for {}", name);
+                    warn!("no previous value of {} available", name);
                 }
-            } else {
-                debug!("empty results for {}", name);
             }
-        } else {
-            debug!("no previous value for {}", name);
+            Err(e) => {
+                error!(
+                    "redis error ({}) when getting last value of {}",
+                    e, name
+                );
+            }
         }
         None
     }
