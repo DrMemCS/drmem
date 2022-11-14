@@ -286,7 +286,7 @@ impl RedisStore {
     fn last_value_cmd(name: &str) -> redis::Cmd {
         let name = RedisStore::hist_key(name);
 
-        redis::Cmd::xrevrange_count(name, "+", "-", 1usize).clone()
+        redis::Cmd::xrevrange_count(name, "+", "-", 1usize)
     }
 
     fn match_pattern_cmd(pattern: &Option<String>) -> redis::Cmd {
@@ -300,7 +300,7 @@ impl RedisStore {
 
         // Query REDIS to return all keys that match our pattern.
 
-        redis::Cmd::keys(pattern).clone()
+        redis::Cmd::keys(pattern)
     }
 
     // Builds the low-level command that returns the type of the
@@ -327,7 +327,7 @@ impl RedisStore {
     fn device_info_cmd(name: &str) -> redis::Cmd {
         let info_key = RedisStore::info_key(name);
 
-        redis::Cmd::hgetall(&info_key).clone()
+        redis::Cmd::hgetall(&info_key)
     }
 
     fn hash_to_info(
@@ -473,7 +473,7 @@ impl RedisStore {
     fn report_new_value_cmd(key: &str, val: &device::Value) -> redis::Cmd {
         let data = [("value", to_redis(val))];
 
-        redis::Cmd::xadd(key, "*", &data).clone()
+        redis::Cmd::xadd(key, "*", &data)
     }
 
     // Creates a closure for a driver to report a device's changing
