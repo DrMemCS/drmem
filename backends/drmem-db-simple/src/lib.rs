@@ -23,7 +23,8 @@ use std::{
     time,
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tracing::error;
+use tokio_stream::{StreamExt, wrappers::{BroadcastStream, errors::BroadcastStreamRecvError}};
+use tracing::{error, warn};
 
 const CHAN_SIZE: usize = 20;
 
@@ -301,21 +302,50 @@ impl Store for SimpleStore {
     }
 
     // Handles a request to monitor a device's changing value. The
-    // caller must pass in the name of the device.
+    // caller must pass in the name of the device. Returns a stream
+    // which returns the last value reported for the device followed
+    // by all new updates.
 
     async fn monitor_device(
         &self, name: device::Name,
-    ) -> Result<broadcast::Receiver<device::Reading>> {
+    ) -> Result<device::DataStream<device::Reading>> {
         // Look-up the name of the device. If it doesn't exist, return
         // an error.
 
         if let Some(di) = self.0.get(&name) {
             // Lock the mutex which protects the broadcast channel and
-            // the device's last values. Return a new receiver handle
-            // for the broadcasts.
+            // the device's last values.
 
             if let Ok(guard) = di.reading.lock() {
-                Ok(guard.0.subscribe())
+		let chan = guard.0.subscribe();
+
+		// Convert the broadcast channel into a broadcast
+		// stream. Broadcast channels report when a client is
+		// too slow in reading values, by returning an error.
+		// The DrMem core doesn't know (or care) about these
+		// low-level details and doesn't expect them so we
+		// filter the errors, but report them to the log.
+
+		let strm = BroadcastStream::new(chan)
+		    .filter_map(move |entry| {
+			match entry {
+			    Ok(v) => Some(v),
+			    Err(BroadcastStreamRecvError::Lagged(count)) => {
+				warn!("missed {} readings of {}", count, &name);
+				None
+			    }
+			}
+		    });
+
+		// If there's a previous value, create a stream that
+		// returns it and starts reading the broadcast stream
+		// for further values (i.e. chain the two streams.)
+
+		if let Some(prev) = &guard.1 {
+		    Ok(Box::pin(tokio_stream::once(prev.clone()).chain(strm)))
+		} else {
+                    Ok(Box::pin(strm))
+		}
             } else {
                 Err(Error::OperationError)
             }

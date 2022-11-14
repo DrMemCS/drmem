@@ -10,9 +10,7 @@ use juniper::{
 };
 use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::{playground_filter, subscriptions::serve_graphql_ws};
-use std::{pin::Pin, result, sync::Arc};
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-use tokio_stream::Stream;
+use std::{result, sync::Arc};
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument;
 use warp::Filter;
@@ -391,37 +389,30 @@ struct Reading {
 
 struct Subscription;
 
-type DataStream =
-    Pin<Box<dyn Stream<Item = Result<Reading, FieldError>> + Send + Sync>>;
-
 impl Subscription {
     fn xlat(
         name: String,
     ) -> impl Fn(
-        Result<device::Reading, BroadcastStreamRecvError>,
+        device::Reading,
     ) -> FieldResult<Reading> {
-        move |e: Result<device::Reading, BroadcastStreamRecvError>| {
-            if let Ok(e) = e {
-                let mut reading = Reading {
-                    device: name.clone(),
-                    stamp: DateTime::<Utc>::from(e.ts),
-                    bool_value: None,
-                    int_value: None,
-                    float_value: None,
-                    string_value: None,
-                };
+        move |e: device::Reading| {
+            let mut reading = Reading {
+                device: name.clone(),
+                stamp: DateTime::<Utc>::from(e.ts),
+                bool_value: None,
+                int_value: None,
+                float_value: None,
+                string_value: None,
+            };
 
-                match e.value {
-                    device::Value::Bool(v) => reading.bool_value = Some(v),
-                    device::Value::Int(v) => reading.int_value = Some(v),
-                    device::Value::Flt(v) => reading.float_value = Some(v),
-                    device::Value::Str(v) => reading.string_value = Some(v),
-                }
-
-                Ok(reading)
-            } else {
-                Err(FieldError::new("bad channel", Value::null()))
+            match e.value {
+                device::Value::Bool(v) => reading.bool_value = Some(v),
+                device::Value::Int(v) => reading.int_value = Some(v),
+                device::Value::Flt(v) => reading.float_value = Some(v),
+                device::Value::Str(v) => reading.string_value = Some(v),
             }
+
+            Ok(reading)
         }
     }
 }
@@ -435,26 +426,23 @@ impl Subscription {
 			     reply each time a device's value changes.")]
     async fn monitor_device(
         #[graphql(context)] db: &ConfigDb, device: String,
-    ) -> DataStream {
-        use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+    ) -> device::DataStream<FieldResult<Reading>> {
+        use tokio_stream::StreamExt;
 
         if let Ok(name) = device.parse::<device::Name>() {
             info!("setting monitor for '{}'", &name);
 
             if let Ok(rx) = db.1.monitor_device(name.clone()).await {
-                let stream = StreamExt::map(
-                    BroadcastStream::new(rx),
-                    Subscription::xlat(device),
-                );
+                let stream = StreamExt::map(rx, Subscription::xlat(device));
 
-                Box::pin(stream) as DataStream
+                Box::pin(stream) as device::DataStream<FieldResult<Reading>>
             } else {
                 let stream = tokio_stream::once(Err(FieldError::new(
                     "device not found",
                     Value::null(),
                 )));
 
-                Box::pin(stream) as DataStream
+                Box::pin(stream) as device::DataStream<FieldResult<Reading>>
             }
         } else {
             let stream = tokio_stream::once(Err(FieldError::new(
@@ -462,7 +450,7 @@ impl Subscription {
                 Value::null(),
             )));
 
-            Box::pin(stream) as DataStream
+            Box::pin(stream) as device::DataStream<FieldResult<Reading>>
         }
     }
 }

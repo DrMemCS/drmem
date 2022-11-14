@@ -11,7 +11,7 @@ use drmem_api::{
 use drmem_config::backend;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
@@ -628,7 +628,7 @@ impl Store for RedisStore {
 
     async fn monitor_device(
         &self, name: device::Name,
-    ) -> Result<broadcast::Receiver<device::Reading>> {
+    ) -> Result<device::DataStream<device::Reading>> {
         todo!()
     }
 }
