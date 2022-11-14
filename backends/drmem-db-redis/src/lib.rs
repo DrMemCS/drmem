@@ -434,11 +434,11 @@ impl RedisStore {
             match result {
                 Ok(data_type) if data_type.as_str() == "hash" => (),
                 Ok(_) => {
-                    warn!("{} meta is of the wrong key type", name);
+                    error!("{} info is of the wrong key type", name);
                     return Err(Error::TypeError);
                 }
                 Err(_) => {
-                    warn!("{} meta doesn't exist", name);
+                    warn!("{} info doesn't exist", name);
                     return Err(Error::NotFound);
                 }
             }
@@ -455,7 +455,7 @@ impl RedisStore {
             match result {
                 Ok(data_type) if data_type.as_str() == "stream" => Ok(()),
                 Ok(_) => {
-                    warn!("{} history is of the wrong key type", name);
+                    error!("{} history is of the wrong key type", name);
                     Err(Error::TypeError)
                 }
                 Err(_) => {
