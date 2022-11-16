@@ -23,7 +23,10 @@ use std::{
     time,
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio_stream::{StreamExt, wrappers::{BroadcastStream, errors::BroadcastStreamRecvError}};
+use tokio_stream::{
+    wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
+    StreamExt,
+};
 use tracing::{error, warn};
 
 const CHAN_SIZE: usize = 20;
@@ -307,7 +310,7 @@ impl Store for SimpleStore {
     // by all new updates.
 
     async fn monitor_device(
-        &self, name: device::Name,
+        &mut self, name: device::Name,
     ) -> Result<device::DataStream<device::Reading>> {
         // Look-up the name of the device. If it doesn't exist, return
         // an error.
@@ -317,35 +320,35 @@ impl Store for SimpleStore {
             // the device's last values.
 
             if let Ok(guard) = di.reading.lock() {
-		let chan = guard.0.subscribe();
+                let chan = guard.0.subscribe();
 
-		// Convert the broadcast channel into a broadcast
-		// stream. Broadcast channels report when a client is
-		// too slow in reading values, by returning an error.
-		// The DrMem core doesn't know (or care) about these
-		// low-level details and doesn't expect them so we
-		// filter the errors, but report them to the log.
+                // Convert the broadcast channel into a broadcast
+                // stream. Broadcast channels report when a client is
+                // too slow in reading values, by returning an error.
+                // The DrMem core doesn't know (or care) about these
+                // low-level details and doesn't expect them so we
+                // filter the errors, but report them to the log.
 
-		let strm = BroadcastStream::new(chan)
-		    .filter_map(move |entry| {
-			match entry {
-			    Ok(v) => Some(v),
-			    Err(BroadcastStreamRecvError::Lagged(count)) => {
-				warn!("missed {} readings of {}", count, &name);
-				None
-			    }
-			}
-		    });
+                let strm =
+                    BroadcastStream::new(chan).filter_map(move |entry| {
+                        match entry {
+                            Ok(v) => Some(v),
+                            Err(BroadcastStreamRecvError::Lagged(count)) => {
+                                warn!("missed {} readings of {}", count, &name);
+                                None
+                            }
+                        }
+                    });
 
-		// If there's a previous value, create a stream that
-		// returns it and starts reading the broadcast stream
-		// for further values (i.e. chain the two streams.)
+                // If there's a previous value, create a stream that
+                // returns it and starts reading the broadcast stream
+                // for further values (i.e. chain the two streams.)
 
-		if let Some(prev) = &guard.1 {
-		    Ok(Box::pin(tokio_stream::once(prev.clone()).chain(strm)))
-		} else {
+                if let Some(prev) = &guard.1 {
+                    Ok(Box::pin(tokio_stream::once(prev.clone()).chain(strm)))
+                } else {
                     Ok(Box::pin(strm))
-		}
+                }
             } else {
                 Err(Error::OperationError)
             }

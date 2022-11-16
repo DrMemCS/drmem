@@ -53,7 +53,7 @@ pub trait Store {
     ) -> Result<types::device::Value>;
 
     async fn monitor_device(
-        &self, name: types::device::Name,
+        &mut self, name: types::device::Name,
     ) -> Result<types::device::DataStream<types::device::Reading>>;
 }
 

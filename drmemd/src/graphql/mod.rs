@@ -390,11 +390,7 @@ struct Reading {
 struct Subscription;
 
 impl Subscription {
-    fn xlat(
-        name: String,
-    ) -> impl Fn(
-        device::Reading,
-    ) -> FieldResult<Reading> {
+    fn xlat(name: String) -> impl Fn(device::Reading) -> FieldResult<Reading> {
         move |e: device::Reading| {
             let mut reading = Reading {
                 device: name.clone(),

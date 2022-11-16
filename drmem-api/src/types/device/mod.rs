@@ -11,8 +11,7 @@ pub struct Reading {
     pub value: Value,
 }
 
-pub type DataStream<T> =
-    Pin<Box<dyn Stream<Item = T> + Send + Sync>>;
+pub type DataStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
 
 mod name;
 pub use name::Base;
