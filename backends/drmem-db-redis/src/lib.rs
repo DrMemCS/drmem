@@ -273,22 +273,17 @@ impl ReadingStream {
     fn parse_reading(data: &redis::Value) -> Option<(String, device::Reading)> {
         let result: redis::RedisResult<((
             String,
-            Vec<(String, HashMap<String, redis::Value>)>,
+            ((String, HashMap<String, redis::Value>),),
         ),)> = redis::from_redis_value(data);
 
         match result {
-            Ok(((_, ref v),)) => {
-                if v.len() == 1 {
-                    let (ref new_id, ref rmap) = v[0];
-                    let reading = device::Reading {
-                        ts: id_to_ts(&new_id).ok()?,
-                        value: from_value(rmap.get("value")?).ok()?,
-                    };
+            Ok(((_, ((ref new_id, ref rmap),)),)) => {
+                let reading = device::Reading {
+                    ts: id_to_ts(&new_id).ok()?,
+                    value: from_value(rmap.get("value")?).ok()?,
+                };
 
-                    Some((new_id.to_string(), reading))
-                } else {
-                    None
-                }
+                Some((new_id.to_string(), reading))
             }
             Err(e) => {
                 error!("couldn't parse reading: {:?}", &e);
