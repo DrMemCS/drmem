@@ -858,6 +858,7 @@ impl Store for RedisStore {
         match Self::make_connection(&self.cfg, None, None).await {
             Ok(con) => {
                 let name = name.to_string();
+		let key = RedisStore::hist_key(&name);
 
                 // If there is a history for the device, create two
                 // streams: one which returns the last value, another
@@ -865,13 +866,13 @@ impl Store for RedisStore {
                 // together.
 
                 if let Some(prev) = self.last_value(&name).await {
-                    let strm2 = ReadingStream::new(con, &name, Some(prev.ts));
+                    let strm2 = ReadingStream::new(con, &key, Some(prev.ts));
                     let strm = stream::once(async { prev });
 
                     Ok(Box::pin(strm.chain(strm2))
                         as device::DataStream<device::Reading>)
                 } else {
-                    let strm2 = ReadingStream::new(con, &name, None);
+                    let strm2 = ReadingStream::new(con, &key, None);
                     let strm = stream::empty();
 
                     Ok(Box::pin(strm.chain(strm2))
