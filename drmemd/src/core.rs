@@ -90,7 +90,7 @@ impl State {
                 }
 
                 if rpy_chan.send(result).is_err() {
-                    warn!("driver exited before a reply could be sent")
+                    warn!("client exited before a reply could be sent")
                 }
             }
 
@@ -102,7 +102,7 @@ impl State {
                 let fut = self.backend.set_device(name, value);
 
                 if rpy_chan.send(fut.await).is_err() {
-                    warn!("driver exited before a reply could be sent")
+                    warn!("client exited before a reply could be sent")
                 }
             }
 
@@ -110,7 +110,7 @@ impl State {
                 let fut = self.backend.monitor_device(name);
 
                 if rpy_chan.send(fut.await).is_err() {
-                    warn!("driver exited before a reply could be sent")
+                    warn!("client exited before a reply could be sent")
                 }
             }
         }
