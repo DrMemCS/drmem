@@ -22,7 +22,8 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
-type AioConnection = redis::aio::MultiplexedConnection;
+type AioMplexConnection = redis::aio::MultiplexedConnection;
+type AioConnection = redis::aio::Connection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;
 
 // Translates a Redis error into a DrMem error. The translation is
@@ -219,10 +220,9 @@ fn id_to_ts(id: &str) -> Result<time::SystemTime> {
 }
 
 type ReadFuture =
-    Pin<Box<dyn Future<Output = redis::RedisResult<redis::Value>> + Send>>;
+    Pin<Box<dyn Future<Output = (AioConnection, redis::RedisResult<redis::Value>)> + Send>>;
 
 struct ReadingStream {
-    con: AioConnection,
     key: String,
     id: String,
     fut: ReadFuture,
@@ -254,9 +254,17 @@ impl ReadingStream {
         redis::Cmd::xread_options(&[key], &[id], &opts)
     }
 
+    // Create a future that returns the next device reading from a
+    // redis stream (or times out trying.) The connection is
+    // "threaded" through the future (i.e. it takes ownership and
+    // returns it with the result.) This is necessary because an
+    // AioConnection isn't clonable.
+
     fn mk_fut(mut con: AioConnection, key: String, id: String) -> ReadFuture {
         Box::pin(async move {
-            Self::read_next_cmd(&key, &id).query_async(&mut con).await
+            let result = Self::read_next_cmd(&key, &id).query_async(&mut con).await;
+
+	    (con, result)
         })
     }
 
@@ -265,9 +273,9 @@ impl ReadingStream {
     ) -> Self {
         let key = key.to_string();
         let id = id.map(Self::ts_to_id).unwrap_or_else(|| String::from("$"));
-        let fut = Self::mk_fut(con.clone(), key.clone(), id.clone());
+        let fut = Self::mk_fut(con, key.clone(), id.clone());
 
-        ReadingStream { con, key, id, fut }
+        ReadingStream { key, id, fut }
     }
 
     fn parse_reading(data: &redis::Value) -> Option<(String, device::Reading)> {
@@ -314,9 +322,9 @@ impl Stream for ReadingStream {
                 // If redis returned an error, report it and close the
                 // stream.
 
-                let result = match result {
-                    Ok(v) => v,
-                    Err(e) => {
+                let (con, result) = match result {
+                    (con, Ok(v)) => (con, v),
+                    (_, Err(e)) => {
                         warn!("read error -- {}", &e);
                         break Poll::Ready(None);
                     }
@@ -334,7 +342,7 @@ impl Stream for ReadingStream {
 
                         self.id = id.clone();
                         self.fut = Self::mk_fut(
-                            self.con.clone(),
+                            con,
                             self.key.clone(),
                             self.id.clone(),
                         );
@@ -346,13 +354,11 @@ impl Stream for ReadingStream {
                         break Poll::Ready(None);
                     }
                 } else {
-                    info!("redis polling timeout ... retrying");
-
                     // The read command timed out. Re-issue the future
                     // using the same `id` and loop.
 
                     self.fut = Self::mk_fut(
-                        self.con.clone(),
+                        con,
                         self.key.clone(),
                         self.id.clone(),
                     );
@@ -367,17 +373,15 @@ impl Stream for ReadingStream {
 /// Defines a context that uses redis for the back-end storage.
 pub struct RedisStore {
     /// This connection is used for interacting with the database.
-    db_con: AioConnection,
+    db_con: AioMplexConnection,
     table: SettingTable,
     cfg: backend::Config,
 }
 
 impl RedisStore {
-    // Creates a connection to redis.
-
-    async fn make_connection(
-        cfg: &backend::Config, name: Option<String>, pword: Option<String>,
-    ) -> Result<AioConnection> {
+    fn make_client(
+	cfg: &backend::Config, name: &Option<String>, pword: &Option<String>
+    ) -> Result<redis::Client> {
         use redis::{ConnectionAddr, ConnectionInfo, RedisConnectionInfo};
 
         let addr = cfg.get_addr();
@@ -387,20 +391,49 @@ impl RedisStore {
             redis: RedisConnectionInfo {
                 db: cfg.get_dbn(),
                 username: name.clone(),
-                password: pword,
+                password: pword.clone(),
             },
         };
 
+        info!(
+            "addr: {}, db {}, user {}",
+            &addr,
+            cfg.get_dbn(),
+            name.as_ref().map(String::as_str).unwrap_or("none")
+        );
+
+        redis::Client::open(ci).map_err(xlat_err)
+    }
+
+    // Creates a single-user connection to redis.
+
+    async fn make_connection(
+        cfg: &backend::Config, name: Option<String>, pword: Option<String>,
+    ) -> Result<AioConnection> {
+	let client = Self::make_client(cfg, &name, &pword)?;
+
         async {
-            info!(
-                "addr: {}, db {}, user {}",
-                &addr,
-                cfg.get_dbn(),
-                name.unwrap_or_else(|| "none".to_string())
-            );
+            client
+                .get_tokio_connection()
+                .await
+                .map_err(|e| {
+                    error!("redis error: {}", &e);
 
-            let client = redis::Client::open(ci).map_err(xlat_err)?;
+                    xlat_err(e)
+                })
+        }
+        .instrument(info_span!("init"))
+        .await
+    }
 
+    // Creates a mulitplexed connection to redis.
+
+    async fn make_mplex_connection(
+        cfg: &backend::Config, name: Option<String>, pword: Option<String>,
+    ) -> Result<AioMplexConnection> {
+	let client = Self::make_client(cfg, &name, &pword)?;
+
+        async {
             client
                 .get_multiplexed_tokio_connection()
                 .await
@@ -422,7 +455,7 @@ impl RedisStore {
     pub async fn new(
         cfg: &backend::Config, name: Option<String>, pword: Option<String>,
     ) -> Result<Self> {
-        let db_con = Self::make_connection(cfg, name, pword).await?;
+        let db_con = Self::make_mplex_connection(cfg, name, pword).await?;
 
         Ok(RedisStore {
             db_con,
@@ -577,7 +610,7 @@ impl RedisStore {
         &mut self, name: device::Name,
     ) -> Result<client::DevInfoReply> {
         Self::device_info_cmd(name.to_string().as_str())
-            .query_async::<AioConnection, HashMap<String, String>>(
+            .query_async::<AioMplexConnection, HashMap<String, String>>(
                 &mut self.db_con,
             )
             .await
@@ -729,7 +762,7 @@ impl RedisStore {
 
             Box::pin(async move {
                 if let Err(e) = Self::report_new_value_cmd(&hist_key, &v)
-                    .query_async::<AioConnection, ()>(&mut db_con)
+                    .query_async::<AioMplexConnection, ()>(&mut db_con)
                     .await
                 {
                     warn!("couldn't save {} data to redis ... {}", &name, e)
