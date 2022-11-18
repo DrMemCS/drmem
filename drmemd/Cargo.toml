@@ -81,23 +81,6 @@ optional = true
 version = "0.3"
 optional = true
 
-# This section defines the optional dependencies for the 'gRPC'
-# feature.
-
-[dependencies.tonic]
-version = "0.6"
-features = ["prost", "compression"]
-optional = true
-
-[dependencies.prost]
-version = "0.9"
-optional = true
-
-[build-dependencies.tonic-build]
-version = "0.6"
-features = ["compression"]
-optional = true
-
 # These are features that can be enabled for drmem.
 
 [features]
@@ -111,7 +94,6 @@ redis-backend = ["drmem-db-redis"]
 # Client APIs
 
 graphql = ["chrono", "warp", "juniper", "juniper_graphql_ws", "juniper_warp"]
-grpc = ["tonic", "prost", "tonic-build"]
 
 # Drivers
 
