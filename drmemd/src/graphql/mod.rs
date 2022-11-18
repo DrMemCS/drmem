@@ -501,7 +501,7 @@ pub fn server(
                         info!("subscription context canceled")
                     }
                     .instrument(info_span!(
-                        "ws",
+                        "graphql",
                         client = addr
                             .map(|v| v.to_string())
                             .unwrap_or_else(|| String::from("*unknown*"))
@@ -525,5 +525,7 @@ pub fn server(
         .or(warp::path("subscriptions").and(sub_filter))
         .or(warp::path("graphql").and(graphql_filter));
 
-    warp::serve(filter).run(([0, 0, 0, 0], 3000))
+    warp::serve(filter)
+        .run(([0, 0, 0, 0], 3000))
+        .instrument(info_span!("http"))
 }

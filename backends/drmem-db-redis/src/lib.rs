@@ -397,13 +397,6 @@ impl RedisStore {
             },
         };
 
-        info!(
-            "addr: {}, db {}, user {}",
-            &addr,
-            cfg.get_dbn(),
-            name.as_ref().map(String::as_str).unwrap_or("none")
-        );
-
         redis::Client::open(ci).map_err(xlat_err)
     }
 
@@ -412,20 +405,17 @@ impl RedisStore {
     async fn make_connection(
         cfg: &backend::Config, name: Option<String>, pword: Option<String>,
     ) -> Result<AioConnection> {
-	let client = Self::make_client(cfg, &name, &pword)?;
+        let client = Self::make_client(cfg, &name, &pword)?;
 
-        async {
-            client
-                .get_tokio_connection()
-                .await
-                .map_err(|e| {
-                    error!("redis error: {}", &e);
+        info!("creating new connection");
 
-                    xlat_err(e)
-                })
-        }
-        .instrument(info_span!("init"))
-        .await
+        client
+            .get_tokio_connection()
+            .await
+            .map_err(|e| {
+                error!("redis error: {}", &e);
+                xlat_err(e)
+            })
     }
 
     // Creates a mulitplexed connection to redis.
@@ -433,20 +423,17 @@ impl RedisStore {
     async fn make_mplex_connection(
         cfg: &backend::Config, name: Option<String>, pword: Option<String>,
     ) -> Result<AioMplexConnection> {
-	let client = Self::make_client(cfg, &name, &pword)?;
+        let client = Self::make_client(cfg, &name, &pword)?;
 
-        async {
-            client
-                .get_multiplexed_tokio_connection()
-                .await
-                .map_err(|e| {
-                    error!("redis error: {}", &e);
+        info!("creating new, shared connection");
 
-                    xlat_err(e)
-                })
-        }
-        .instrument(info_span!("init"))
-        .await
+        client
+            .get_multiplexed_tokio_connection()
+            .await
+            .map_err(|e| {
+                error!("redis error: {}", &e);
+                xlat_err(e)
+            })
     }
 
     /// Builds a new backend context which interacts with `redis`.
@@ -925,7 +912,11 @@ impl Store for RedisStore {
 }
 
 pub async fn open(cfg: &backend::Config) -> Result<impl Store> {
-    RedisStore::new(cfg, None, None).await
+    RedisStore::new(cfg, None, None)
+        .instrument(
+            info_span!("redis-db", addr=?cfg.get_addr(), db=cfg.get_dbn()),
+        )
+        .await
 }
 
 // This is the test module to make sure the redis backend works
