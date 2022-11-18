@@ -8,12 +8,6 @@ use tracing::{error, trace, warn};
 mod core;
 mod driver;
 
-// If the user specifies the 'grpc' feature, then pull in the module
-// that defines the gRPC server.
-
-#[cfg(feature = "grpc")]
-mod grpc;
-
 // If the user specifies the 'graphql' feature, then pull in the module
 // that defines the GraphQL server.
 
