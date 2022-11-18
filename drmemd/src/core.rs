@@ -83,11 +83,14 @@ impl State {
                 ref pattern,
                 rpy_chan,
             } => {
-                let fut = self.backend.get_device_info(pattern);
-                let result = fut.await;
+                let result = self.backend.get_device_info(pattern).await;
 
-                if rpy_chan.send(result.unwrap()).is_err() {
-                    warn!("driver exited before a reply could be sent")
+                if let Err(ref e) = result {
+                    info!("get_device_info() returned {}", e);
+                }
+
+                if rpy_chan.send(result).is_err() {
+                    warn!("client exited before a reply could be sent")
                 }
             }
 
@@ -97,10 +100,9 @@ impl State {
                 rpy_chan,
             } => {
                 let fut = self.backend.set_device(name, value);
-                let result = fut.await;
 
-                if rpy_chan.send(result).is_err() {
-                    warn!("driver exited before a reply could be sent")
+                if rpy_chan.send(fut.await).is_err() {
+                    warn!("client exited before a reply could be sent")
                 }
             }
 
@@ -108,7 +110,7 @@ impl State {
                 let fut = self.backend.monitor_device(name);
 
                 if rpy_chan.send(fut.await).is_err() {
-                    warn!("driver exited before a reply could be sent")
+                    warn!("client exited before a reply could be sent")
                 }
             }
         }
@@ -126,9 +128,15 @@ impl State {
             #[rustfmt::skip]
             tokio::select! {
 		Some(req) = rx_drv_req.recv() =>
-                    self.handle_driver_request(req).await,
+                    self
+		    .handle_driver_request(req)
+		    .instrument(info_span!("driver_req"))
+		    .await,
 		Some(req) = rx_clnt_req.recv() =>
-                    self.handle_client_request(req).await,
+                    self
+		    .handle_client_request(req)
+		    .instrument(info_span!("client_req"))
+		    .await,
 		else => break
             }
         }
@@ -166,7 +174,7 @@ pub async fn start(
 
             state
                 .run(rx_drv_req, rx_clnt_req)
-                .instrument(info_span!("driver_manager"))
+                .instrument(info_span!("drmem"))
                 .await
         }),
     ))

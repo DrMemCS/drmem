@@ -10,9 +10,7 @@ use juniper::{
 };
 use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::{playground_filter, subscriptions::serve_graphql_ws};
-use std::{pin::Pin, result, sync::Arc};
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-use tokio_stream::Stream;
+use std::{result, sync::Arc};
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument;
 use warp::Filter;
@@ -125,6 +123,9 @@ impl DeviceInfo {
 struct Config;
 
 impl Config {
+    // These helper functions are used by a call to `Iterator::filter`
+    // to select a set of devices.
+
     fn is_settable(e: &&client::DevInfoReply) -> bool {
         e.settable
     }
@@ -300,7 +301,7 @@ impl Control {
 
 #[juniper::graphql_object(
     context = ConfigDb,
-    description = "These queries allow devices to be modified."
+    description = "This group of queries perform modifications to devices."
 )]
 impl Control {
     #[graphql(description = "Submits `value` to be applied to the device \
@@ -388,37 +389,26 @@ struct Reading {
 
 struct Subscription;
 
-type DataStream =
-    Pin<Box<dyn Stream<Item = Result<Reading, FieldError>> + Send + Sync>>;
-
 impl Subscription {
-    fn xlat(
-        name: String,
-    ) -> impl Fn(
-        Result<device::Reading, BroadcastStreamRecvError>,
-    ) -> FieldResult<Reading> {
-        move |e: Result<device::Reading, BroadcastStreamRecvError>| {
-            if let Ok(e) = e {
-                let mut reading = Reading {
-                    device: name.clone(),
-                    stamp: DateTime::<Utc>::from(e.ts),
-                    bool_value: None,
-                    int_value: None,
-                    float_value: None,
-                    string_value: None,
-                };
+    fn xlat(name: String) -> impl Fn(device::Reading) -> FieldResult<Reading> {
+        move |e: device::Reading| {
+            let mut reading = Reading {
+                device: name.clone(),
+                stamp: DateTime::<Utc>::from(e.ts),
+                bool_value: None,
+                int_value: None,
+                float_value: None,
+                string_value: None,
+            };
 
-                match e.value {
-                    device::Value::Bool(v) => reading.bool_value = Some(v),
-                    device::Value::Int(v) => reading.int_value = Some(v),
-                    device::Value::Flt(v) => reading.float_value = Some(v),
-                    device::Value::Str(v) => reading.string_value = Some(v),
-                }
-
-                Ok(reading)
-            } else {
-                Err(FieldError::new("bad channel", Value::null()))
+            match e.value {
+                device::Value::Bool(v) => reading.bool_value = Some(v),
+                device::Value::Int(v) => reading.int_value = Some(v),
+                device::Value::Flt(v) => reading.float_value = Some(v),
+                device::Value::Str(v) => reading.string_value = Some(v),
             }
+
+            Ok(reading)
         }
     }
 }
@@ -432,26 +422,23 @@ impl Subscription {
 			     reply each time a device's value changes.")]
     async fn monitor_device(
         #[graphql(context)] db: &ConfigDb, device: String,
-    ) -> DataStream {
-        use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+    ) -> device::DataStream<FieldResult<Reading>> {
+        use tokio_stream::StreamExt;
 
         if let Ok(name) = device.parse::<device::Name>() {
             info!("setting monitor for '{}'", &name);
 
             if let Ok(rx) = db.1.monitor_device(name.clone()).await {
-                let stream = StreamExt::map(
-                    BroadcastStream::new(rx),
-                    Subscription::xlat(device),
-                );
+                let stream = StreamExt::map(rx, Subscription::xlat(device));
 
-                Box::pin(stream) as DataStream
+                Box::pin(stream) as device::DataStream<FieldResult<Reading>>
             } else {
                 let stream = tokio_stream::once(Err(FieldError::new(
                     "device not found",
                     Value::null(),
                 )));
 
-                Box::pin(stream) as DataStream
+                Box::pin(stream) as device::DataStream<FieldResult<Reading>>
             }
         } else {
             let stream = tokio_stream::once(Err(FieldError::new(
@@ -459,7 +446,7 @@ impl Subscription {
                 Value::null(),
             )));
 
-            Box::pin(stream) as DataStream
+            Box::pin(stream) as device::DataStream<FieldResult<Reading>>
         }
     }
 }
@@ -514,7 +501,7 @@ pub fn server(
                         info!("subscription context canceled")
                     }
                     .instrument(info_span!(
-                        "ws",
+                        "graphql",
                         client = addr
                             .map(|v| v.to_string())
                             .unwrap_or_else(|| String::from("*unknown*"))
@@ -538,5 +525,7 @@ pub fn server(
         .or(warp::path("subscriptions").and(sub_filter))
         .or(warp::path("graphql").and(graphql_filter));
 
-    warp::serve(filter).run(([0, 0, 0, 0], 3000))
+    warp::serve(filter)
+        .run(([0, 0, 0, 0], 3000))
+        .instrument(info_span!("http"))
 }

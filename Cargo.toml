@@ -3,10 +3,9 @@ members = [
     "drmem-api",
     "drmem-config",
     "drivers/*",
-    "backends/drmem-db-simple",
+    "backends/*",
     "drmemd"
 ]
-exclude = ["backends/drmem-db-redis"]
 
 # Profiles used by all binaries and packages.
 

@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use tokio::sync::broadcast;
 
 pub mod types;
 
@@ -46,7 +45,7 @@ pub trait Store {
     )>;
 
     async fn get_device_info(
-        &self, pattern: &Option<String>,
+        &mut self, pattern: &Option<String>,
     ) -> Result<Vec<client::DevInfoReply>>;
 
     async fn set_device(
@@ -54,8 +53,8 @@ pub trait Store {
     ) -> Result<types::device::Value>;
 
     async fn monitor_device(
-        &self, name: types::device::Name,
-    ) -> Result<broadcast::Receiver<types::device::Reading>>;
+        &mut self, name: types::device::Name,
+    ) -> Result<types::device::DataStream<types::device::Reading>>;
 }
 
 pub mod client;

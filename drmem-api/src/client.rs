@@ -5,8 +5,9 @@ use crate::{
     types::{device, Error},
     Result,
 };
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct DevInfoReply {
     pub name: device::Name,
     pub units: Option<String>,
@@ -18,7 +19,7 @@ pub struct DevInfoReply {
 pub enum Request {
     QueryDeviceInfo {
         pattern: Option<String>,
-        rpy_chan: oneshot::Sender<Vec<DevInfoReply>>,
+        rpy_chan: oneshot::Sender<Result<Vec<DevInfoReply>>>,
     },
 
     SetDevice {
@@ -29,7 +30,7 @@ pub enum Request {
 
     MonitorDevice {
         name: device::Name,
-        rpy_chan: oneshot::Sender<Result<broadcast::Receiver<device::Reading>>>,
+        rpy_chan: oneshot::Sender<Result<device::DataStream<device::Reading>>>,
     },
 }
 
@@ -52,7 +53,7 @@ impl RequestChan {
 
     pub async fn monitor_device(
         &self, name: device::Name,
-    ) -> Result<broadcast::Receiver<device::Reading>> {
+    ) -> Result<device::DataStream<device::Reading>> {
         // Create our reply channel and build the request message.
 
         let (tx, rx) = oneshot::channel();
@@ -116,6 +117,6 @@ impl RequestChan {
 
         // Return the reply from the request.
 
-        rx.await.map_err(|e| e.into())
+        rx.await.map_err(|e| e.into()).and_then(|v| v)
     }
 }

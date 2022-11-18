@@ -11,8 +11,7 @@ impl Segment {
     // device name.
 
     fn is_valid_char((idx, ch): (usize, char), len: usize) -> bool {
-	ch.is_alphanumeric()
-            || (ch == '-' && idx != 0 && idx != len - 1)
+        ch.is_alphanumeric() || (ch == '-' && idx != 0 && idx != len - 1)
     }
 
     // Creates a `Segment`, if the strings contains a well-formed
@@ -222,7 +221,7 @@ mod tests {
         assert!(" ".parse::<Segment>().is_err());
         assert_eq!(format!("{}", "a-b".parse::<Segment>().unwrap()), "a-b");
 
-	// Check non-ASCII entries.
+        // Check non-ASCII entries.
 
         assert!("٣".parse::<Segment>().is_ok());
         assert!("温度".parse::<Segment>().is_ok());
@@ -238,10 +237,15 @@ mod tests {
     #[test]
     fn test_path() {
         assert!("".parse::<Path>().is_err());
+        assert!("basement:🤖".parse::<Path>().is_err());
+
         assert_eq!(format!("{}", "a-b".parse::<Path>().unwrap()), "a-b");
         assert_eq!(format!("{}", "a:b".parse::<Path>().unwrap()), "a:b");
         assert_eq!(format!("{}", "a:b:c".parse::<Path>().unwrap()), "a:b:c");
-        assert_eq!(format!("{}", "家:温度".parse::<Path>().unwrap()), "家:温度");
+        assert_eq!(
+            format!("{}", "家:温度".parse::<Path>().unwrap()),
+            "家:温度"
+        );
     }
 
     #[test]
