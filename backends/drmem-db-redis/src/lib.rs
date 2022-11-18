@@ -219,8 +219,14 @@ fn id_to_ts(id: &str) -> Result<time::SystemTime> {
     Err(Error::InvArgument("unknown timestamp format"))
 }
 
-type ReadFuture =
-    Pin<Box<dyn Future<Output = (AioConnection, redis::RedisResult<redis::Value>)> + Send>>;
+type ReadFuture = Pin<
+    Box<
+        dyn Future<Output = (AioConnection, redis::RedisResult<redis::Value>)>
+            + Send,
+    >,
+>;
+
+type ReadingResult = ((String, ((String, HashMap<String, redis::Value>),)),);
 
 struct ReadingStream {
     key: String,
@@ -262,9 +268,10 @@ impl ReadingStream {
 
     fn mk_fut(mut con: AioConnection, key: String, id: String) -> ReadFuture {
         Box::pin(async move {
-            let result = Self::read_next_cmd(&key, &id).query_async(&mut con).await;
+            let result =
+                Self::read_next_cmd(&key, &id).query_async(&mut con).await;
 
-	    (con, result)
+            (con, result)
         })
     }
 
@@ -279,15 +286,13 @@ impl ReadingStream {
     }
 
     fn parse_reading(data: &redis::Value) -> Option<(String, device::Reading)> {
-        let result: redis::RedisResult<((
-            String,
-            ((String, HashMap<String, redis::Value>),),
-        ),)> = redis::from_redis_value(data);
+        let result: redis::RedisResult<ReadingResult> =
+            redis::from_redis_value(data);
 
         match result {
             Ok(((_, ((ref new_id, ref rmap),)),)) => {
                 let reading = device::Reading {
-                    ts: id_to_ts(&new_id).ok()?,
+                    ts: id_to_ts(new_id).ok()?,
                     value: from_value(rmap.get("value")?).ok()?,
                 };
 
@@ -340,7 +345,7 @@ impl Stream for ReadingStream {
                         // This future is no longer good. Create a new
                         // future using the updated `id`.
 
-                        self.id = id.clone();
+                        self.id = id;
                         self.fut = Self::mk_fut(
                             con,
                             self.key.clone(),
@@ -357,11 +362,8 @@ impl Stream for ReadingStream {
                     // The read command timed out. Re-issue the future
                     // using the same `id` and loop.
 
-                    self.fut = Self::mk_fut(
-                        con,
-                        self.key.clone(),
-                        self.id.clone(),
-                    );
+                    self.fut =
+                        Self::mk_fut(con, self.key.clone(), self.id.clone());
                 }
             } else {
                 break Poll::Pending;
@@ -380,7 +382,7 @@ pub struct RedisStore {
 
 impl RedisStore {
     fn make_client(
-	cfg: &backend::Config, name: &Option<String>, pword: &Option<String>
+        cfg: &backend::Config, name: &Option<String>, pword: &Option<String>,
     ) -> Result<redis::Client> {
         use redis::{ConnectionAddr, ConnectionInfo, RedisConnectionInfo};
 
@@ -891,7 +893,7 @@ impl Store for RedisStore {
         match Self::make_connection(&self.cfg, None, None).await {
             Ok(con) => {
                 let name = name.to_string();
-		let key = RedisStore::hist_key(&name);
+                let key = RedisStore::hist_key(&name);
 
                 // If there is a history for the device, create two
                 // streams: one which returns the last value, another
