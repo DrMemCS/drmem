@@ -409,13 +409,10 @@ impl RedisStore {
 
         info!("creating new connection");
 
-        client
-            .get_tokio_connection()
-            .await
-            .map_err(|e| {
-                error!("redis error: {}", &e);
-                xlat_err(e)
-            })
+        client.get_tokio_connection().await.map_err(|e| {
+            error!("redis error: {}", &e);
+            xlat_err(e)
+        })
     }
 
     // Creates a mulitplexed connection to redis.
@@ -558,6 +555,15 @@ impl RedisStore {
         let data = [("value", to_redis(val))];
 
         redis::Cmd::xadd(key, "*", &data)
+    }
+
+    fn report_bounded_new_value_cmd(
+        key: &str, val: &device::Value, mh: usize,
+    ) -> redis::Cmd {
+        let opts = redis::streams::StreamMaxlen::Approx(mh);
+        let data = [("value", to_redis(val))];
+
+        redis::Cmd::xadd_maxlen(key, opts, "*", &data)
     }
 
     fn hash_to_info(
@@ -740,24 +746,44 @@ impl RedisStore {
     // Creates a closure for a driver to report a device's changing
     // values.
 
-    fn mk_report_func(&self, name: &str) -> ReportReading {
+    fn mk_report_func(
+        &self, name: &str, max_history: &Option<usize>,
+    ) -> ReportReading {
         let db_con = self.db_con.clone();
         let name = String::from(name);
 
-        Box::new(move |v| {
-            let mut db_con = db_con.clone();
-            let hist_key = Self::hist_key(&name);
-            let name = name.clone();
+        if let Some(mh) = *max_history {
+            Box::new(move |v| {
+                let mut db_con = db_con.clone();
+                let hist_key = Self::hist_key(&name);
+                let name = name.clone();
 
-            Box::pin(async move {
-                if let Err(e) = Self::report_new_value_cmd(&hist_key, &v)
-                    .query_async::<AioMplexConnection, ()>(&mut db_con)
-                    .await
-                {
-                    warn!("couldn't save {} data to redis ... {}", &name, e)
-                }
+                Box::pin(async move {
+                    if let Err(e) =
+                        Self::report_bounded_new_value_cmd(&hist_key, &v, mh)
+                            .query_async::<AioMplexConnection, ()>(&mut db_con)
+                            .await
+                    {
+                        warn!("couldn't save {} data to redis ... {}", &name, e)
+                    }
+                })
             })
-        })
+        } else {
+            Box::new(move |v| {
+                let mut db_con = db_con.clone();
+                let hist_key = Self::hist_key(&name);
+                let name = name.clone();
+
+                Box::pin(async move {
+                    if let Err(e) = Self::report_new_value_cmd(&hist_key, &v)
+                        .query_async::<AioMplexConnection, ()>(&mut db_con)
+                        .await
+                    {
+                        warn!("couldn't save {} data to redis ... {}", &name, e)
+                    }
+                })
+            })
+        }
     }
 }
 
@@ -767,7 +793,7 @@ impl Store for RedisStore {
 
     async fn register_read_only_device(
         &mut self, driver_name: &str, name: &device::Name,
-        units: &Option<String>,
+        units: &Option<String>, max_history: &Option<usize>,
     ) -> Result<(ReportReading, Option<Value>)> {
         let name = name.to_string();
 
@@ -779,14 +805,14 @@ impl Store for RedisStore {
             info!("'{}' has been successfully created", &name);
         }
         Ok((
-            self.mk_report_func(&name),
+            self.mk_report_func(&name, max_history),
             self.last_value(&name).await.map(|v| v.value),
         ))
     }
 
     async fn register_read_write_device(
         &mut self, driver_name: &str, name: &device::Name,
-        units: &Option<String>,
+        units: &Option<String>, max_history: &Option<usize>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
         let sname = name.to_string();
 
@@ -802,7 +828,7 @@ impl Store for RedisStore {
         let _ = self.table.insert(name.clone(), tx);
 
         Ok((
-            self.mk_report_func(&sname),
+            self.mk_report_func(&sname, max_history),
             rx,
             self.last_value(&sname).await.map(|v| v.value),
         ))
@@ -1334,6 +1360,84 @@ $9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
             b"*5\r
 $4\r\nXADD\r
 $3\r\nkey\r
+$1\r\n*\r
+$5\r\nvalue\r
+$10\r\nS\x00\x00\x00\x05hello\r\n"
+        );
+
+        assert_eq!(
+            &RedisStore::report_bounded_new_value_cmd("key", &(true.into()), 0)
+                .get_packed_command(),
+            b"*8\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$6\r\nMAXLEN\r
+$1\r\n~\r
+$1\r\n0\r
+$1\r\n*\r
+$5\r\nvalue\r
+$2\r\nBT\r\n"
+        );
+        assert_eq!(
+            &RedisStore::report_bounded_new_value_cmd(
+                "key",
+                &(0x00010203i32.into()),
+                1
+            )
+            .get_packed_command(),
+            b"*8\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$6\r\nMAXLEN\r
+$1\r\n~\r
+$1\r\n1\r
+$1\r\n*\r
+$5\r\nvalue\r
+$5\r\nI\x00\x01\x02\x03\r\n"
+        );
+        assert_eq!(
+            &RedisStore::report_bounded_new_value_cmd(
+                "key",
+                &(0x12345678i32.into()),
+                2
+            )
+            .get_packed_command(),
+            b"*8\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$6\r\nMAXLEN\r
+$1\r\n~\r
+$1\r\n2\r
+$1\r\n*\r
+$5\r\nvalue\r
+$5\r\nI\x12\x34\x56\x78\r\n"
+        );
+        assert_eq!(
+            &RedisStore::report_bounded_new_value_cmd("key", &(1.0.into()), 3)
+                .get_packed_command(),
+            b"*8\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$6\r\nMAXLEN\r
+$1\r\n~\r
+$1\r\n3\r
+$1\r\n*\r
+$5\r\nvalue\r
+$9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
+        );
+        assert_eq!(
+            &RedisStore::report_bounded_new_value_cmd(
+                "key",
+                &(String::from("hello").into()),
+                4
+            )
+            .get_packed_command(),
+            b"*8\r
+$4\r\nXADD\r
+$3\r\nkey\r
+$6\r\nMAXLEN\r
+$1\r\n~\r
+$1\r\n4\r
 $1\r\n*\r
 $5\r\nvalue\r
 $10\r\nS\x00\x00\x00\x05hello\r\n"

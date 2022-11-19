@@ -15,6 +15,7 @@ mod drv_timer;
 type Factory = fn(
     DriverConfig,
     RequestChan,
+    Option<usize>,
 ) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send>>;
 
 pub struct Driver {
@@ -36,13 +37,13 @@ impl Driver {
 
     async fn manage_instance(
         name: String, factory: Factory, cfg: DriverConfig,
-        req_chan: RequestChan,
+        req_chan: RequestChan, max_history: Option<usize>,
     ) -> Result<Infallible> {
         loop {
             // Create a Future that creates an instance of the driver
             // using the provided configuration parameters.
 
-            let result = factory(cfg.clone(), req_chan.clone())
+            let result = factory(cfg.clone(), req_chan.clone(), max_history)
                 .instrument(info_span!("init"));
 
             match result.await {
@@ -90,15 +91,22 @@ impl Driver {
     // parameters.
 
     pub fn run_instance(
-        &self, name: String, cfg: DriverConfig, req_chan: RequestChan,
+        &self, name: String, max_history: Option<usize>, cfg: DriverConfig,
+        req_chan: RequestChan,
     ) -> JoinHandle<Result<Infallible>> {
         // Spawn a task that supervises the driver task. If the driver
         // panics, this supervisor "catches" it and reports a problem.
         // It then restarts the driver.
 
         tokio::spawn(
-            Driver::manage_instance(name.clone(), self.factory, cfg, req_chan)
-                .instrument(info_span!("mngr", drvr = name.as_str())),
+            Driver::manage_instance(
+                name.clone(),
+                self.factory,
+                cfg,
+                req_chan,
+                max_history,
+            )
+            .instrument(info_span!("mngr", drvr = name.as_str())),
         )
     }
 }

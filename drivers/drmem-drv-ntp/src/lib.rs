@@ -357,6 +357,7 @@ impl Instance {
 impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
+        max_history: Option<usize>,
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
@@ -371,16 +372,32 @@ impl driver::API for Instance {
                     // Define the devices managed by this driver.
 
                     let (d_state, _) = core
-                        .add_ro_device("state".parse::<Base>()?, None)
+                        .add_ro_device(
+                            "state".parse::<Base>()?,
+                            None,
+                            max_history,
+                        )
                         .await?;
                     let (d_source, _) = core
-                        .add_ro_device("source".parse::<Base>()?, None)
+                        .add_ro_device(
+                            "source".parse::<Base>()?,
+                            None,
+                            max_history,
+                        )
                         .await?;
                     let (d_offset, _) = core
-                        .add_ro_device("offset".parse::<Base>()?, Some("ms"))
+                        .add_ro_device(
+                            "offset".parse::<Base>()?,
+                            Some("ms"),
+                            max_history,
+                        )
                         .await?;
                     let (d_delay, _) = core
-                        .add_ro_device("delay".parse::<Base>()?, Some("ms"))
+                        .add_ro_device(
+                            "delay".parse::<Base>()?,
+                            Some("ms"),
+                            max_history,
+                        )
                         .await?;
 
                     return Ok(Box::new(Instance {

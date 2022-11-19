@@ -110,6 +110,7 @@ async fn run() -> Result<()> {
                     RequestChan::new(&driver_name, &driver.prefix, &tx_drv_req);
                 let instance = driver_info.run_instance(
                     driver_name,
+                    driver.max_history,
                     driver.cfg.unwrap_or_default().clone(),
                     chan,
                 );

@@ -243,6 +243,7 @@ impl Instance {
 impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
+        max_history: Option<usize>,
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
@@ -259,15 +260,21 @@ impl driver::API for Instance {
 
             // Define the devices managed by this driver.
 
-            let (d_service, _) =
-                core.add_ro_device("service".parse::<Base>()?, None).await?;
-            let (d_state, _) =
-                core.add_ro_device("state".parse::<Base>()?, None).await?;
+            let (d_service, _) = core
+                .add_ro_device("service".parse::<Base>()?, None, max_history)
+                .await?;
+            let (d_state, _) = core
+                .add_ro_device("state".parse::<Base>()?, None, max_history)
+                .await?;
             let (d_duty, _) = core
-                .add_ro_device("duty".parse::<Base>()?, Some("%"))
+                .add_ro_device("duty".parse::<Base>()?, Some("%"), max_history)
                 .await?;
             let (d_inflow, _) = core
-                .add_ro_device("in-flow".parse::<Base>()?, Some("gpm"))
+                .add_ro_device(
+                    "in-flow".parse::<Base>()?,
+                    Some("gpm"),
+                    max_history,
+                )
                 .await?;
 
             Ok(Box::new(Instance {

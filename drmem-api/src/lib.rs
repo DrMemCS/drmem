@@ -21,7 +21,7 @@ pub trait Store {
 
     async fn register_read_only_device(
         &mut self, driver: &str, name: &types::device::Name,
-        units: &Option<String>,
+        units: &Option<String>, max_history: &Option<usize>,
     ) -> Result<(driver::ReportReading, Option<types::device::Value>)>;
 
     /// Used by a driver to define a read-write device. `name`
@@ -37,7 +37,7 @@ pub trait Store {
 
     async fn register_read_write_device(
         &mut self, driver: &str, name: &types::device::Name,
-        units: &Option<String>,
+        units: &Option<String>, max_history: &Option<usize>,
     ) -> Result<(
         driver::ReportReading,
         driver::RxDeviceSetting,

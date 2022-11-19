@@ -143,6 +143,7 @@ impl Instance {
 impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
+        max_history: Option<usize>,
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
@@ -154,10 +155,12 @@ impl driver::API for Instance {
 
             // Define the devices managed by this driver.
 
-            let (d_output, _) =
-                core.add_ro_device("output".parse::<Base>()?, None).await?;
-            let (d_enable, rx_set, _) =
-                core.add_rw_device("enable".parse::<Base>()?, None).await?;
+            let (d_output, _) = core
+                .add_ro_device("output".parse::<Base>()?, None, max_history)
+                .await?;
+            let (d_enable, rx_set, _) = core
+                .add_rw_device("enable".parse::<Base>()?, None, max_history)
+                .await?;
 
             Ok(Box::new(Instance::new(
                 enabled, millis, d_output, d_enable, rx_set,

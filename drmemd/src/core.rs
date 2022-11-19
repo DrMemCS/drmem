@@ -41,11 +41,17 @@ impl State {
                 ref driver_name,
                 ref dev_name,
                 ref dev_units,
+                ref max_history,
                 rpy_chan,
             } => {
                 let result = self
                     .backend
-                    .register_read_only_device(driver_name, dev_name, dev_units)
+                    .register_read_only_device(
+                        driver_name,
+                        dev_name,
+                        dev_units,
+                        max_history,
+                    )
                     .await
                     .map_err(|_| Error::DeviceDefined(format!("{}", dev_name)));
 
@@ -58,6 +64,7 @@ impl State {
                 ref driver_name,
                 ref dev_name,
                 ref dev_units,
+                ref max_history,
                 rpy_chan,
             } => {
                 let result = self
@@ -66,6 +73,7 @@ impl State {
                         driver_name,
                         dev_name,
                         dev_units,
+                        max_history,
                     )
                     .await
                     .map_err(|_| Error::DeviceDefined(format!("{}", dev_name)));

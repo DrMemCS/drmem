@@ -278,6 +278,7 @@ impl Instance {
 impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
+        max_history: Option<usize>,
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
@@ -308,13 +309,25 @@ impl driver::API for Instance {
                     debug!("registering devices");
 
                     let (d_dewpt, _) = core
-                        .add_ro_device("dewpoint".parse::<Base>()?, temp_unit)
+                        .add_ro_device(
+                            "dewpoint".parse::<Base>()?,
+                            temp_unit,
+                            max_history,
+                        )
                         .await?;
                     let (d_htidx, _) = core
-                        .add_ro_device("heat-index".parse::<Base>()?, temp_unit)
+                        .add_ro_device(
+                            "heat-index".parse::<Base>()?,
+                            temp_unit,
+                            max_history,
+                        )
                         .await?;
                     let (d_humidity, _) = core
-                        .add_ro_device("humidity".parse::<Base>()?, Some("%"))
+                        .add_ro_device(
+                            "humidity".parse::<Base>()?,
+                            Some("%"),
+                            max_history,
+                        )
                         .await?;
                     let (d_prate, _) = core
                         .add_ro_device(
@@ -324,6 +337,7 @@ impl driver::API for Instance {
                             } else {
                                 "mm/hr"
                             }),
+                            max_history,
                         )
                         .await?;
 
@@ -335,6 +349,7 @@ impl driver::API for Instance {
                             } else {
                                 "mm"
                             }),
+                            max_history,
                         )
                         .await?;
 
@@ -346,6 +361,7 @@ impl driver::API for Instance {
                             } else {
                                 "hPa"
                             }),
+                            max_history,
                         )
                         .await?;
 
@@ -353,32 +369,52 @@ impl driver::API for Instance {
                         .add_ro_device(
                             "solar-rad".parse::<Base>()?,
                             Some("W/m²"),
+                            max_history,
                         )
                         .await?;
                     let (d_state, _) = core
-                        .add_ro_device("state".parse::<Base>()?, None)
+                        .add_ro_device(
+                            "state".parse::<Base>()?,
+                            None,
+                            max_history,
+                        )
                         .await?;
                     let (d_temp, _) = core
                         .add_ro_device(
                             "temperature".parse::<Base>()?,
                             temp_unit,
+                            max_history,
                         )
                         .await?;
-                    let (d_uv, _) =
-                        core.add_ro_device("uv".parse::<Base>()?, None).await?;
+                    let (d_uv, _) = core
+                        .add_ro_device("uv".parse::<Base>()?, None, max_history)
+                        .await?;
                     let (d_wndchl, _) = core
-                        .add_ro_device("wind-chill".parse::<Base>()?, temp_unit)
+                        .add_ro_device(
+                            "wind-chill".parse::<Base>()?,
+                            temp_unit,
+                            max_history,
+                        )
                         .await?;
                     let (d_wnddir, _) = core
-                        .add_ro_device("wind-dir".parse::<Base>()?, Some("°"))
+                        .add_ro_device(
+                            "wind-dir".parse::<Base>()?,
+                            Some("°"),
+                            max_history,
+                        )
                         .await?;
                     let (d_wndgst, _) = core
-                        .add_ro_device("wind-gust".parse::<Base>()?, speed_unit)
+                        .add_ro_device(
+                            "wind-gust".parse::<Base>()?,
+                            speed_unit,
+                            max_history,
+                        )
                         .await?;
                     let (d_wndspd, _) = core
                         .add_ro_device(
                             "wind-speed".parse::<Base>()?,
                             speed_unit,
+                            max_history,
                         )
                         .await?;
 
