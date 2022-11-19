@@ -103,6 +103,7 @@ impl Default for Config {
 pub struct Driver {
     pub name: String,
     pub prefix: Path,
+    pub max_history: Option<usize>,
     pub cfg: Option<DriverConfig>,
 }
 
@@ -273,13 +274,15 @@ mod tests {
         // Verify that the [[driver]] section needs an entry to be
         // defined..
 
-        if let Ok(_) = toml::from_str::<Config>(
-            r#"
+        assert!(
+            toml::from_str::<Config>(
+                r#"
 [[driver]]
 "#,
-        ) {
-            panic!("TOML parser accepted missing [[driver]] section")
-        }
+            )
+            .is_err(),
+            "TOML parser accepted empty [[driver]] section"
+        );
 
         // Verify a missing [backend] results in a properly defined
         // default.
@@ -412,6 +415,82 @@ prefix = "null"
 "#,
         ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[driver]]
+name = "none"
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[driver]] section with missing prefix"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[driver]]
+prefix = "null"
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[driver]] section with missing name"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[driver]]
+name = "none"
+prefix = "null"
+max_history = false
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[driver]] section with bad max_history"
+        );
+
+        match toml::from_str::<Config>(
+            r#"
+[[driver]]
+name = "none"
+prefix = "null"
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.driver.len(), 1);
+
+                assert_eq!(cfg.driver[0].name, "none");
+                assert_eq!(
+                    cfg.driver[0].prefix,
+                    "null".parse::<Path>().unwrap()
+                );
+                assert_eq!(cfg.driver[0].max_history, None);
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+[[driver]]
+name = "none"
+prefix = "null"
+max_history = 10000
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.driver.len(), 1);
+
+                assert_eq!(cfg.driver[0].name, "none");
+                assert_eq!(
+                    cfg.driver[0].prefix,
+                    "null".parse::<Path>().unwrap()
+                );
+                assert_eq!(cfg.driver[0].max_history, Some(10000));
+            }
             Err(e) => panic!("TOML parse error: {}", e),
         }
     }

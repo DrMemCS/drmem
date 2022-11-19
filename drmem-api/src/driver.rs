@@ -35,6 +35,7 @@ pub enum Request {
         driver_name: String,
         dev_name: Name,
         dev_units: Option<String>,
+        max_history: Option<usize>,
         rpy_chan: oneshot::Sender<Result<(ReportReading, Option<Value>)>>,
     },
 
@@ -47,6 +48,7 @@ pub enum Request {
         driver_name: String,
         dev_name: Name,
         dev_units: Option<String>,
+        max_history: Option<usize>,
         rpy_chan: oneshot::Sender<
             Result<(ReportReading, RxDeviceSetting, Option<Value>)>,
         >,
@@ -94,7 +96,7 @@ impl RequestChan {
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
     pub async fn add_ro_device(
-        &self, name: Base, units: Option<&str>,
+        &self, name: Base, units: Option<&str>, max_history: Option<usize>,
     ) -> super::Result<(ReportReading, Option<Value>)> {
         // Create a location for the reply.
 
@@ -108,6 +110,7 @@ impl RequestChan {
                 driver_name: self.driver_name.clone(),
                 dev_name: Name::build(self.prefix.clone(), name),
                 dev_units: units.map(String::from),
+                max_history,
                 rpy_chan: tx,
             })
             .await;
@@ -151,7 +154,7 @@ impl RequestChan {
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device(
-        &self, name: Base, units: Option<&str>,
+        &self, name: Base, units: Option<&str>, max_history: Option<usize>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
@@ -160,6 +163,7 @@ impl RequestChan {
                 driver_name: self.driver_name.clone(),
                 dev_name: Name::build(self.prefix.clone(), name),
                 dev_units: units.map(String::from),
+                max_history,
                 rpy_chan: tx,
             })
             .await;
@@ -204,9 +208,20 @@ pub trait API: Send {
     /// framework, which is usually done in this method. As other
     /// request types are added, they can be used while the driver is
     /// running.
+    ///
+    /// `max_history` is specified in the configuration file. It is a
+    /// hint as to the maximum number of data point to save for each
+    /// of the devices created by this driver. A backend can choose to
+    /// interpret this in its own way. For instance, the simple
+    /// backend can only ever save one data point. Redis will take
+    /// this as a hint and will choose the most efficient way to prune
+    /// the history. That means, if more than the limit is present,
+    /// redis won't prune the history to less than the limit. However
+    /// there may be more than the limit -- it just won't grow without
+    /// bound.
 
     fn create_instance(
-        cfg: DriverConfig, drc: RequestChan,
+        cfg: DriverConfig, drc: RequestChan, max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send + 'static>>
     where
         Self: Sized;

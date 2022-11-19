@@ -137,6 +137,7 @@ impl Store for SimpleStore {
 
     async fn register_read_only_device(
         &mut self, driver: &str, name: &device::Name, units: &Option<String>,
+        _max_history: &Option<usize>,
     ) -> Result<(ReportReading, Option<device::Value>)> {
         // Check to see if the device name already exists.
 
@@ -191,6 +192,7 @@ impl Store for SimpleStore {
 
     async fn register_read_write_device(
         &mut self, driver: &str, name: &device::Name, units: &Option<String>,
+        _max_history: &Option<usize>,
     ) -> Result<(ReportReading, RxDeviceSetting, Option<device::Value>)> {
         // Check to see if the device name already exists.
 
@@ -380,8 +382,9 @@ mod tests {
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
 
-        if let Ok((f, None)) =
-            db.register_read_only_device("test", &name, &None).await
+        if let Ok((f, None)) = db
+            .register_read_only_device("test", &name, &None, &None)
+            .await
         {
             // Make sure the device was defined and the setting
             // channel is `None`.
@@ -407,15 +410,16 @@ mod tests {
             // driver name results in an error.
 
             assert!(db
-                .register_read_only_device("test2", &name, &None)
+                .register_read_only_device("test2", &name, &None, &None)
                 .await
                 .is_err());
 
             // Assert that re-registering this device with the same
             // driver name is successful.
 
-            if let Ok((f, Some(device::Value::Int(1)))) =
-                db.register_read_only_device("test", &name, &None).await
+            if let Ok((f, Some(device::Value::Int(1)))) = db
+                .register_read_only_device("test", &name, &None, &None)
+                .await
             {
                 // Also, verify that the device update channel wasn't
                 // disrupted by sending a value and receiving it from
@@ -439,8 +443,9 @@ mod tests {
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
 
-        if let Ok((f, mut set_chan, None)) =
-            db.register_read_write_device("test", &name, &None).await
+        if let Ok((f, mut set_chan, None)) = db
+            .register_read_write_device("test", &name, &None, &None)
+            .await
         {
             // Make sure the device was defined and a setting channel
             // has been created.
@@ -487,7 +492,7 @@ mod tests {
             // didn't affect the setting channel.
 
             assert!(db
-                .register_read_only_device("test2", &name, &None)
+                .register_read_only_device("test2", &name, &None, &None)
                 .await
                 .is_err());
             assert_eq!(
@@ -498,8 +503,9 @@ mod tests {
             // Assert that re-registering this device with the same
             // driver name is successful.
 
-            if let Ok((f, _, Some(device::Value::Int(1)))) =
-                db.register_read_write_device("test", &name, &None).await
+            if let Ok((f, _, Some(device::Value::Int(1)))) = db
+                .register_read_write_device("test", &name, &None, &None)
+                .await
             {
                 assert_eq!(
                     Err(TryRecvError::Disconnected),
