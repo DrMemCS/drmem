@@ -282,6 +282,21 @@ impl driver::API for Instance {
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
+        let dewpoint_name = "dewpoint".parse::<Base>().unwrap();
+        let heat_index_name = "heat-index".parse::<Base>().unwrap();
+        let humidity_name = "humidity".parse::<Base>().unwrap();
+        let precip_rate_name = "precip-rate".parse::<Base>().unwrap();
+        let precip_total_name = "precip-total".parse::<Base>().unwrap();
+        let pressure_name = "pressure".parse::<Base>().unwrap();
+        let solar_rad_name = "solar-rad".parse::<Base>().unwrap();
+        let state_name = "state".parse::<Base>().unwrap();
+        let temperature_name = "temperature".parse::<Base>().unwrap();
+        let uv_name = "uv".parse::<Base>().unwrap();
+        let wind_chill_name = "wind-chill".parse::<Base>().unwrap();
+        let wind_dir_name = "wind-dir".parse::<Base>().unwrap();
+        let wind_gust_name = "wind-gust".parse::<Base>().unwrap();
+        let wind_speed_name = "wind-speed".parse::<Base>().unwrap();
+
         let fut = async move {
             match wu::create_client(Duration::from_secs(5)) {
                 Ok(mut con) => {
@@ -309,29 +324,17 @@ impl driver::API for Instance {
                     debug!("registering devices");
 
                     let (d_dewpt, _) = core
-                        .add_ro_device(
-                            "dewpoint".parse::<Base>()?,
-                            temp_unit,
-                            max_history,
-                        )
+                        .add_ro_device(dewpoint_name, temp_unit, max_history)
                         .await?;
                     let (d_htidx, _) = core
-                        .add_ro_device(
-                            "heat-index".parse::<Base>()?,
-                            temp_unit,
-                            max_history,
-                        )
+                        .add_ro_device(heat_index_name, temp_unit, max_history)
                         .await?;
                     let (d_humidity, _) = core
-                        .add_ro_device(
-                            "humidity".parse::<Base>()?,
-                            Some("%"),
-                            max_history,
-                        )
+                        .add_ro_device(humidity_name, Some("%"), max_history)
                         .await?;
                     let (d_prate, _) = core
                         .add_ro_device(
-                            "precip-rate".parse::<Base>()?,
+                            precip_rate_name,
                             Some(if let wu::Unit::English = units {
                                 "in/hr"
                             } else {
@@ -343,7 +346,7 @@ impl driver::API for Instance {
 
                     let (d_ptotal, precip_int) = core
                         .add_ro_device(
-                            "precip-total".parse::<Base>()?,
+                            precip_total_name,
                             Some(if let wu::Unit::English = units {
                                 "in"
                             } else {
@@ -355,7 +358,7 @@ impl driver::API for Instance {
 
                     let (d_pressure, _) = core
                         .add_ro_device(
-                            "pressure".parse::<Base>()?,
+                            pressure_name,
                             Some(if let wu::Unit::English = units {
                                 "inHg"
                             } else {
@@ -367,55 +370,30 @@ impl driver::API for Instance {
 
                     let (d_solrad, _) = core
                         .add_ro_device(
-                            "solar-rad".parse::<Base>()?,
+                            solar_rad_name,
                             Some("W/m²"),
                             max_history,
                         )
                         .await?;
                     let (d_state, _) = core
-                        .add_ro_device(
-                            "state".parse::<Base>()?,
-                            None,
-                            max_history,
-                        )
+                        .add_ro_device(state_name, None, max_history)
                         .await?;
                     let (d_temp, _) = core
-                        .add_ro_device(
-                            "temperature".parse::<Base>()?,
-                            temp_unit,
-                            max_history,
-                        )
+                        .add_ro_device(temperature_name, temp_unit, max_history)
                         .await?;
-                    let (d_uv, _) = core
-                        .add_ro_device("uv".parse::<Base>()?, None, max_history)
-                        .await?;
+                    let (d_uv, _) =
+                        core.add_ro_device(uv_name, None, max_history).await?;
                     let (d_wndchl, _) = core
-                        .add_ro_device(
-                            "wind-chill".parse::<Base>()?,
-                            temp_unit,
-                            max_history,
-                        )
+                        .add_ro_device(wind_chill_name, temp_unit, max_history)
                         .await?;
                     let (d_wnddir, _) = core
-                        .add_ro_device(
-                            "wind-dir".parse::<Base>()?,
-                            Some("°"),
-                            max_history,
-                        )
+                        .add_ro_device(wind_dir_name, Some("°"), max_history)
                         .await?;
                     let (d_wndgst, _) = core
-                        .add_ro_device(
-                            "wind-gust".parse::<Base>()?,
-                            speed_unit,
-                            max_history,
-                        )
+                        .add_ro_device(wind_gust_name, speed_unit, max_history)
                         .await?;
                     let (d_wndspd, _) = core
-                        .add_ro_device(
-                            "wind-speed".parse::<Base>()?,
-                            speed_unit,
-                            max_history,
-                        )
+                        .add_ro_device(wind_speed_name, speed_unit, max_history)
                         .await?;
 
                     // If a previous value of the integration is

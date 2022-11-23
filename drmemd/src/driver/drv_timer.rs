@@ -182,6 +182,9 @@ impl driver::API for Instance {
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
+        let output_name = "output".parse::<Base>().unwrap();
+        let enable_name = "enable".parse::<Base>().unwrap();
+
         let fut = async move {
             // Validate the configuration.
 
@@ -189,13 +192,21 @@ impl driver::API for Instance {
             let level = Instance::get_cfg_level(&cfg)?;
 
             // Define the devices managed by this driver.
+            //
+            // This first device is the output of the timer. When it's
+            // not timing, this device's value with be `!level`. While
+            // it's timing, `level`.
 
-            let (d_output, _) = core
-                .add_ro_device("output".parse::<Base>()?, None, max_history)
-                .await?;
-            let (d_enable, rx_set, _) = core
-                .add_rw_device("enable".parse::<Base>()?, None, max_history)
-                .await?;
+            let (d_output, _) =
+                core.add_ro_device(output_name, None, max_history).await?;
+
+            // This device is settable. Any time it transitions from
+            // `false` to `true`, the timer begins a timing cycle.
+
+            let (d_enable, rx_set, _) =
+                core.add_rw_device(enable_name, None, max_history).await?;
+
+            // Build and return the future.
 
             Ok(Box::new(Instance::new(
                 level, millis, d_output, d_enable, rx_set,

@@ -247,6 +247,11 @@ impl driver::API for Instance {
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
+        let service_name = "service".parse::<Base>().unwrap();
+        let state_name = "state".parse::<Base>().unwrap();
+        let duty_name = "duty".parse::<Base>().unwrap();
+        let in_flow_name = "in-flow".parse::<Base>().unwrap();
+
         let fut = async move {
             // Validate the configuration.
 
@@ -260,21 +265,15 @@ impl driver::API for Instance {
 
             // Define the devices managed by this driver.
 
-            let (d_service, _) = core
-                .add_ro_device("service".parse::<Base>()?, None, max_history)
-                .await?;
-            let (d_state, _) = core
-                .add_ro_device("state".parse::<Base>()?, None, max_history)
-                .await?;
+            let (d_service, _) =
+                core.add_ro_device(service_name, None, max_history).await?;
+            let (d_state, _) =
+                core.add_ro_device(state_name, None, max_history).await?;
             let (d_duty, _) = core
-                .add_ro_device("duty".parse::<Base>()?, Some("%"), max_history)
+                .add_ro_device(duty_name, Some("%"), max_history)
                 .await?;
             let (d_inflow, _) = core
-                .add_ro_device(
-                    "in-flow".parse::<Base>()?,
-                    Some("gpm"),
-                    max_history,
-                )
+                .add_ro_device(in_flow_name, Some("gpm"), max_history)
                 .await?;
 
             Ok(Box::new(Instance {
