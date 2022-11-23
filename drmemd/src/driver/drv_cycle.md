@@ -12,8 +12,8 @@ This driver uses the following configuration parameters.
 
 - `millis` is the number of milliseconds for the full cycle.
 - `enabled` is an optional boolean value which, when `true`, will set
-  the `enable` device's initial value to `true`. If not provided, it
-  defaults to `false`.
+  the `enable` device's initial value to `true` and, therefore, start
+  the cycling at boot time. If not provided, it defaults to `false`.
 
 ## Devices
 
@@ -27,8 +27,7 @@ The driver creates these devices:
 Every value sent to the `enable` device will be reported -- even
 duplicates. This allows one to, if using the redis backend, see the
 history of settings made to the device. The `output` device, however,
-only reports state changes. So if a client sends multiple `true`
-values, the `output` would only report the state changes.
+only reports state changes.
 
 ## History
 
