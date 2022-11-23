@@ -4,10 +4,9 @@ version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 description = "Main process of the DrMem control system"
-homepage = "https://github.com/rneswold/drmem"
-repository = "https://github.com/rneswold/drmem"
-license = "BSD-3-Clause"
-publish = false
+homepage = "https://github.com/DrMemCS/drmem"
+repository = "https://github.com/DrMemCS/drmem"
+license = "MIT"
 categories = ["embedded", "hardware-support"]
 keywords = ["control-system", "automation"]
 
