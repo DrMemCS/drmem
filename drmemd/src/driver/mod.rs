@@ -9,6 +9,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, field, info, info_span};
 use tracing_futures::Instrument;
 
+mod drv_memory;
 mod drv_cycle;
 mod drv_timer;
 
@@ -117,6 +118,19 @@ pub struct DriverDb(Arc<HashMap<&'static str, Driver>>);
 impl DriverDb {
     pub fn create() -> DriverDb {
         let mut table = HashMap::new();
+
+        {
+            use drv_memory::Instance;
+
+            table.insert(
+                Instance::NAME,
+                Driver::create(
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    <Instance as API>::create_instance,
+                ),
+            );
+        }
 
         {
             use drv_timer::Instance;
