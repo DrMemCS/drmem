@@ -3,6 +3,11 @@ name = "drmem-drv-weather-wu"
 version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
+homepage = "https://github.com/DrMemCS/drmem"
+repository = "https://github.com/DrMemCS/drmem"
+license = "MIT"
+categories = ["embedded"]
+keywords = ["control-system", "automation"]
 
 [dependencies]
 toml = "0.5.6"
