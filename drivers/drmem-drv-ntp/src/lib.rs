@@ -361,6 +361,15 @@ impl driver::API for Instance {
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
+        // It's safe to use `.unwrap()` for these names because, in a
+        // fully-tested, released version of this driver, we would
+        // have seen and fixed any panics.
+
+        let state_name = "state".parse::<Base>().unwrap();
+        let source_name = "source".parse::<Base>().unwrap();
+        let offset_name = "offset".parse::<Base>().unwrap();
+        let delay_name = "delay".parse::<Base>().unwrap();
+
         let fut = async move {
             // Validate the configuration.
 
@@ -372,32 +381,16 @@ impl driver::API for Instance {
                     // Define the devices managed by this driver.
 
                     let (d_state, _) = core
-                        .add_ro_device(
-                            "state".parse::<Base>()?,
-                            None,
-                            max_history,
-                        )
+                        .add_ro_device(state_name, None, max_history)
                         .await?;
                     let (d_source, _) = core
-                        .add_ro_device(
-                            "source".parse::<Base>()?,
-                            None,
-                            max_history,
-                        )
+                        .add_ro_device(source_name, None, max_history)
                         .await?;
                     let (d_offset, _) = core
-                        .add_ro_device(
-                            "offset".parse::<Base>()?,
-                            Some("ms"),
-                            max_history,
-                        )
+                        .add_ro_device(offset_name, Some("ms"), max_history)
                         .await?;
                     let (d_delay, _) = core
-                        .add_ro_device(
-                            "delay".parse::<Base>()?,
-                            Some("ms"),
-                            max_history,
-                        )
+                        .add_ro_device(delay_name, Some("ms"), max_history)
                         .await?;
 
                     return Ok(Box::new(Instance {

@@ -1,7 +1,7 @@
 # drmem-drv-sump
 
 This driver monitors the state of a sump pump through a custom,
-non-commercial interface and updates a set of devices based on its
+non-commercial interface[^1] and updates a set of devices based on its
 behavior.
 
 The sump pump state is obtained, via TCP, with a RaspberryPi that's
@@ -59,3 +59,9 @@ inaccuracy of the measurements.
 ## History
 
 Added in v0.1.0.
+
+[^1]: The remote end is running on a Raspberry Pi loaded with NetBSD
+    9.0. The source code can be found
+    [here](https://github.com/rneswold/drmem-drv-sump). The GPIO code
+    is specific to NetBSD, so adjustments will have to be made for
+    Linux.

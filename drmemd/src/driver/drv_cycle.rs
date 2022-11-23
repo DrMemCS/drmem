@@ -147,6 +147,9 @@ impl driver::API for Instance {
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
+        let output_name = "output".parse::<Base>().unwrap();
+        let enable_name = "enable".parse::<Base>().unwrap();
+
         let fut = async move {
             // Validate the configuration.
 
@@ -154,13 +157,21 @@ impl driver::API for Instance {
             let enabled = Instance::get_cfg_enabled(&cfg)?;
 
             // Define the devices managed by this driver.
+            //
+            // This first device is the output signal. It toggles
+            // between `false` and `true` at a rate determined by the
+            // `interval` config option.
 
-            let (d_output, _) = core
-                .add_ro_device("output".parse::<Base>()?, None, max_history)
-                .await?;
-            let (d_enable, rx_set, _) = core
-                .add_rw_device("enable".parse::<Base>()?, None, max_history)
-                .await?;
+            let (d_output, _) =
+                core.add_ro_device(output_name, None, max_history).await?;
+
+            // This device is settable. Any time it transitions from
+            // `false` to `true`, the output device begins a cycling.
+            // When this device is set to `false`, the device stops
+            // cycling.
+
+            let (d_enable, rx_set, _) =
+                core.add_rw_device(enable_name, None, max_history).await?;
 
             Ok(Box::new(Instance::new(
                 enabled, millis, d_output, d_enable, rx_set,
