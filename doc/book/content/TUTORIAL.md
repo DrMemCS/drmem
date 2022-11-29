@@ -47,7 +47,7 @@ The "prefix" parameter specifies the path to be prepended to the
 device names created by this driver. For this configuration, the two
 devices will be named `demo-timer:enable` and `demo-timer:output`.
 Multiple `[[driver]]` sections can use the `timer` driver to make many
-timer devices, but different prefixes need to be specifies so all the
+timer devices, but different prefixes need to be specified so all the
 created devices have unique names.
 
 Each driver has a "cfg" parameter which contains configuration
@@ -74,9 +74,9 @@ firewall. If your browser successfully connects, you'll see an
 environment where you can submit GraphQL queries and see the results.
 
 On the far right are two tabs, "Docs" and "Schema". Clicking on the
-"Docs" tab will so documentation built into DrMem which describes the
-available queries, their arguments, and the form of the
-responses. Take a moment to peruse the docs.
+"Docs" tab will show documentation built into DrMem which describes
+available queries, their arguments, and the form of the responses.
+Take a moment to peruse the docs.
 
 ## Drive Information
 
@@ -155,12 +155,12 @@ subscription {
 
 Monitoring a device always returns the current value along with the
 timestamp when it occurred. Then it waits for further updates. We can
-see this change in the next section.
+see these changes in the next section.
 
 ## Setting a Device
 
 For a timer device, when the `enable` device goes from false to true,
-the timier starts timing.
+the timer starts timing.
 
 Put the current browser window, which is monitoring the `output`
 device, aside and open another browser window. Connect to DrMem using
@@ -178,12 +178,12 @@ mutation {
 ```
 
 When you execute this query, you'll the timer output goes immediately
-to true and, after 5 seconds, goes back to false. To starts the timer
+to true and, after 5 seconds, goes back to false. To start the timer
 again, you first have to set the `enable` device to false before
 setting it to true.
 
-GraphQL allows you to chain queries, but you have to add "aliases" so
-that the results can be matched with the query. Try this:
+GraphQL allows you to chain queries, but you have to add "alias"
+labels so results can be matched with the query. Try this:
 
 ```
 mutation {
@@ -196,8 +196,9 @@ mutation {
 }
 ```
 
-Now each time you run this double query, the timer resets. The timer
-driver only reports changes to the output so, if you reset it before
-it times out, you'll see `output` change to false 5 seconds later. In
-other words, the timer driver won't issue two true or two false
-values.
+Now each time you run this double query, the timer resets; the first
+query sets the `enable` device to false and the second to true. The
+timer driver only reports *changes* to `output` so, if you reset it
+before it times out, you'll see `output` change to false 5 seconds
+later. In other words, the timer driver won't issue two true or two
+false values.
