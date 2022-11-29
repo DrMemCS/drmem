@@ -19,8 +19,8 @@ _A small, capable control system for the hobbyist_
 ---
 
 The DrMem Project strives to be a complete, easy-to-use control system
-for home automation. Like the Arduino and RaspberryPi communities,
-this project is aimed at the hobbyist that likes to tinker and build
+for the hobbyist. Like the Arduino and RaspberryPi communities, this
+project is aimed at people that like to tinker and build programmable
 systems. Although commercial products will be supported, nothing
 prevents you from incorporating and controlling your own custom
 hardware.
@@ -53,12 +53,34 @@ set of devices, is all you need.
 background with no user interaction, it is useful to have an interface
 that applications can use to provide dashboards, etc. for viewing and
 controlling DrMem devices. This is provided by a built-in HTTP
-server hosting a gRPC interface.
+server hosting a GraphQL interface.
+
+## What's Ready Now
+
+Although DrMem is a young project, it's core is very usable. These are
+currently supported features:
+
+- Two types of back-end storage
+  - A "simple" back-end which only saves the last value of a device
+  - A back-end which writes device information to a Redis server
+- A client API which uses GraphQL
+- Drivers which implement devices
+  - 3 built-in drivers
+    - Memory devices
+	- Cycling device
+	- Timer device
+  - 3 external drivers
+    - Weather Underground data
+	- NTP daemon status
+	- (Author's) custom sump pump monitor
+
+You can try some of this out by following the
+[tutorial](doc/book/content/TUTORIAL.md).
 
 ## Other Control System / Home Automation Projects
 
-DrMem is a young project. If you're looking for more complete
-solutions that are available now, here's a few options:
+If you're looking for more complete solutions that are available now,
+here are a few options:
 
 - [EPICS](https://epics-controls.org/) is a professional control system used
   by particle accelerators and observatories around the world.
@@ -68,45 +90,9 @@ solutions that are available now, here's a few options:
 - [Home Assistant](https://www.home-assistant.io) is a nice-looking,
   well-polished, home automation system.
 - Many devices can also be controlled by [Google's Home app](https://play.google.com/store/apps/details?id=com.google.android.apps.chromecast.app)
-  or [Apple's Home app](https://www.apple.com/ios/home/)
+  or [Apple's HomeKit app](https://www.apple.com/ios/home/)
 
 But be sure to check back occasionally as `drmem` matures!
-
-## Preparation
-
-The core service used in this control system is
-[Redis](https://redis.io/) which is light-weight, *fast* and has the
-data management features needed for a control system: device
-information and time-series storage of device readings.
-
-`redis` servers support multiple databases. The default database is
-number 0 and is what DrMem uses. For testing, other database numbers
-can be used which isolates possibly buggy, development code from the
-"operational" database.
-
-Before setting up DrMem, you'll need to have a running instance of
-`redis`. The author configured an instance on a RaspberryPi to only
-listen on 127.0.0.1. If the control system grows beyond one node,
-`redis` can be configured to listen on the local network. `redis` is
-an in-memory database, so the author configured it to periodically
-dump the database on a NAS over NFS.
-
-## Building
-
-DrMem is written in Rust using the excellent
-[`tokio`](https://tokio.rs/) async scheduler module. To build it,
-you'll need a Rust installation.
-
-**NOTE: This project is in a very, very early state. Eventually I want
-users to specify which drivers to use in `drmem.conf`. Right now every
-driver gets built and run.**
-
-Check out the source, run `cargo build --release`, and relax; this
-takes  a half hour to build on my RPi 3+. On server boxes, it'll build
-much faster.
-
-Developers can run `cargo build` to create the debug version (found in
-`target/debug/drmemd`).
 
 ## Colophon
 
