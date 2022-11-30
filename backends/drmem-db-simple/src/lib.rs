@@ -37,6 +37,8 @@ type ReadingState = (
     time::SystemTime,
 );
 
+mod glob;
+
 struct DeviceInfo {
     owner: String,
     units: Option<String>,
@@ -260,7 +262,9 @@ impl Store for SimpleStore {
                 if let Ok(pattern) = pattern.parse::<device::Name>() {
                     Box::new(move |(k, _)| pattern == **k)
                 } else {
-                    Box::new(|_| false)
+                    Box::new(move |(k, _)| {
+                        glob::Pattern::create(pattern).matches(&k.to_string())
+                    })
                 }
             } else {
                 Box::new(|_| true)
