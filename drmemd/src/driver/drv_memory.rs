@@ -1,9 +1,6 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::{
-        device::Base,
-        Error,
-    },
+    types::{device::Base, Error},
     Result,
 };
 use std::{convert::Infallible, future::Future, pin::Pin};
@@ -17,8 +14,7 @@ pub struct Instance {
 impl Instance {
     pub const NAME: &'static str = "memory";
 
-    pub const SUMMARY: &'static str =
-        "An area in memory to set values.";
+    pub const SUMMARY: &'static str = "An area in memory to set values.";
 
     pub const DESCRIPTION: &'static str = include_str!("drv_memory.md");
 
@@ -35,7 +31,7 @@ impl Instance {
     fn get_cfg_name(cfg: &DriverConfig) -> Result<Base> {
         match cfg.get("name") {
             Some(toml::value::Value::String(name)) => {
-		if let Ok(name) = name.parse::<Base>() {
+                if let Ok(name) = name.parse::<Base>() {
                     return Ok(name);
                 } else {
                     error!("'name' isn't a proper, base name for a device")
@@ -57,7 +53,7 @@ impl driver::API for Instance {
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
         let fut = async move {
-	    let name = Instance::get_cfg_name(&cfg)?;
+            let name = Instance::get_cfg_name(&cfg)?;
 
             // This device is settable. Any setting is forwarded to
             // the backend.
@@ -67,9 +63,8 @@ impl driver::API for Instance {
 
             // Build and return the future.
 
-            Ok(Box::new(Instance::new(
-                d_memory, s_memory
-            )) as driver::DriverType)
+            Ok(Box::new(Instance::new(d_memory, s_memory))
+                as driver::DriverType)
         };
 
         Box::pin(fut)
@@ -80,14 +75,14 @@ impl driver::API for Instance {
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
             loop {
-		if let Some((v, tx)) = self.s_memory.recv().await {
-		    let _ = tx.send(Ok(v.clone()));
+                if let Some((v, tx)) = self.s_memory.recv().await {
+                    let _ = tx.send(Ok(v.clone()));
 
-		    (self.d_memory)(v).await
-		} else {
-		    panic!("can no longer receive settings");
-		}
-	    }
+                    (self.d_memory)(v).await
+                } else {
+                    panic!("can no longer receive settings");
+                }
+            }
         };
 
         Box::pin(fut)
