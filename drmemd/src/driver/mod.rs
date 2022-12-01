@@ -9,8 +9,8 @@ use tokio::task::JoinHandle;
 use tracing::{error, field, info, info_span};
 use tracing_futures::Instrument;
 
-mod drv_memory;
 mod drv_cycle;
+mod drv_memory;
 mod drv_timer;
 
 type Factory = fn(
