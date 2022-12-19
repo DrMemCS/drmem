@@ -1,3 +1,14 @@
+//! Defines and enforces device name requirements.
+//!
+//! Every device in a running instance of `drmemd` needs to have a
+//! unique name. A device name is made up of segments separated with
+//! colons. The last segment is the base name of the device and all
+//! previous segments are the "path" of the device. A segment consists
+//! of one or more UTF-8 alphanumeric or dash characters.
+//!
+//! In a `[[driver]]` section of `drmemd`'s configuration file, a path
+//! is specified for the driver instance and the driver provides the
+//! base names for its set of devices.
 use crate::{types::Error, Result};
 use serde_derive::Deserialize;
 use std::fmt;
@@ -49,11 +60,18 @@ impl fmt::Display for Segment {
     }
 }
 
+/// A type which models a device's path.
+///
+/// A path is a series of segments, where segments are made up of one
+/// or more alphanumeric or dash characters.
 #[derive(Debug, PartialEq, Clone, Deserialize, Hash, Eq)]
 #[serde(try_from = "&str")]
 pub struct Path(Vec<Segment>);
 
 impl Path {
+
+    /// Creates a `Path` from a string slice. If any segment contains
+    /// an invalid character, an `Err()` is returned.
     pub fn create(s: &str) -> Result<Self> {
         s.split(':')
             .map(Segment::create)
@@ -95,10 +113,17 @@ impl fmt::Display for Path {
     }
 }
 
+/// A type representing the base name of a device.
+///
+/// The base name consists of one or more alphanumeric or dash
+/// characters.
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Base(Segment);
 
 impl Base {
+
+    /// Creates a `Base` from a string slice. If it contains an
+    /// invalid character, `Err()` is returned.
     pub fn create(s: &str) -> Result<Self> {
         Segment::create(s).map(Base)
     }
@@ -168,6 +193,8 @@ impl Name {
             Err(e) => Err(e),
         }
     }
+
+    /// Builds a device name from `Path` and `Base` components.
 
     pub fn build(path: Path, base: Base) -> Name {
         Name { path, base }

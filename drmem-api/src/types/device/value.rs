@@ -12,10 +12,15 @@ pub enum Value {
     Bool(bool),
 
     /// For devices that return/accept an integer value. It is stored
-    /// as a signed, 32-bit.
+    /// as a signed, 32-bit. This type should primarily be used for
+    /// digital inputs/outputs. There is no 64-bit version because
+    /// Javascript doesn't support a 64-bit integer. For integer
+    /// values greater than 32 bits, use a `Flt` since it can
+    /// losslessly handle integers up to 52 bits.
     Int(i32),
 
-    /// For devices that return/accept floating point numbers.
+    /// For devices that return/accept floating point numbers or
+    /// integers up to 52 bits.
     Flt(f64),
 
     /// For devices that return/accept text. Since strings can greatly

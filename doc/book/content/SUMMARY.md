@@ -1,4 +1,4 @@
-Part I : Installing DrMem
+## Installing DrMem
 
 - [Introduction](INTRODUCTION.md)
 - [Installing](INSTALLING.md)
@@ -6,7 +6,7 @@ Part I : Installing DrMem
   - Building
     - Features
 
-Part II : Using DrMem
+## Using DrMem
 
 - [What are Devices?](DEVICES.md)
   - Meta-information
@@ -18,7 +18,12 @@ Part II : Using DrMem
 - [Configuration](CONFIGURATION.md)
 - [Reactive Engine](REACTIVE_ENGINE.md)
 
-Part III : Extending DrMem
+## Driver Directory
+
+- [Available Drivers](DRIVER_LIST.md)
+- [Device Sets](DEVICE_SETS.md)
+
+## Extending DrMem
 
 - [Writing Device Drivers](DRIVER_TUTORIAL.md)
   - Driver Specifications
@@ -26,7 +31,7 @@ Part III : Extending DrMem
   - Adding Drivers to `DrMem`
 - [Included Drivers](DRIVER_TABLE.md)
 
-Part IV : APIs
+## APIs
 
 - [Driver API](DRIVER_API.md)
 - [Client API](CLIENT_API.md))

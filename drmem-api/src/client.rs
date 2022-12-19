@@ -1,5 +1,36 @@
-//! This module defines types and interfaces that clients use to
-//! interact with the core of DrMem.
+//! This module defines types and interfaces that internal clients use
+//! to interact with the core of DrMem. The primary, internal client
+//! is the GraphQL interface.
+//!
+//! Any new, internal tasks that need access to device readings or
+//! wish to set the value of the device need to have a
+//! `client::RequestChan` handle. As DrMem starts, it should
+//! `.clone()` the `RequestChan` used to communicate with the
+//! back-end.
+//!
+//! # Example
+//!
+//! ```ignore
+//! async fn some_new_task(handle: client::RequestChan) {
+//!    // Initialize and enter loop.
+//!
+//!    let device = "some:device".parse::<device::Name>().unwrap();
+//!
+//!    loop {
+//!        // Set a device value.
+//!
+//!        if some_condition {
+//!            handle.set_device(&device, true.into())
+//!        }
+//!    }
+//! }
+//!
+//! // Somewhere in DrMem start-up.
+//!
+//! let task = some_new_task(backend_chan.clone());
+//!
+//! // Add the task to the set of tasks to be awaited.
+//! ```
 
 use crate::{
     types::{device, Error},
@@ -7,15 +38,26 @@ use crate::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+/// Holds information about a device. A back-end is free to store this
+/// information in any way it sees fit. However, it is returned for
+/// GraphQL queries, so it should be reasonably efficient to assemble
+/// this reply.
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct DevInfoReply {
+    /// The full name of the device.
     pub name: device::Name,
+    /// The device's engineering units. Some devices don't use units
+    /// (boolean devices are an example.)
     pub units: Option<String>,
+    /// Indicates whether the device is settable.
     pub settable: bool,
+    /// The name of the driver that suports this device.
     pub driver: String,
 }
 
-/// Defines the requests that can be sent to core.
+// Defines the requests that can be sent to core.
+#[doc(hidden)]
 pub enum Request {
     QueryDeviceInfo {
         pattern: Option<String>,
@@ -49,7 +91,10 @@ impl RequestChan {
         RequestChan { req_chan }
     }
 
-    // Makes a request to monitor a device.
+    /// Makes a request to monitor the device, `name`.
+    ///
+    /// If sucessful, a stream is returned which yields device
+    /// readings as the device is updated.
 
     pub async fn monitor_device(
         &self, name: device::Name,
@@ -68,12 +113,18 @@ impl RequestChan {
         rx.await?
     }
 
-    // Polymorphic method which requests that a device be set to the
-    // provided value. The return value is the value the driver
-    // actually used to set the device. Some drivers do sanity checks
-    // on the set value and, if the value is unusable, the driver may
-    // return an error or clip the value to something valid. The
-    // driver's documentation should indicate how it handles settings.
+    /// Requests that a device be set to a provided value.
+    ///
+    /// - `name` is the name of the device
+    /// - `value` is the value to be set. This value can be a
+    ///   `device::Value` value or can be any type that can be coerced
+    ///   into one.
+    ///
+    /// Returns the value the driver actually used to set the device.
+    /// Some drivers do sanity checks on the set value and, if the
+    /// value is unusable, the driver may return an error or clip the
+    /// value to something valid. The driver's documentation should
+    /// indicate how it handles invalid settings.
 
     pub async fn set_device<
         T: Into<device::Value> + TryFrom<device::Value, Error = Error>,
@@ -100,8 +151,8 @@ impl RequestChan {
         rx.await?.and_then(T::try_from)
     }
 
-    // Requests device information for devices whose name matches the
-    // provided pattern.
+    /// Requests device information for devices whose name matches the
+    /// provided pattern.
 
     pub async fn get_device_info(
         &self, pattern: Option<String>,

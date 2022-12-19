@@ -1,4 +1,4 @@
-//! This module defines types and interfaces that driver use to
+//! This module defines types and interfaces that drivers use to
 //! interact with the core of DrMem.
 
 use crate::types::{
@@ -12,12 +12,22 @@ use toml::value;
 
 use super::Result;
 
+/// Represents how configuration information is given to a driver.
+/// Since each driver can have vastly different requirements, the
+/// config structure needs to be as general as possible. A
+/// `DriverConfig` type is a map with `String` keys and `toml::Value`
+/// values.
 pub type DriverConfig = value::Table;
+
+/// Used by client APIs to send setting requests to a driver.
 pub type TxDeviceSetting =
     mpsc::Sender<(Value, oneshot::Sender<Result<Value>>)>;
+
+/// Used by a driver to receive settings from a client.
 pub type RxDeviceSetting =
     mpsc::Receiver<(Value, oneshot::Sender<Result<Value>>)>;
 
+/// A function that drivers use to report updated values of a device.
 pub type ReportReading = Box<
     dyn Fn(Value) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
         + Send
@@ -25,7 +35,8 @@ pub type ReportReading = Box<
         + 'static,
 >;
 
-/// Defines the requests that can be sent to core.
+/// Defines the requests that can be sent to core. Drivers don't use
+/// this type directly. They are indirectly used by `RequestChan`.
 pub enum Request {
     /// Registers a read-only device with core.
     ///

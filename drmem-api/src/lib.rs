@@ -1,39 +1,73 @@
+//! This crate is used by various, internal tasks of `drmemd`.
+//!
+//! The interfaces and types defined in this crate are useful for
+//! those wishing to write a new back-end storage module or a driver
+//! for the `drmemd` executable.
+
 use async_trait::async_trait;
 
 pub mod types;
 
-/// A `Result` type where the error value is a value from
-/// `drmem_api::types::Error`.
+/// A specialization of `std::result::Result<>` where the error value
+/// is `types::Error`.
 
 pub type Result<T> = std::result::Result<T, types::Error>;
 
-/// The `DbContext` trait defines the API that a back-end needs to
-/// implement to provide storage for -- and access to -- the state of
-/// each driver's devices.
+/// Defines the trait that a back-end needs to implement to provide
+/// storage for -- and access to -- the state of each driver's
+/// devices.
 
 #[async_trait]
 pub trait Store {
-    /// Used by a driver to define a read-only device. `name`
-    /// specifies the final segment of the device name (the path
-    /// portion of the device name is specified in the driver's
-    /// configuration.) On success, the function returns a closure
-    /// which can be used to report device updates.
+    /// Called when a read-only device is to be registered with the
+    /// back-end.
+    ///
+    /// When `drmemd` begins, it starts up the set of drivers
+    /// specified in the configuration file. As these drivers
+    /// initialize, they'll register the devices they need. For
+    /// read-only devices, this method will be called.
+    ///
+    /// - `driver` is the name of the driver. The framework will
+    ///   guarantee that this parameter is consistent for all devices
+    ///   defined by a driver.
+    /// - `name` is the full name of the device.
+    /// - `units` is an optional value which specifies the engineering
+    ///   units returned by the device.
+    /// - `max_history` is a hint as to how large an archive the user
+    ///   specifies should be used for this device.
+    ///
+    /// On success, this function returns a pair. The first element is
+    /// a closure the driver uses to report updates. The second
+    /// element is an optional value representing the last value of
+    /// the device, as saved in the back-end.
 
     async fn register_read_only_device(
         &mut self, driver: &str, name: &types::device::Name,
         units: &Option<String>, max_history: &Option<usize>,
     ) -> Result<(driver::ReportReading, Option<types::device::Value>)>;
 
-    /// Used by a driver to define a read-write device. `name`
-    /// specifies the final segment of the device name (the path
-    /// portion of the device name is specified in the driver's
-    /// configuration.) On success, the function retrns a 3-tuple. The
-    /// first element is a closure which the driver uses to report new
-    /// values of the device. The second element is an
-    /// `mpsc::Receiver<>` handle which the driver monitors for
-    /// incoming settings. The last item is the last value reported
-    /// for the device. If it's a new device or the backend doesn't
-    /// have a persistent store, then `None` is provided.
+    /// Called when a read-write device is to be registered with the
+    /// back-end.
+    ///
+    /// When `drmemd` begins, it starts up the set of drivers
+    /// specified in the configuration file. As these drivers
+    /// initialize, they'll register the devices they need. For
+    /// read-write devices, this method will be called.
+    ///
+    /// - `driver` is the name of the driver. The framework will
+    ///   guarantee that this parameter is consistent for all devices
+    ///   defined by a driver.
+    /// - `name` is the full name of the device.
+    /// - `units` is an optional value which specifies the engineering
+    ///   units returned by the device.
+    /// - `max_history` is a hint as to how large an archive the user
+    ///   specifies should be used for this device.
+    ///
+    /// On success, this function returns a 3-tuple. The first element
+    /// is a closure the driver uses to report updates. The second
+    /// element is a handle with which the driver will receive setting
+    /// requests. The third element is an optional value representing
+    /// the last value of the device, as saved in the back-end.
 
     async fn register_read_write_device(
         &mut self, driver: &str, name: &types::device::Name,
@@ -44,13 +78,26 @@ pub trait Store {
         Option<types::device::Value>,
     )>;
 
+    /// Called when information from a device is requested.
+    ///
+    /// On success, this method should return an array of
+    /// `client::DevInfoReply` data. If a `pattern` is specified, only
+    /// device names matching the pattern should be returned. The
+    /// grammar of the pattern is the one used by Redis (to be
+    /// consistent across back-ends.)
+
     async fn get_device_info(
         &mut self, pattern: &Option<String>,
     ) -> Result<Vec<client::DevInfoReply>>;
 
+    /// Sends a request to a driver to set its device to the specified
+    /// value.
+
     async fn set_device(
         &self, name: types::device::Name, value: types::device::Value,
     ) -> Result<types::device::Value>;
+
+    /// Creates a stream that yields values of a device as it updates.
 
     async fn monitor_device(
         &mut self, name: types::device::Name,

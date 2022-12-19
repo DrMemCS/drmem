@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 homepage = "https://github.com/DrMemCS/drmem"
+description = "DrMem driver which monitors a sump pump"
 repository = "https://github.com/DrMemCS/drmem"
 license = "MIT"
 categories = ["embedded"]
