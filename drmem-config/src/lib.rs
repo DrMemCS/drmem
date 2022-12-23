@@ -113,6 +113,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             log_level: None,
+	    #[cfg(feature = "graphql")]
             graphql: graphql::Config { addr: None },
             backend: Some(backend::Config::new()),
             driver: vec![],
@@ -298,6 +299,8 @@ mod tests {
         assert!(
             toml::from_str::<Config>(
                 r#"
+[[graphql]]
+
 [[driver]]
 "#,
             )
@@ -310,6 +313,8 @@ mod tests {
 
         match toml::from_str::<Config>(
             r#"
+[[graphql]]
+
 [[driver]]
 name = "none"
 prefix = "null"
@@ -342,6 +347,8 @@ prefix = "null"
         #[cfg(feature = "redis-backend")]
         match toml::from_str::<Config>(
             r#"
+[[graphql]]
+
 [backend]
 addr = "192.168.1.1:6000"
 
@@ -368,6 +375,8 @@ prefix = "null"
         #[cfg(feature = "redis-backend")]
         match toml::from_str::<Config>(
             r#"
+[[graphql]]
+
 [backend]
 dbn = 3
 
@@ -394,6 +403,8 @@ prefix = "null"
             r#"
 log_level = "trace"
 
+[[graphql]]
+
 [[driver]]
 name = "none"
 prefix = "null"
@@ -405,6 +416,8 @@ prefix = "null"
         match toml::from_str::<Config>(
             r#"
 log_level = "debug"
+
+[[graphql]]
 
 [[driver]]
 name = "none"
@@ -418,6 +431,8 @@ prefix = "null"
             r#"
 log_level = "info"
 
+[[graphql]]
+
 [[driver]]
 name = "none"
 prefix = "null"
@@ -429,6 +444,8 @@ prefix = "null"
         match toml::from_str::<Config>(
             r#"
 log_level = "warn"
+
+[[graphql]]
 
 [[driver]]
 name = "none"
@@ -442,6 +459,8 @@ prefix = "null"
         assert!(
             toml::from_str::<Config>(
                 r#"
+[[graphql]]
+
 [[driver]]
 name = "none"
 "#,
@@ -453,6 +472,8 @@ name = "none"
         assert!(
             toml::from_str::<Config>(
                 r#"
+[[graphql]]
+
 [[driver]]
 prefix = "null"
 "#,
@@ -464,6 +485,8 @@ prefix = "null"
         assert!(
             toml::from_str::<Config>(
                 r#"
+[[graphql]]
+
 [[driver]]
 name = "none"
 prefix = "null"
@@ -476,6 +499,8 @@ max_history = false
 
         match toml::from_str::<Config>(
             r#"
+[[graphql]]
+
 [[driver]]
 name = "none"
 prefix = "null"
@@ -496,6 +521,8 @@ prefix = "null"
 
         match toml::from_str::<Config>(
             r#"
+[[graphql]]
+
 [[driver]]
 name = "none"
 prefix = "null"
