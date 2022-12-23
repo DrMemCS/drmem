@@ -85,10 +85,13 @@ async fn run() -> Result<()> {
 
         #[cfg(feature = "graphql")]
         {
-            let f = Box::pin(
-                graphql::server(drv_tbl.clone(), tx_clnt_req.clone())
-                    .then(|_| async { Err(Error::OperationError) }),
-            );
+            let f =
+                graphql::server(
+                    &cfg.graphql,
+                    drv_tbl.clone(),
+                    tx_clnt_req.clone(),
+                )
+                .then(|_| async { Err(Error::OperationError) });
 
             tasks.push(wrap_task(tokio::spawn(f)));
         }

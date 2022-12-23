@@ -459,7 +459,8 @@ fn schema() -> Schema {
 }
 
 pub fn server(
-    db: crate::driver::DriverDb, cchan: client::RequestChan,
+    cfg: &drmem_config::graphql::Config, db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
     const FULL_QUERY_PATH: &str = "/query";
     const FULL_SUBSCRIBE_PATH: &str = "/subscribe";
@@ -537,6 +538,12 @@ pub fn server(
 
     let (resp, task) = Responder::with_default_handle().unwrap();
 
+    let addr = cfg.get_addr();
+
+    // Bind to the address.
+
+    let (addr, http_task) = warp::serve(filter).bind_ephemeral(addr);
+
     // Register DrMem's mDNS entry. In the properties field, inform
     // the client with which paths to use for each GraphQL query
     // type.
@@ -544,7 +551,7 @@ pub fn server(
     let service = resp.register(
         "_drmem._tcp".into(),
         "DrMem control system node".into(),
-        3000,
+        addr.port(),
         &[
             &format!("queries={}", FULL_QUERY_PATH),
             &format!("mutations={}", FULL_QUERY_PATH),
@@ -559,9 +566,5 @@ pub fn server(
         drop(service)
     });
 
-    // Return the webserver task.
-
-    warp::serve(filter)
-        .run(([0, 0, 0, 0], 3000))
-        .instrument(info_span!("http"))
+    http_task.instrument(info_span!("http"))
 }

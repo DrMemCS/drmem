@@ -96,7 +96,7 @@ redis-backend = ["drmem-db-redis"]
 
 # Client APIs
 
-graphql = ["chrono", "warp", "juniper", "juniper_graphql_ws", "juniper_warp", "libmdns"]
+graphql = ["chrono", "warp", "juniper", "juniper_graphql_ws", "juniper_warp", "libmdns", "drmem-config/graphql"]
 
 # Drivers
 
