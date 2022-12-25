@@ -459,7 +459,7 @@ fn schema() -> Schema {
 }
 
 pub fn server(
-    cfg: &drmem_config::graphql::Config, db: crate::driver::DriverDb,
+    addr: &std::net::SocketAddr, db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
     const FULL_QUERY_PATH: &str = "/query";
@@ -538,11 +538,9 @@ pub fn server(
 
     let (resp, task) = Responder::with_default_handle().unwrap();
 
-    let addr = cfg.get_addr();
-
     // Bind to the address.
 
-    let (addr, http_task) = warp::serve(filter).bind_ephemeral(addr);
+    let (addr, http_task) = warp::serve(filter).bind_ephemeral(*addr);
 
     // Register DrMem's mDNS entry. In the properties field, inform
     // the client with which paths to use for each GraphQL query

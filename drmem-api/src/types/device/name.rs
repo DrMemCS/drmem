@@ -69,7 +69,6 @@ impl fmt::Display for Segment {
 pub struct Path(Vec<Segment>);
 
 impl Path {
-
     /// Creates a `Path` from a string slice. If any segment contains
     /// an invalid character, an `Err()` is returned.
     pub fn create(s: &str) -> Result<Self> {
@@ -121,7 +120,6 @@ impl fmt::Display for Path {
 pub struct Base(Segment);
 
 impl Base {
-
     /// Creates a `Base` from a string slice. If it contains an
     /// invalid character, `Err()` is returned.
     pub fn create(s: &str) -> Result<Self> {
