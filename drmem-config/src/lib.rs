@@ -68,6 +68,8 @@ pub mod backend {
 #[derive(Deserialize)]
 pub struct Config {
     log_level: Option<String>,
+    #[cfg(feature = "graphql")]
+    pub graphql: Option<std::net::SocketAddr>,
     pub backend: Option<backend::Config>,
     pub driver: Vec<Driver>,
 }
@@ -87,12 +89,21 @@ impl<'a> Config {
     pub fn get_backend(&'a self) -> &'a backend::Config {
         self.backend.as_ref().unwrap_or(&backend::DEF)
     }
+
+    #[cfg(feature = "graphql")]
+    pub fn get_graphql_addr(&self) -> std::net::SocketAddr {
+        self.graphql.unwrap_or_else(|| {
+            "0.0.0.0:3000".parse::<std::net::SocketAddr>().unwrap()
+        })
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
             log_level: None,
+            #[cfg(feature = "graphql")]
+            graphql: None,
             backend: Some(backend::Config::new()),
             driver: vec![],
         }

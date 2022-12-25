@@ -10,6 +10,7 @@ use juniper::{
 };
 use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::{playground_filter, subscriptions::serve_graphql_ws};
+use libmdns::Responder;
 use std::{result, sync::Arc};
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument;
@@ -458,8 +459,15 @@ fn schema() -> Schema {
 }
 
 pub fn server(
-    db: crate::driver::DriverDb, cchan: client::RequestChan,
+    addr: &std::net::SocketAddr, db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
+    const FULL_QUERY_PATH: &str = "/query";
+    const FULL_SUBSCRIBE_PATH: &str = "/subscribe";
+
+    let query_path: &str = &FULL_QUERY_PATH[1..];
+    let subscribe_path: &str = &FULL_SUBSCRIBE_PATH[1..];
+
     let context = ConfigDb(db, cchan);
 
     // Create filter that handles GraphQL queries and mutations.
@@ -471,7 +479,8 @@ pub fn server(
 
     // Create filter that handle the interactive GraphQL app.
 
-    let graphiql_filter = playground_filter("/graphql", Some("/subscriptions"));
+    let graphiql_filter =
+        playground_filter(FULL_QUERY_PATH, Some(FULL_SUBSCRIBE_PATH));
 
     // Create the filter that handles subscriptions.
 
@@ -522,10 +531,38 @@ pub fn server(
     // interface.
 
     let filter = (warp::path("graphiql").and(graphiql_filter))
-        .or(warp::path("subscriptions").and(sub_filter))
-        .or(warp::path("graphql").and(graphql_filter));
+        .or(warp::path(subscribe_path).and(sub_filter))
+        .or(warp::path(query_path).and(graphql_filter));
 
-    warp::serve(filter)
-        .run(([0, 0, 0, 0], 3000))
-        .instrument(info_span!("http"))
+    // Create the background mDNS task.
+
+    let (resp, task) = Responder::with_default_handle().unwrap();
+
+    // Bind to the address.
+
+    let (addr, http_task) = warp::serve(filter).bind_ephemeral(*addr);
+
+    // Register DrMem's mDNS entry. In the properties field, inform
+    // the client with which paths to use for each GraphQL query
+    // type.
+
+    let service = resp.register(
+        "_drmem._tcp".into(),
+        "DrMem control system node".into(),
+        addr.port(),
+        &[
+            &format!("queries={}", FULL_QUERY_PATH),
+            &format!("mutations={}", FULL_QUERY_PATH),
+            &format!("subscriptions={}", FULL_SUBSCRIBE_PATH),
+        ],
+    );
+
+    // Make mDNS run in the background.
+
+    let _ = tokio::spawn(async move {
+        task.await;
+        drop(service)
+    });
+
+    http_task.instrument(info_span!("http"))
 }
