@@ -88,7 +88,7 @@ default = ["simple-backend"]
 # Backends
 
 simple-backend = ["drmem-db-simple"]
-redis-backend = ["drmem-db-redis"]
+redis-backend = ["drmem-db-redis", "drmem-config/redis-backend"]
 
 # Client APIs
 
