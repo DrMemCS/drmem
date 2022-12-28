@@ -86,6 +86,7 @@ async fn run() -> Result<()> {
         #[cfg(feature = "graphql")]
         {
             let f = graphql::server(
+		&cfg.get_name(),
                 &cfg.get_graphql_addr(),
                 drv_tbl.clone(),
                 tx_clnt_req.clone(),

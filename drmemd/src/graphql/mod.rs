@@ -459,7 +459,9 @@ fn schema() -> Schema {
 }
 
 pub fn server(
-    addr: &std::net::SocketAddr, db: crate::driver::DriverDb,
+    node_name: &str,
+    addr: &std::net::SocketAddr,
+    db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
     const FULL_QUERY_PATH: &str = "/query";
@@ -548,7 +550,7 @@ pub fn server(
 
     let service = resp.register(
         "_drmem._tcp".into(),
-        "DrMem control system node".into(),
+	format!("DrMem-{}", node_name),
         addr.port(),
         &[
             &format!("queries={}", FULL_QUERY_PATH),

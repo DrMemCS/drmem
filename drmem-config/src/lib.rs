@@ -1,6 +1,7 @@
 use serde_derive::Deserialize;
 use toml::value;
 use tracing::Level;
+use std::env;
 
 use drmem_api::{driver::DriverConfig, types::device::Path};
 
@@ -67,6 +68,8 @@ pub mod backend {
 
 #[derive(Deserialize)]
 pub struct Config {
+    #[cfg(feature = "graphql")]
+    name: Option<String>,
     log_level: Option<String>,
     #[cfg(feature = "graphql")]
     pub graphql: Option<std::net::SocketAddr>,
@@ -96,11 +99,24 @@ impl<'a> Config {
             "0.0.0.0:3000".parse::<std::net::SocketAddr>().unwrap()
         })
     }
+
+    #[cfg(feature = "graphql")]
+    pub fn get_name(&self) -> String {
+	self.name
+	    .as_ref()
+	    .map(String::from)
+	    .unwrap_or_else(|| {
+	    env::var("HOST")
+		.expect("no 'name' in config file and no HOST env var")
+	})
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
+            #[cfg(feature = "graphql")]
+	    name: None,
             log_level: None,
             #[cfg(feature = "graphql")]
             graphql: None,
@@ -188,8 +204,6 @@ async fn from_file(path: &str) -> Option<Config> {
 }
 
 async fn find_cfg() -> Config {
-    use std::env;
-
     const CFG_FILE: &str = "drmem.toml";
 
     // Create a vector of directories that could contain a
