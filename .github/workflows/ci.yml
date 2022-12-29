@@ -1,6 +1,12 @@
 name: CI
 
 on:
+  workflow_call:
+    inputs:
+      rust-version:
+        type: string
+        required: false
+        defaults: stable
   push:
     branches: [ "main", "pr-*" ]
   pull_request:
@@ -11,11 +17,36 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  build:
+  check:
+    strategy:
+      matrix:
+        backend: [simple-backend, redis-backend]
 
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Check out
+      uses: actions/checkout@v3
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ inputs.rust-version }}
+        override: true
+        components: rustfmt, clippy
+    - name: Set up cache
+      uses: actions/cachev3
+      continue-on-error: false
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: ${{ runner.os }}-cargo-
+    - name: Lint
+      run: cargo fmt --all -- --check
     - name: Run tests
-      run: cargo test --verbose --features graphql
+      run: cargo test --verbose --workspace --features graphql,${{ matrix.backend }}

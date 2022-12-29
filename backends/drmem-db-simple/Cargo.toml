@@ -14,12 +14,15 @@ keywords = ["control-system", "automation"]
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-async-trait = "0.1"
-drmem-api = { path = "../../drmem-api", version = "0.1" }
-tokio = { version = "1", features = ["sync"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
-tracing = { version = "^0.1", features = ["std"] }
+async-trait.workspace = true
 
-[dependencies.drmem-config]
-path = "../../drmem-config"
-version = "0.1"
+toml.workspace = true
+
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+
+serde.workspace = true
+serde_derive.workspace = true
+
+drmem-api = { path = "../../drmem-api", version = "0.1" }
