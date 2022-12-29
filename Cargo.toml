@@ -6,6 +6,23 @@ members = [
     "drmemd"
 ]
 
+[workspace.dependencies]
+async-trait = "0.1"
+
+futures = { version = "0.3", features = ["std"] }
+futures-util = "0.3"
+
+toml = "0.5"
+
+tokio = { version = "1", features = ["macros", "time", "sync"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tracing = { version = "0.1", features = ["std"] }
+tracing-futures = "0.2"
+tracing-subscriber = "0.2"
+
+serde = "1"
+serde_derive = "1"
+
 # Profiles used by all binaries and packages.
 
 [profile.release]

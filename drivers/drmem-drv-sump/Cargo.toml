@@ -11,9 +11,11 @@ categories = ["embedded"]
 keywords = ["control-system", "automation"]
 
 [dependencies]
-toml = "0.5.6"
-tracing-subscriber = "^0.2"
-tracing-futures = "^0.2"
-tracing = { version = "^0.1", features = ["std"] }
-tokio = { version = "1", features = ["time", "net", "io-util"] }
+toml.workspace = true
+
+tokio = { workspace = true, features = ["net", "io-util"] }
+tracing.workspace = true
+tracing-futures.workspace = true
+tracing-subscriber.workspace = true
+
 drmem-api = { path = "../../drmem-api", version = "0.1" }

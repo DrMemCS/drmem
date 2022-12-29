@@ -14,16 +14,21 @@ keywords = ["control-system", "automation", "database"]
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-toml = "0.5.6"
-serde = "1.0.115"
-serde_derive = "1.0.115"
-async-trait = "0.1"
+async-trait.workspace = true
+
+futures.workspace = true
+futures-util.workspace = true
+
+toml.workspace = true
+
+tokio.workspace = true
+tracing.workspace = true
+tracing-futures.workspace = true
+tracing-subscriber.workspace = true
+
+serde.workspace = true
+serde_derive.workspace = true
+
 redis = { version = "0.22", features = ["tokio-comp"] }
-tracing-subscriber = "^0.2"
-tracing-futures = "^0.2"
-tracing = { version = "^0.1", features = ["std"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-futures = { version = "0.3", features = ["std"] }
-futures-util = "0.3"
 
 drmem-api = { path = "../../drmem-api", version = "0.1" }
