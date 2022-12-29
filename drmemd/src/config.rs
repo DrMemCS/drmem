@@ -232,7 +232,8 @@ pub async fn get() -> Option<Config> {
 mod tests {
     use super::*;
 
-    fn test_defaults() {
+    #[test]
+    fn test_config() {
         // Verify that missing the [[driver]] section fails.
 
         if let Ok(_) = toml::from_str::<Config>("") {
@@ -251,89 +252,6 @@ mod tests {
             .is_err(),
             "TOML parser accepted empty [[driver]] section"
         );
-
-        // Verify a missing [backend] results in a properly defined
-        // default.
-
-        match toml::from_str::<Config>(
-            r#"
-[[driver]]
-name = "none"
-prefix = "null"
-"#,
-        ) {
-            Ok(cfg) => {
-                let def_cfg = Config::default();
-
-                #[cfg(feature = "redis-backend")]
-                {
-                    assert_eq!(
-                        cfg.get_backend().get_addr(),
-                        def_cfg.get_backend().get_addr()
-                    );
-                    assert_eq!(
-                        cfg.get_backend().get_dbn(),
-                        def_cfg.get_backend().get_dbn()
-                    );
-                }
-
-                assert_eq!(cfg.log_level, def_cfg.log_level);
-                assert_eq!(cfg.driver.len(), 1)
-            }
-            Err(e) => panic!("TOML parse error: {}", e),
-        }
-
-        // Verify the [backend] section can handle only one field at a
-        // time.
-
-        #[cfg(feature = "redis-backend")]
-        match toml::from_str::<Config>(
-            r#"
-[backend]
-addr = "192.168.1.1:6000"
-
-[[driver]]
-name = "none"
-prefix = "null"
-"#,
-        ) {
-            Ok(cfg) => {
-                let def_cfg = Config::default();
-
-                assert_eq!(
-                    cfg.get_backend().get_addr(),
-                    "192.168.1.1:6000".parse().unwrap()
-                );
-                assert_eq!(
-                    cfg.get_backend().get_dbn(),
-                    def_cfg.get_backend().get_dbn()
-                );
-            }
-            Err(e) => panic!("TOML parse error: {}", e),
-        }
-
-        #[cfg(feature = "redis-backend")]
-        match toml::from_str::<Config>(
-            r#"
-[backend]
-dbn = 3
-
-[[driver]]
-name = "none"
-prefix = "null"
-"#,
-        ) {
-            Ok(cfg) => {
-                let def_cfg = Config::default();
-
-                assert_eq!(
-                    cfg.get_backend().get_addr(),
-                    def_cfg.get_backend().get_addr()
-                );
-                assert_eq!(cfg.get_backend().get_dbn(), 3);
-            }
-            Err(e) => panic!("TOML parse error: {}", e),
-        }
 
         // Verify the log_level can be set.
 
@@ -463,8 +381,90 @@ max_history = 10000
         }
     }
 
-    #[tokio::test]
-    async fn test_config() {
-        test_defaults()
+    #[cfg(feature = "simple-backend")]
+    #[test]
+    fn test_simple_config() {
+    }
+
+    #[cfg(feature = "redis-backend")]
+    #[test]
+    fn test_redis_config() {
+
+        // Verify a missing [backend] results in a properly defined
+        // default.
+
+        match toml::from_str::<Config>(
+            r#"
+[[driver]]
+name = "none"
+prefix = "null"
+"#,
+        ) {
+            Ok(cfg) => {
+                let def_cfg = Config::default();
+
+                assert_eq!(
+                    cfg.get_backend().get_addr(),
+                    def_cfg.get_backend().get_addr()
+                );
+                assert_eq!(
+                    cfg.get_backend().get_dbn(),
+                    def_cfg.get_backend().get_dbn()
+                );
+                assert_eq!(cfg.log_level, def_cfg.log_level);
+                assert_eq!(cfg.driver.len(), 1)
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        // Verify the [backend] section can handle only one field at a
+        // time.
+
+        match toml::from_str::<Config>(
+            r#"
+[backend]
+addr = "192.168.1.1:6000"
+
+[[driver]]
+name = "none"
+prefix = "null"
+"#,
+        ) {
+            Ok(cfg) => {
+                let def_cfg = Config::default();
+
+                assert_eq!(
+                    cfg.get_backend().get_addr(),
+                    "192.168.1.1:6000".parse().unwrap()
+                );
+                assert_eq!(
+                    cfg.get_backend().get_dbn(),
+                    def_cfg.get_backend().get_dbn()
+                );
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+[backend]
+dbn = 3
+
+[[driver]]
+name = "none"
+prefix = "null"
+"#,
+        ) {
+            Ok(cfg) => {
+                let def_cfg = Config::default();
+
+                assert_eq!(
+                    cfg.get_backend().get_addr(),
+                    def_cfg.get_backend().get_addr()
+                );
+                assert_eq!(cfg.get_backend().get_dbn(), 3);
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
     }
 }
