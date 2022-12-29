@@ -193,6 +193,13 @@ fn dump_config(cfg: &Config) {
         println!("    db #: {}\n", cfg.get_backend().get_dbn());
     }
 
+    #[cfg(feature = "graphql")]
+    {
+	println!("Using GraphQL:");
+	println!("    instance name: {}", cfg.get_name());
+	println!("    address: {}\n", cfg.get_graphql_addr());
+    }
+
     println!("Driver configuration:");
     if !cfg.driver.is_empty() {
         for ii in &cfg.driver {
