@@ -195,9 +195,9 @@ fn dump_config(cfg: &Config) {
 
     #[cfg(feature = "graphql")]
     {
-	println!("Using GraphQL:");
-	println!("    instance name: {}", cfg.get_name());
-	println!("    address: {}\n", cfg.get_graphql_addr());
+        println!("Using GraphQL:");
+        println!("    instance name: {}", cfg.get_name());
+        println!("    address: {}\n", cfg.get_graphql_addr());
     }
 
     println!("Driver configuration:");
@@ -383,13 +383,11 @@ max_history = 10000
 
     #[cfg(feature = "simple-backend")]
     #[test]
-    fn test_simple_config() {
-    }
+    fn test_simple_config() {}
 
     #[cfg(feature = "redis-backend")]
     #[test]
     fn test_redis_config() {
-
         // Verify a missing [backend] results in a properly defined
         // default.
 
