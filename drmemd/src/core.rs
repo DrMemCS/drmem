@@ -1,21 +1,9 @@
+use super::store;
 use drmem_api::{client, driver, types::Error, Result, Store};
-use drmem_config::{backend, Config};
 use std::convert::Infallible;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{info, info_span, warn};
 use tracing_futures::Instrument;
-
-// Define a `store` module that pulls in the appropriate backend.
-
-#[cfg(not(feature = "redis-backend"))]
-mod store {
-    pub use drmem_db_simple::open;
-}
-
-#[cfg(feature = "redis-backend")]
-mod store {
-    pub use drmem_db_redis::open;
-}
 
 /// Holds the state of the core task in the framework.
 ///
@@ -28,7 +16,7 @@ struct State {
 
 impl State {
     /// Creates an initialized state for the core task.
-    async fn create(cfg: backend::Config) -> Result<Self> {
+    async fn create(cfg: store::config::Config) -> Result<Self> {
         let backend = Box::new(store::open(&cfg).await?);
 
         Ok(State { backend })
@@ -160,7 +148,7 @@ impl State {
 /// tasks can send requests to it.
 
 pub async fn start(
-    cfg: &Config,
+    cfg: &super::config::Config,
 ) -> Result<(
     mpsc::Sender<driver::Request>,
     client::RequestChan,

@@ -16,7 +16,6 @@ use drmem_api::{
     types::{device, Error},
     Result, Store,
 };
-use drmem_config::backend;
 use std::collections::{hash_map, HashMap};
 use std::{
     sync::{Arc, Mutex},
@@ -37,6 +36,7 @@ type ReadingState = (
     time::SystemTime,
 );
 
+pub mod config;
 mod glob;
 
 struct DeviceInfo {
@@ -66,7 +66,7 @@ impl DeviceInfo {
 
 struct SimpleStore(HashMap<device::Name, DeviceInfo>);
 
-pub async fn open(_cfg: &backend::Config) -> Result<impl Store> {
+pub async fn open(_cfg: &config::Config) -> Result<impl Store> {
     Ok(SimpleStore(HashMap::new()))
 }
 

@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "drmem-api",
-    "drmem-config",
     "drivers/*",
     "backends/*",
     "drmemd"

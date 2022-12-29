@@ -17,4 +17,3 @@ tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["std"] }
 tokio = { version = "1", features = ["time", "net", "io-util"] }
 drmem-api = { path = "../../drmem-api", version = "0.1" }
-drmem-config = { path = "../../drmem-config", version = "0.1" }

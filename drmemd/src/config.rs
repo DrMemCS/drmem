@@ -1,70 +1,10 @@
+use super::store;
 use serde_derive::Deserialize;
+use std::env;
 use toml::value;
 use tracing::Level;
-use std::env;
 
 use drmem_api::{driver::DriverConfig, types::device::Path};
-
-// This module is defined when no backend is specified. There are no
-// config parameters for this backend.
-
-#[cfg(not(feature = "redis-backend"))]
-pub mod backend {
-    use serde_derive::Deserialize;
-
-    #[derive(Deserialize, Clone)]
-    pub struct Config {}
-
-    impl Config {
-        pub const fn new() -> Config {
-            Config {}
-        }
-    }
-
-    pub static DEF: Config = Config::new();
-}
-
-// This module is defined when the REDIS backend is specified. It
-// provides configuration parameters that need to be provided in the
-// TOML file to help configure the REDIS support.
-
-#[cfg(feature = "redis-backend")]
-pub mod backend {
-    use serde_derive::Deserialize;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-
-    #[derive(Deserialize, Clone)]
-    pub struct Config {
-        pub addr: Option<SocketAddr>,
-        pub dbn: Option<i64>,
-    }
-
-    impl<'a> Config {
-        pub const fn new() -> Config {
-            Config {
-                addr: None,
-                dbn: None,
-            }
-        }
-
-        pub fn get_addr(&'a self) -> SocketAddr {
-            self.addr.unwrap_or_else(|| {
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6379)
-            })
-        }
-
-        #[cfg(debug_assertions)]
-        pub fn get_dbn(&self) -> i64 {
-            self.dbn.unwrap_or(1)
-        }
-        #[cfg(not(debug_assertions))]
-        pub fn get_dbn(&self) -> i64 {
-            self.dbn.unwrap_or(0)
-        }
-    }
-
-    pub static DEF: Config = Config::new();
-}
 
 #[derive(Deserialize)]
 pub struct Config {
@@ -73,7 +13,7 @@ pub struct Config {
     log_level: Option<String>,
     #[cfg(feature = "graphql")]
     pub graphql: Option<std::net::SocketAddr>,
-    pub backend: Option<backend::Config>,
+    pub backend: Option<store::config::Config>,
     pub driver: Vec<Driver>,
 }
 
@@ -89,8 +29,8 @@ impl<'a> Config {
         }
     }
 
-    pub fn get_backend(&'a self) -> &'a backend::Config {
-        self.backend.as_ref().unwrap_or(&backend::DEF)
+    pub fn get_backend(&'a self) -> &'a store::config::Config {
+        self.backend.as_ref().unwrap_or(&store::config::DEF)
     }
 
     #[cfg(feature = "graphql")]
@@ -102,13 +42,10 @@ impl<'a> Config {
 
     #[cfg(feature = "graphql")]
     pub fn get_name(&self) -> String {
-	self.name
-	    .as_ref()
-	    .map(String::from)
-	    .unwrap_or_else(|| {
-	    env::var("HOST")
-		.expect("no 'name' in config file and no HOST env var")
-	})
+        self.name.as_ref().map(String::from).unwrap_or_else(|| {
+            env::var("HOST")
+                .expect("no 'name' in config file and no HOST env var")
+        })
     }
 }
 
@@ -116,11 +53,11 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             #[cfg(feature = "graphql")]
-	    name: None,
+            name: None,
             log_level: None,
             #[cfg(feature = "graphql")]
             graphql: None,
-            backend: Some(backend::Config::new()),
+            backend: Some(store::config::Config::new()),
             driver: vec![],
         }
     }

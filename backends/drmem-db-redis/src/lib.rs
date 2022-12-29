@@ -8,7 +8,6 @@ use drmem_api::{
     },
     Result, Store,
 };
-use drmem_config::backend;
 use futures::task::{Context, Poll};
 use futures::{
     stream::{self, StreamExt},
@@ -25,6 +24,8 @@ use tracing_futures::Instrument;
 type AioMplexConnection = redis::aio::MultiplexedConnection;
 type AioConnection = redis::aio::Connection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;
+
+pub mod config;
 
 // Translates a Redis error into a DrMem error. The translation is
 // slightly lossy in that we lose the exact Redis error that occurred
@@ -377,12 +378,12 @@ pub struct RedisStore {
     /// This connection is used for interacting with the database.
     db_con: AioMplexConnection,
     table: SettingTable,
-    cfg: backend::Config,
+    cfg: config::Config,
 }
 
 impl RedisStore {
     fn make_client(
-        cfg: &backend::Config, name: &Option<String>, pword: &Option<String>,
+        cfg: &config::Config, name: &Option<String>, pword: &Option<String>,
     ) -> Result<redis::Client> {
         use redis::{ConnectionAddr, ConnectionInfo, RedisConnectionInfo};
 
@@ -403,7 +404,7 @@ impl RedisStore {
     // Creates a single-user connection to redis.
 
     async fn make_connection(
-        cfg: &backend::Config, name: Option<String>, pword: Option<String>,
+        cfg: &config::Config, name: Option<String>, pword: Option<String>,
     ) -> Result<AioConnection> {
         let client = Self::make_client(cfg, &name, &pword)?;
 
@@ -418,7 +419,7 @@ impl RedisStore {
     // Creates a mulitplexed connection to redis.
 
     async fn make_mplex_connection(
-        cfg: &backend::Config, name: Option<String>, pword: Option<String>,
+        cfg: &config::Config, name: Option<String>, pword: Option<String>,
     ) -> Result<AioMplexConnection> {
         let client = Self::make_client(cfg, &name, &pword)?;
 
@@ -439,7 +440,7 @@ impl RedisStore {
     /// used for credentials when connecting to `redis`.
 
     pub async fn new(
-        cfg: &backend::Config, name: Option<String>, pword: Option<String>,
+        cfg: &config::Config, name: Option<String>, pword: Option<String>,
     ) -> Result<Self> {
         let db_con = Self::make_mplex_connection(cfg, name, pword).await?;
 
@@ -937,7 +938,7 @@ impl Store for RedisStore {
     }
 }
 
-pub async fn open(cfg: &backend::Config) -> Result<impl Store> {
+pub async fn open(cfg: &config::Config) -> Result<impl Store> {
     RedisStore::new(cfg, None, None)
         .instrument(
             info_span!("redis-db", addr=?cfg.get_addr(), db=cfg.get_dbn()),

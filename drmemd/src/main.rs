@@ -1,12 +1,20 @@
 use drmem_api::{driver::RequestChan, types::Error, Result};
-use drmem_config::Config;
 use futures::{future, FutureExt};
 use std::convert::Infallible;
 use tokio::task::JoinHandle;
 use tracing::{error, trace, warn};
 
+mod config;
 mod core;
 mod driver;
+
+// Define a `store` module that pulls in the appropriate backend.
+
+#[cfg(feature = "simple-backend")]
+pub use drmem_db_simple as store;
+
+#[cfg(feature = "redis-backend")]
+pub use drmem_db_redis as store;
 
 // If the user specifies the 'graphql' feature, then pull in the module
 // that defines the GraphQL server.
@@ -20,10 +28,10 @@ mod graphql;
 // returns `None` if the program should exit (because a command line
 // option asked for a "usage" message, for instance.)
 
-async fn init_app() -> Option<Config> {
+async fn init_app() -> Option<config::Config> {
     // If a configuration is returned, set up the logger.
 
-    if let Some(cfg) = drmem_config::get().await {
+    if let Some(cfg) = config::get().await {
         // Initialize the log system. The max log level is determined
         // by the user (either through the config file or the command
         // line.)
@@ -86,7 +94,7 @@ async fn run() -> Result<()> {
         #[cfg(feature = "graphql")]
         {
             let f = graphql::server(
-		&cfg.get_name(),
+                &cfg.get_name(),
                 &cfg.get_graphql_addr(),
                 drv_tbl.clone(),
                 tx_clnt_req.clone(),

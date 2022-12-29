@@ -15,15 +15,17 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 toml = "0.5.6"
+serde = "1.0.115"
+serde_derive = "1.0.115"
+clap = { version = "2", default-features = false }
 tracing-subscriber = "^0.2"
 tracing-futures = "^0.2"
 tracing = { version = "^0.1", features = ["std"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync", "net"] }
 futures = "0.3"
 
 drmem-api = { path = "../drmem-api", version = "0.1" }
-drmem-config = { path = "../drmem-config", version = "0.1" }
 
 # This section defines the driver dependencies. Most drivers are
 # optional, but a few drivers define common devices for a `drmem`
@@ -87,16 +89,16 @@ optional = true
 # These are features that can be enabled for drmem.
 
 [features]
-default = ["simple-backend"]
+default = []
 
 # Backends
 
 simple-backend = ["drmem-db-simple"]
-redis-backend = ["drmem-db-redis", "drmem-config/redis-backend"]
+redis-backend = ["drmem-db-redis"]
 
 # Client APIs
 
-graphql = ["chrono", "warp", "juniper", "juniper_graphql_ws", "juniper_warp", "libmdns", "drmem-config/graphql"]
+graphql = ["chrono", "warp", "juniper", "juniper_graphql_ws", "juniper_warp", "libmdns"]
 
 # Drivers
 
