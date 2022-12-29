@@ -183,7 +183,7 @@ fn dump_config(cfg: &Config) {
 
     #[cfg(feature = "simple-backend")]
     {
-        println!("Using SIMPLE backend -- no configuration for it.");
+        println!("Using SIMPLE backend -- no configuration for it.\n");
     }
 
     #[cfg(feature = "redis-backend")]
@@ -196,14 +196,13 @@ fn dump_config(cfg: &Config) {
     println!("Driver configuration:");
     if !cfg.driver.is_empty() {
         for ii in &cfg.driver {
-            print!(
-                "    name: {}, prefix: {}, cfg: {:?}",
+            println!(
+                "    name: {}\n    prefix: '{}'\n    cfg: {:?}\n",
                 &ii.name,
                 &ii.prefix,
                 ii.cfg.as_ref().unwrap_or(&value::Table::new())
             )
         }
-        println!();
     } else {
         println!("    No drivers specified.");
     }
