@@ -6,7 +6,7 @@ on:
       rust-version:
         type: string
         required: false
-        defaults: stable
+        default: stable
   push:
     branches: [ "main", "pr-*" ]
   pull_request:
