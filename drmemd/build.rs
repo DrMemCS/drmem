@@ -1,7 +1,7 @@
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    #[cfg(features = "grpc")]
+    #[cfg(feature = "grpc")]
     {
         let idl_src = &["proto/drmem.proto"];
         let dirs = &["proto"];
