@@ -35,7 +35,7 @@ jobs:
         override: true
         components: rustfmt, clippy
     - name: Set up cache
-      uses: actions/cachev3
+      uses: actions/cache@v3
       continue-on-error: false
       with:
         path: |
