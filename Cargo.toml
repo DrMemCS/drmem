@@ -5,6 +5,7 @@ members = [
     "backends/*",
     "drmemd"
 ]
+default-members = ["drmemd"]
 
 [workspace.dependencies]
 async-trait = "0.1"

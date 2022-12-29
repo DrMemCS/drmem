@@ -12,10 +12,9 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
     - name: Run tests
-      run: cargo test --verbose --features graphql
+      run: cargo test --verbose --workspace --features graphql,simple-backend
