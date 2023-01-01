@@ -400,11 +400,7 @@ impl driver::API for Instance {
                     // provided, initialize the state to
                     // it. Otherwise, set it to 0.0.
 
-                    let precip_int = if let Some(v) = precip_int {
-                        f64::try_from(v).unwrap_or(0.0)
-                    } else {
-                        0.0
-                    };
+                    let precip_int = precip_int.unwrap_or(0.0);
 
                     // Assemble and return the state of the driver.
 

@@ -107,9 +107,9 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device<T: Into<Value>>(
+    pub async fn add_ro_device<T: Into<Value> + TryFrom<Value>>(
         &self, name: Base, units: Option<&str>, max_history: Option<usize>,
-    ) -> super::Result<(ReportReading<T>, Option<Value>)> {
+    ) -> super::Result<(ReportReading<T>, Option<T>)> {
         // Create a location for the reply.
 
         let (tx, rx) = oneshot::channel();
@@ -132,9 +132,10 @@ impl RequestChan {
 
         if result.is_ok() {
             match rx.await {
-                Ok(Ok((rr, prev))) => {
-                    Ok((Box::new(move |a| rr(a.into())), prev))
-                }
+                Ok(Ok((rr, prev))) => Ok((
+                    Box::new(move |a| rr(a.into())),
+                    prev.and_then(|v| T::try_from(v).ok()),
+                )),
                 Ok(Err(e)) => Err(e),
                 Err(_) => Err(Error::MissingPeer(String::from(
                     "core didn't reply to request",
@@ -167,9 +168,9 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_rw_device<T: Into<Value>>(
+    pub async fn add_rw_device<T: Into<Value> + TryFrom<Value>>(
         &self, name: Base, units: Option<&str>, max_history: Option<usize>,
-    ) -> Result<(ReportReading<T>, RxDeviceSetting, Option<Value>)> {
+    ) -> Result<(ReportReading<T>, RxDeviceSetting, Option<T>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
@@ -184,9 +185,11 @@ impl RequestChan {
 
         if result.is_ok() {
             match rx.await {
-                Ok(Ok((rr, rs, prev))) => {
-                    Ok((Box::new(move |a| rr(a.into())), rs, prev))
-                }
+                Ok(Ok((rr, rs, prev))) => Ok((
+                    Box::new(move |a| rr(a.into())),
+                    rs,
+                    prev.and_then(|v| T::try_from(v).ok()),
+                )),
                 Ok(Err(e)) => Err(e),
                 Err(_) => Err(Error::MissingPeer(String::from(
                     "core didn't reply to request",
