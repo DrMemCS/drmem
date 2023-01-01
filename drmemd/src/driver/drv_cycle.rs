@@ -25,8 +25,8 @@ pub struct Instance {
     enabled_at_boot: bool,
     state: CycleState,
     millis: time::Duration,
-    d_output: driver::ReportReading<device::Value>,
-    d_enable: driver::ReportReading<device::Value>,
+    d_output: driver::ReportReading<bool>,
+    d_enable: driver::ReportReading<bool>,
     s_enable: driver::RxDeviceSetting,
 }
 
@@ -42,8 +42,8 @@ impl Instance {
 
     pub fn new(
         enabled: bool, millis: time::Duration,
-        d_output: driver::ReportReading<device::Value>,
-        d_enable: driver::ReportReading<device::Value>,
+        d_output: driver::ReportReading<bool>,
+        d_enable: driver::ReportReading<bool>,
         s_enable: driver::RxDeviceSetting,
     ) -> Instance {
         Instance {
@@ -191,11 +191,11 @@ impl driver::API for Instance {
 
             if self.enabled_at_boot {
                 self.state = CycleState::CycleHigh;
-                (self.d_enable)(true.into()).await;
-                (self.d_output)(true.into()).await;
+                (self.d_enable)(true).await;
+                (self.d_output)(true).await;
             } else {
-                (self.d_enable)(false.into()).await;
-                (self.d_output)(false.into()).await;
+                (self.d_enable)(false).await;
+                (self.d_output)(false).await;
             }
 
             loop {
@@ -213,7 +213,7 @@ impl driver::API for Instance {
 
 			if let Some(v) = self.time_expired() {
 			    debug!("state {:?} : timeout occurred -- output {}", &self.state, v);
-			    (self.d_output)(v.into()).await;
+			    (self.d_output)(v).await;
 			}
                     }
 
@@ -243,10 +243,10 @@ impl driver::API for Instance {
 
                             debug!("state {:?} : new input -> {}", &self.state, b);
 
-                            (self.d_enable)(b.into()).await;
+                            (self.d_enable)(b).await;
 
                             if let Some(out) = out {
-				(self.d_output)(out.into()).await;
+				(self.d_output)(out).await;
                             }
 			} else {
                             let _ = tx.send(Err(Error::TypeError));
@@ -265,12 +265,9 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use drmem_api::types::device;
     use tokio::{sync::mpsc, time};
 
-    fn fake_report(
-        _v: device::Value,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    fn fake_report(_v: bool) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(async { () })
     }
 

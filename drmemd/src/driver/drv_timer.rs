@@ -26,8 +26,8 @@ pub struct Instance {
     state: TimerState,
     active_level: bool,
     millis: time::Duration,
-    d_output: driver::ReportReading<device::Value>,
-    d_enable: driver::ReportReading<device::Value>,
+    d_output: driver::ReportReading<bool>,
+    d_enable: driver::ReportReading<bool>,
     s_enable: driver::RxDeviceSetting,
 }
 
@@ -44,8 +44,8 @@ impl Instance {
 
     pub fn new(
         active_level: bool, millis: time::Duration,
-        d_output: driver::ReportReading<device::Value>,
-        d_enable: driver::ReportReading<device::Value>,
+        d_output: driver::ReportReading<bool>,
+        d_enable: driver::ReportReading<bool>,
         s_enable: driver::RxDeviceSetting,
     ) -> Instance {
         Instance {
@@ -223,8 +223,8 @@ impl driver::API for Instance {
         let fut = async {
             let mut timeout = time::Instant::now();
 
-            (self.d_enable)(false.into()).await;
-            (self.d_output)((!self.active_level).into()).await;
+            (self.d_enable)(false).await;
+            (self.d_output)(!self.active_level).await;
 
             loop {
                 info!("state {:?} : waiting for event", &self.state);
@@ -241,7 +241,7 @@ impl driver::API for Instance {
 			// set the output to the inactive value.
 
 			self.time_expired();
-			(self.d_output)((!self.active_level).into()).await;
+			(self.d_output)(!self.active_level).await;
                     }
 
                     // Always look for settings. We're pattern
@@ -269,10 +269,10 @@ impl driver::API for Instance {
 				timeout = tmo
                             }
 
-                            (self.d_enable)(b.into()).await;
+                            (self.d_enable)(b).await;
 
                             if let Some(out) = out {
-				(self.d_output)(out.into()).await;
+				(self.d_output)(out).await;
                             }
 			} else {
                             let _ = tx.send(Err(Error::TypeError));
@@ -291,12 +291,9 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use drmem_api::types::device;
     use tokio::{sync::mpsc, time};
 
-    fn fake_report(
-        _v: device::Value,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    fn fake_report(_v: bool) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(async { () })
     }
 

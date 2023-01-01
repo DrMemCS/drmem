@@ -22,20 +22,20 @@ pub struct Instance {
     precip_int: f64,
     prev_precip_total: Option<f64>,
 
-    d_dewpt: driver::ReportReading<device::Value>,
-    d_htidx: driver::ReportReading<device::Value>,
-    d_humidity: driver::ReportReading<device::Value>,
-    d_prate: driver::ReportReading<device::Value>,
-    d_ptotal: driver::ReportReading<device::Value>,
-    d_pressure: driver::ReportReading<device::Value>,
-    d_solrad: driver::ReportReading<device::Value>,
-    d_state: driver::ReportReading<device::Value>,
-    d_temp: driver::ReportReading<device::Value>,
-    d_uv: driver::ReportReading<device::Value>,
-    d_wndchl: driver::ReportReading<device::Value>,
-    d_wnddir: driver::ReportReading<device::Value>,
-    d_wndgst: driver::ReportReading<device::Value>,
-    d_wndspd: driver::ReportReading<device::Value>,
+    d_dewpt: driver::ReportReading<f64>,
+    d_htidx: driver::ReportReading<f64>,
+    d_humidity: driver::ReportReading<f64>,
+    d_prate: driver::ReportReading<f64>,
+    d_ptotal: driver::ReportReading<f64>,
+    d_pressure: driver::ReportReading<f64>,
+    d_solrad: driver::ReportReading<f64>,
+    d_state: driver::ReportReading<bool>,
+    d_temp: driver::ReportReading<f64>,
+    d_uv: driver::ReportReading<f64>,
+    d_wndchl: driver::ReportReading<f64>,
+    d_wnddir: driver::ReportReading<f64>,
+    d_wndgst: driver::ReportReading<f64>,
+    d_wndspd: driver::ReportReading<f64>,
 }
 
 impl Instance {
@@ -158,7 +158,7 @@ impl Instance {
 
         if let Some(dewpt) = dewpt {
             if (0.0..=200.0).contains(&dewpt) {
-                (self.d_dewpt)(dewpt.into()).await
+                (self.d_dewpt)(dewpt).await
             } else {
                 warn!("ignoring bad dew point value: {:.1}", dewpt)
             }
@@ -166,7 +166,7 @@ impl Instance {
 
         if let Some(htidx) = htidx {
             if (0.0..=200.0).contains(&htidx) {
-                (self.d_htidx)(htidx.into()).await
+                (self.d_htidx)(htidx).await
             } else {
                 warn!("ignoring bad heat index value: {:.1}", htidx)
             }
@@ -174,7 +174,7 @@ impl Instance {
 
         if let (Some(prate), Some(ptotal)) = (prate, ptotal) {
             if (0.0..=24.0).contains(&prate) {
-                (self.d_prate)(prate.into()).await
+                (self.d_prate)(prate).await
             } else {
                 warn!("ignoring bad precip rate: {:.2}", prate)
             }
@@ -197,7 +197,7 @@ impl Instance {
                         debug!("precip calc: stable sum, no rain ... resetting sum");
                         self.precip_int = 0.0
                     }
-                    (self.d_ptotal)(self.precip_int.into()).await
+                    (self.d_ptotal)(self.precip_int).await
                 }
                 self.prev_precip_total = Some(ptotal);
             } else {
@@ -208,23 +208,23 @@ impl Instance {
         }
 
         if let Some(press) = press {
-            (self.d_pressure)(press.into()).await
+            (self.d_pressure)(press).await
         }
 
         if let Some(temp) = temp {
-            (self.d_temp)(temp.into()).await
+            (self.d_temp)(temp).await
         }
 
         if let Some(wndchl) = wndchl {
-            (self.d_wndchl)(wndchl.into()).await
+            (self.d_wndchl)(wndchl).await
         }
 
         if let Some(wndgst) = wndgst {
-            (self.d_wndgst)(wndgst.into()).await
+            (self.d_wndgst)(wndgst).await
         }
 
         if let Some(wndspd) = wndspd {
-            (self.d_wndspd)(wndspd.into()).await
+            (self.d_wndspd)(wndspd).await
         }
 
         // If solar radiation readings are provided, report them.
@@ -236,7 +236,7 @@ impl Instance {
             // slightly inaccurate sensors won't be ignored.
 
             if (0.0..=1400.0).contains(&sol_rad) {
-                (self.d_solrad)(sol_rad.into()).await
+                (self.d_solrad)(sol_rad).await
             } else {
                 warn!("ignoring bad solar radiation value: {:.1}", sol_rad)
             }
@@ -249,7 +249,7 @@ impl Instance {
             // doubtful there's a place on earth that gets that low.
 
             if (0.0..=100.0).contains(&humidity) {
-                (self.d_humidity)(humidity.into()).await
+                (self.d_humidity)(humidity).await
             } else {
                 warn!("ignoring bad humidity value: {:.1}", humidity)
             }
@@ -258,7 +258,7 @@ impl Instance {
         // If UV readings are provided, report them.
 
         if let Some(uv) = obs.uv {
-            (self.d_uv)(uv.into()).await
+            (self.d_uv)(uv).await
         }
 
         // If wind direction readings are provided, report them.
@@ -267,7 +267,7 @@ impl Instance {
             // Make sure the reading is in range.
 
             if (0.0..=360.0).contains(&winddir) {
-                (self.d_wnddir)(winddir.into()).await
+                (self.d_wnddir)(winddir).await
             } else {
                 warn!("ignoring bad wind direction value: {:.1}", winddir)
             }
@@ -486,7 +486,7 @@ impl driver::API for Instance {
                                         if obs.len() > 1 {
                                             warn!("ignoring {} extra weather observations", obs.len() - 1);
                                         }
-                                        (self.d_state)(true.into()).await;
+                                        (self.d_state)(true).await;
                                         self.handle(&obs[0]).await;
                                         continue;
                                     }
@@ -495,19 +495,19 @@ impl driver::API for Instance {
                             }
 
                             Err(e) => {
-                                (self.d_state)(false.into()).await;
+                                (self.d_state)(false).await;
                                 panic!("error response from Weather Underground -- {:?}", &e)
                             }
                         }
                     }
 
                     Ok(None) => {
-                        (self.d_state)(false.into()).await;
+                        (self.d_state)(false).await;
                         panic!("no response from Weather Underground")
                     }
 
                     Err(e) => {
-                        (self.d_state)(false.into()).await;
+                        (self.d_state)(false).await;
                         panic!(
                             "error accessing Weather Underground -- {:?}",
                             &e

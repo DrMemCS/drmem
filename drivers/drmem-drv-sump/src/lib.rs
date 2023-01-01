@@ -144,10 +144,10 @@ pub struct Instance {
     gpm: f64,
     rx: OwnedReadHalf,
     _tx: OwnedWriteHalf,
-    d_service: driver::ReportReading<device::Value>,
-    d_state: driver::ReportReading<device::Value>,
-    d_duty: driver::ReportReading<device::Value>,
-    d_inflow: driver::ReportReading<device::Value>,
+    d_service: driver::ReportReading<bool>,
+    d_state: driver::ReportReading<bool>,
+    d_duty: driver::ReportReading<f64>,
+    d_inflow: driver::ReportReading<f64>,
 }
 
 impl Instance {
@@ -308,13 +308,13 @@ impl driver::API for Instance {
                 Span::current().record("cfg", &addr.as_str());
             }
 
-            (self.d_service)(true.into()).await;
+            (self.d_service)(true).await;
 
             loop {
                 match self.get_reading().await {
                     Ok((stamp, true)) => {
                         if self.state.on_event(stamp) {
-                            (self.d_state)(true.into()).await;
+                            (self.d_state)(true).await;
                         }
                     }
 
@@ -331,15 +331,15 @@ impl driver::API for Instance {
                                 in_flow
                             );
 
-                            (self.d_state)(false.into()).await;
-                            (self.d_duty)(duty.into()).await;
-                            (self.d_inflow)(in_flow.into()).await;
+                            (self.d_state)(false).await;
+                            (self.d_duty)(duty).await;
+                            (self.d_inflow)(in_flow).await;
                         }
                     }
 
                     Err(e) => {
-                        (self.d_state)(false.into()).await;
-                        (self.d_service)(false.into()).await;
+                        (self.d_state)(false).await;
+                        (self.d_service)(false).await;
                         panic!("couldn't read sump state -- {:?}", e);
                     }
                 }

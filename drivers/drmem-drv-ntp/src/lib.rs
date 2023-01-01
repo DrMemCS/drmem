@@ -105,10 +105,10 @@ mod server {
 pub struct Instance {
     sock: UdpSocket,
     seq: u16,
-    d_state: driver::ReportReading<device::Value>,
-    d_source: driver::ReportReading<device::Value>,
-    d_offset: driver::ReportReading<device::Value>,
-    d_delay: driver::ReportReading<device::Value>,
+    d_state: driver::ReportReading<bool>,
+    d_source: driver::ReportReading<String>,
+    d_offset: driver::ReportReading<f64>,
+    d_delay: driver::ReportReading<f64>,
 }
 
 impl Instance {
@@ -451,10 +451,10 @@ impl driver::API for Instance {
                                     tmp.get_offset(),
                                     tmp.get_delay()
                                 );
-                                (self.d_source)(tmp.get_host().into()).await;
-                                (self.d_offset)(tmp.get_offset().into()).await;
-                                (self.d_delay)(tmp.get_delay().into()).await;
-                                (self.d_state)(true.into()).await;
+                                (self.d_source)(tmp.get_host().clone()).await;
+                                (self.d_offset)(tmp.get_offset()).await;
+                                (self.d_delay)(tmp.get_delay()).await;
+                                (self.d_state)(true).await;
                                 info = host_info;
                             }
                             continue;
@@ -463,14 +463,14 @@ impl driver::API for Instance {
                             if info.is_some() {
                                 warn!("no synced host information found");
                                 info = None;
-                                (self.d_state)(false.into()).await;
+                                (self.d_state)(false).await;
                             }
                         }
                     }
                 } else if info.is_some() {
                     warn!("we're not synced to any host");
                     info = None;
-                    (self.d_state)(false.into()).await;
+                    (self.d_state)(false).await;
                 }
             }
         };
