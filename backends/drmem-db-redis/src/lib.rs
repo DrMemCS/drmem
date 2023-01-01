@@ -749,7 +749,7 @@ impl RedisStore {
 
     fn mk_report_func(
         &self, name: &str, max_history: &Option<usize>,
-    ) -> ReportReading {
+    ) -> ReportReading<Value> {
         let db_con = self.db_con.clone();
         let name = String::from(name);
 
@@ -795,7 +795,7 @@ impl Store for RedisStore {
     async fn register_read_only_device(
         &mut self, driver_name: &str, name: &device::Name,
         units: &Option<String>, max_history: &Option<usize>,
-    ) -> Result<(ReportReading, Option<Value>)> {
+    ) -> Result<(ReportReading<Value>, Option<Value>)> {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
@@ -814,7 +814,7 @@ impl Store for RedisStore {
     async fn register_read_write_device(
         &mut self, driver_name: &str, name: &device::Name,
         units: &Option<String>, max_history: &Option<usize>,
-    ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
+    ) -> Result<(ReportReading<Value>, RxDeviceSetting, Option<Value>)> {
         let sname = name.to_string();
 
         debug!("registering '{}' as read-write", &sname);

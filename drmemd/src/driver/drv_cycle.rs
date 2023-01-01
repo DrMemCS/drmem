@@ -25,8 +25,8 @@ pub struct Instance {
     enabled_at_boot: bool,
     state: CycleState,
     millis: time::Duration,
-    d_output: driver::ReportReading,
-    d_enable: driver::ReportReading,
+    d_output: driver::ReportReading<device::Value>,
+    d_enable: driver::ReportReading<device::Value>,
     s_enable: driver::RxDeviceSetting,
 }
 
@@ -41,8 +41,10 @@ impl Instance {
     /// Creates a new, idle `Instance`.
 
     pub fn new(
-        enabled: bool, millis: time::Duration, d_output: driver::ReportReading,
-        d_enable: driver::ReportReading, s_enable: driver::RxDeviceSetting,
+        enabled: bool, millis: time::Duration,
+        d_output: driver::ReportReading<device::Value>,
+        d_enable: driver::ReportReading<device::Value>,
+        s_enable: driver::RxDeviceSetting,
     ) -> Instance {
         Instance {
             enabled_at_boot: enabled,

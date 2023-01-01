@@ -1,6 +1,6 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::{device::Base, Error},
+    types::{device, Error},
     Result,
 };
 use std::convert::{Infallible, TryFrom};
@@ -22,20 +22,20 @@ pub struct Instance {
     precip_int: f64,
     prev_precip_total: Option<f64>,
 
-    d_dewpt: driver::ReportReading,
-    d_htidx: driver::ReportReading,
-    d_humidity: driver::ReportReading,
-    d_prate: driver::ReportReading,
-    d_ptotal: driver::ReportReading,
-    d_pressure: driver::ReportReading,
-    d_solrad: driver::ReportReading,
-    d_state: driver::ReportReading,
-    d_temp: driver::ReportReading,
-    d_uv: driver::ReportReading,
-    d_wndchl: driver::ReportReading,
-    d_wnddir: driver::ReportReading,
-    d_wndgst: driver::ReportReading,
-    d_wndspd: driver::ReportReading,
+    d_dewpt: driver::ReportReading<device::Value>,
+    d_htidx: driver::ReportReading<device::Value>,
+    d_humidity: driver::ReportReading<device::Value>,
+    d_prate: driver::ReportReading<device::Value>,
+    d_ptotal: driver::ReportReading<device::Value>,
+    d_pressure: driver::ReportReading<device::Value>,
+    d_solrad: driver::ReportReading<device::Value>,
+    d_state: driver::ReportReading<device::Value>,
+    d_temp: driver::ReportReading<device::Value>,
+    d_uv: driver::ReportReading<device::Value>,
+    d_wndchl: driver::ReportReading<device::Value>,
+    d_wnddir: driver::ReportReading<device::Value>,
+    d_wndgst: driver::ReportReading<device::Value>,
+    d_wndspd: driver::ReportReading<device::Value>,
 }
 
 impl Instance {
@@ -282,20 +282,20 @@ impl driver::API for Instance {
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
-        let dewpoint_name = "dewpoint".parse::<Base>().unwrap();
-        let heat_index_name = "heat-index".parse::<Base>().unwrap();
-        let humidity_name = "humidity".parse::<Base>().unwrap();
-        let precip_rate_name = "precip-rate".parse::<Base>().unwrap();
-        let precip_total_name = "precip-total".parse::<Base>().unwrap();
-        let pressure_name = "pressure".parse::<Base>().unwrap();
-        let solar_rad_name = "solar-rad".parse::<Base>().unwrap();
-        let state_name = "state".parse::<Base>().unwrap();
-        let temperature_name = "temperature".parse::<Base>().unwrap();
-        let uv_name = "uv".parse::<Base>().unwrap();
-        let wind_chill_name = "wind-chill".parse::<Base>().unwrap();
-        let wind_dir_name = "wind-dir".parse::<Base>().unwrap();
-        let wind_gust_name = "wind-gust".parse::<Base>().unwrap();
-        let wind_speed_name = "wind-speed".parse::<Base>().unwrap();
+        let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();
+        let heat_index_name = "heat-index".parse::<device::Base>().unwrap();
+        let humidity_name = "humidity".parse::<device::Base>().unwrap();
+        let precip_rate_name = "precip-rate".parse::<device::Base>().unwrap();
+        let precip_total_name = "precip-total".parse::<device::Base>().unwrap();
+        let pressure_name = "pressure".parse::<device::Base>().unwrap();
+        let solar_rad_name = "solar-rad".parse::<device::Base>().unwrap();
+        let state_name = "state".parse::<device::Base>().unwrap();
+        let temperature_name = "temperature".parse::<device::Base>().unwrap();
+        let uv_name = "uv".parse::<device::Base>().unwrap();
+        let wind_chill_name = "wind-chill".parse::<device::Base>().unwrap();
+        let wind_dir_name = "wind-dir".parse::<device::Base>().unwrap();
+        let wind_gust_name = "wind-gust".parse::<device::Base>().unwrap();
+        let wind_speed_name = "wind-speed".parse::<device::Base>().unwrap();
 
         let fut = async move {
             match wu::create_client(Duration::from_secs(5)) {

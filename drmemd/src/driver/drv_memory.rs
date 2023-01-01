@@ -1,13 +1,13 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::{device::Base, Error},
+    types::{device, Error},
     Result,
 };
 use std::{convert::Infallible, future::Future, pin::Pin};
 use tracing::{self, error};
 
 pub struct Instance {
-    d_memory: driver::ReportReading,
+    d_memory: driver::ReportReading<device::Value>,
     s_memory: driver::RxDeviceSetting,
 }
 
@@ -21,17 +21,18 @@ impl Instance {
     /// Creates a new `Instance` instance.
 
     pub fn new(
-        d_memory: driver::ReportReading, s_memory: driver::RxDeviceSetting,
+        d_memory: driver::ReportReading<device::Value>,
+        s_memory: driver::RxDeviceSetting,
     ) -> Instance {
         Instance { d_memory, s_memory }
     }
 
     // Gets the name of the device from the configuration.
 
-    fn get_cfg_name(cfg: &DriverConfig) -> Result<Base> {
+    fn get_cfg_name(cfg: &DriverConfig) -> Result<device::Base> {
         match cfg.get("name") {
             Some(toml::value::Value::String(name)) => {
-                if let Ok(name) = name.parse::<Base>() {
+                if let Ok(name) = name.parse::<device::Base>() {
                     return Ok(name);
                 } else {
                     error!("'name' isn't a proper, base name for a device")

@@ -1,6 +1,6 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::{device::Base, Error},
+    types::{device, Error},
     Result,
 };
 use std::future::Future;
@@ -144,10 +144,10 @@ pub struct Instance {
     gpm: f64,
     rx: OwnedReadHalf,
     _tx: OwnedWriteHalf,
-    d_service: driver::ReportReading,
-    d_state: driver::ReportReading,
-    d_duty: driver::ReportReading,
-    d_inflow: driver::ReportReading,
+    d_service: driver::ReportReading<device::Value>,
+    d_state: driver::ReportReading<device::Value>,
+    d_duty: driver::ReportReading<device::Value>,
+    d_inflow: driver::ReportReading<device::Value>,
 }
 
 impl Instance {
@@ -247,10 +247,10 @@ impl driver::API for Instance {
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
-        let service_name = "service".parse::<Base>().unwrap();
-        let state_name = "state".parse::<Base>().unwrap();
-        let duty_name = "duty".parse::<Base>().unwrap();
-        let in_flow_name = "in-flow".parse::<Base>().unwrap();
+        let service_name = "service".parse::<device::Base>().unwrap();
+        let state_name = "state".parse::<device::Base>().unwrap();
+        let duty_name = "duty".parse::<device::Base>().unwrap();
+        let in_flow_name = "in-flow".parse::<device::Base>().unwrap();
 
         let fut = async move {
             // Validate the configuration.

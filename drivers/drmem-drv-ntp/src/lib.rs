@@ -1,6 +1,6 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::{device::Base, Error},
+    types::{device, Error},
     Result,
 };
 use std::future::Future;
@@ -105,10 +105,10 @@ mod server {
 pub struct Instance {
     sock: UdpSocket,
     seq: u16,
-    d_state: driver::ReportReading,
-    d_source: driver::ReportReading,
-    d_offset: driver::ReportReading,
-    d_delay: driver::ReportReading,
+    d_state: driver::ReportReading<device::Value>,
+    d_source: driver::ReportReading<device::Value>,
+    d_offset: driver::ReportReading<device::Value>,
+    d_delay: driver::ReportReading<device::Value>,
 }
 
 impl Instance {
@@ -365,10 +365,10 @@ impl driver::API for Instance {
         // fully-tested, released version of this driver, we would
         // have seen and fixed any panics.
 
-        let state_name = "state".parse::<Base>().unwrap();
-        let source_name = "source".parse::<Base>().unwrap();
-        let offset_name = "offset".parse::<Base>().unwrap();
-        let delay_name = "delay".parse::<Base>().unwrap();
+        let state_name = "state".parse::<device::Base>().unwrap();
+        let source_name = "source".parse::<device::Base>().unwrap();
+        let offset_name = "offset".parse::<device::Base>().unwrap();
+        let delay_name = "delay".parse::<device::Base>().unwrap();
 
         let fut = async move {
             // Validate the configuration.

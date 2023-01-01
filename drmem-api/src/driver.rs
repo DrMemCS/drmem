@@ -28,8 +28,8 @@ pub type RxDeviceSetting =
     mpsc::Receiver<(Value, oneshot::Sender<Result<Value>>)>;
 
 /// A function that drivers use to report updated values of a device.
-pub type ReportReading = Box<
-    dyn Fn(Value) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+pub type ReportReading<T> = Box<
+    dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
         + Send
         + Sync
         + 'static,
@@ -47,7 +47,8 @@ pub enum Request {
         dev_name: Name,
         dev_units: Option<String>,
         max_history: Option<usize>,
-        rpy_chan: oneshot::Sender<Result<(ReportReading, Option<Value>)>>,
+        rpy_chan:
+            oneshot::Sender<Result<(ReportReading<Value>, Option<Value>)>>,
     },
 
     /// Registers a writable device with core.
@@ -61,7 +62,7 @@ pub enum Request {
         dev_units: Option<String>,
         max_history: Option<usize>,
         rpy_chan: oneshot::Sender<
-            Result<(ReportReading, RxDeviceSetting, Option<Value>)>,
+            Result<(ReportReading<Value>, RxDeviceSetting, Option<Value>)>,
         >,
     },
 }
@@ -106,9 +107,9 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device(
+    pub async fn add_ro_device<T: Into<Value>>(
         &self, name: Base, units: Option<&str>, max_history: Option<usize>,
-    ) -> super::Result<(ReportReading, Option<Value>)> {
+    ) -> super::Result<(ReportReading<T>, Option<Value>)> {
         // Create a location for the reply.
 
         let (tx, rx) = oneshot::channel();
@@ -130,21 +131,23 @@ impl RequestChan {
         // received a reply, process the payload.
 
         if result.is_ok() {
-            if let Ok(v) = rx.await {
-                return v;
-            } else {
-                return Err(Error::MissingPeer(String::from(
+            match rx.await {
+                Ok(Ok((rr, prev))) => {
+                    Ok((Box::new(move |a| rr(a.into())), prev))
+                }
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(Error::MissingPeer(String::from(
                     "core didn't reply to request",
-                )));
+                ))),
             }
+        } else {
+            // If either communication direction failed, return an error
+            // indicating we can't talk to core.
+
+            Err(Error::MissingPeer(String::from(
+                "core didn't accept request",
+            )))
         }
-
-        // If either communication direction failed, return an error
-        // indicating we can't talk to core.
-
-        Err(Error::MissingPeer(String::from(
-            "core didn't accept request",
-        )))
     }
 
     /// Registers a read-write device with the framework. `name` is the
@@ -164,9 +167,9 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_rw_device(
+    pub async fn add_rw_device<T: Into<Value>>(
         &self, name: Base, units: Option<&str>, max_history: Option<usize>,
-    ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
+    ) -> Result<(ReportReading<T>, RxDeviceSetting, Option<Value>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
@@ -180,17 +183,20 @@ impl RequestChan {
             .await;
 
         if result.is_ok() {
-            if let Ok(v) = rx.await {
-                return v;
-            } else {
-                return Err(Error::MissingPeer(String::from(
+            match rx.await {
+                Ok(Ok((rr, rs, prev))) => {
+                    Ok((Box::new(move |a| rr(a.into())), rs, prev))
+                }
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(Error::MissingPeer(String::from(
                     "core didn't reply to request",
-                )));
+                ))),
             }
+        } else {
+            Err(Error::MissingPeer(String::from(
+                "core didn't accept request",
+            )))
         }
-        Err(Error::MissingPeer(String::from(
-            "core didn't accept request",
-        )))
     }
 }
 

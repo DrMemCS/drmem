@@ -26,8 +26,8 @@ pub struct Instance {
     state: TimerState,
     active_level: bool,
     millis: time::Duration,
-    d_output: driver::ReportReading,
-    d_enable: driver::ReportReading,
+    d_output: driver::ReportReading<device::Value>,
+    d_enable: driver::ReportReading<device::Value>,
     s_enable: driver::RxDeviceSetting,
 }
 
@@ -44,7 +44,8 @@ impl Instance {
 
     pub fn new(
         active_level: bool, millis: time::Duration,
-        d_output: driver::ReportReading, d_enable: driver::ReportReading,
+        d_output: driver::ReportReading<device::Value>,
+        d_enable: driver::ReportReading<device::Value>,
         s_enable: driver::RxDeviceSetting,
     ) -> Instance {
         Instance {
