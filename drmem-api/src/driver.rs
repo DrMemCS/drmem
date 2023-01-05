@@ -55,8 +55,9 @@ pub type ReportReading<T> = Box<
 pub enum Request {
     /// Registers a read-only device with core.
     ///
-    /// The reply will contain a channel to broadcast values read from
-    /// the hardware.
+    /// The reply is a pair where the first element is a channel to
+    /// report updated values of the device. The second element, if
+    /// not `None`, is the last saved value of the device.
     AddReadonlyDevice {
         driver_name: String,
         dev_name: Name,
@@ -68,9 +69,10 @@ pub enum Request {
 
     /// Registers a writable device with core.
     ///
-    /// The reply is a pair where the first element is a channel to
-    /// broadcast values read from the hardware. The second element is
-    /// a read-handle to acccept incoming setting to the device.
+    /// The reply is a 3-tuple where the first element is a channel to
+    /// report updated values of the device. The second element is a
+    /// stream that yileds incoming settings to the device. The last
+    /// element, if not `None`, is the last saved value of the device.
     AddReadWriteDevice {
         driver_name: String,
         dev_name: Name,
@@ -265,12 +267,11 @@ pub trait API: Send {
     /// the driver. By convention, if any errors are found in the
     /// configuration, this method should return `Error::BadConfig`.
     ///
-    /// `drc` is the send handle to a device request channel. The
-    /// driver should store this handle and use it to communicate with
-    /// the framework. Its typical use is to register devices with the
-    /// framework, which is usually done in this method. As other
-    /// request types are added, they can be used while the driver is
-    /// running.
+    /// `drc` is a communication channel with which the driver makes
+    /// requests to the core. Its typical use is to register devices
+    /// with the framework, which is usually done in this method. As
+    /// other request types are added, they can be used while the
+    /// driver is running.
     ///
     /// `max_history` is specified in the configuration file. It is a
     /// hint as to the maximum number of data point to save for each
@@ -292,10 +293,11 @@ pub trait API: Send {
     /// Runs the instance of the driver.
     ///
     /// Since drivers provide access to hardware, this method should
-    /// never return unless something severe occurs. All drivers are
-    /// monitored by a task and if a driver panics or returns an error
-    /// from this method, it gets reported in the log and then, after
-    /// a short delay, the driver is restarted.
+    /// never return unless something severe occurs and, in that case,
+    /// it should use `panic!()`. All drivers are monitored by a task
+    /// and if a driver panics or returns an error from this method,
+    /// it gets reported in the log and then, after a short delay, the
+    /// driver is restarted.
 
     fn run<'a>(
         &'a mut self,
