@@ -43,12 +43,8 @@ pub type SettingStream<T> =
     Pin<Box<dyn Stream<Item = (T, SettingReply<T>)> + Send>>;
 
 /// A function that drivers use to report updated values of a device.
-pub type ReportReading<T> = Box<
-    dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
-        + Send
-        + Sync
-        + 'static,
->;
+pub type ReportReading<T> =
+    Box<dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Defines the requests that can be sent to core. Drivers don't use
 /// this type directly. They are indirectly used by `RequestChan`.
