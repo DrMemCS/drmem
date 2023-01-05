@@ -11,8 +11,8 @@ _A small, capable control system for the hobbyist_
 [mit-url]: https://github.com/tokio-rs/tokio/blob/master/LICENSE
 [crates-badge]: https://img.shields.io/crates/v/drmemd.svg
 [crates-url]: https://crates.io/crates/drmemd
-[actions-badge]: workflows/CI/badge.svg
-[actions-url]: actions?query=workflow%3ACI+branch%3Amain
+[actions-badge]: https://github.com/DrMemCS/drmem/actions/workflows/ci.yml/badge.svg
+[actions-url]: https://github.com/DrMemCS/drmem/actions/workflows/ci.yml
 [twitter-badge]: https://img.shields.io/twitter/follow/DrMemCS?style=social
 [twitter-url]: https://twitter.com/DrMemCS
 
