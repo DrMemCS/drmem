@@ -303,3 +303,53 @@ pub trait API: Send {
         &'a mut self,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::{mpsc, oneshot};
+
+    #[tokio::test]
+    async fn test_setting_stream() {
+        // Build communication channels, including wrapping the
+        // receive handle in a `SettingStream`.
+
+        let (tx, rx) = mpsc::channel(20);
+        let mut s: SettingStream<bool> = RequestChan::create_setting_stream(rx);
+        let (os_tx, os_rx) = oneshot::channel();
+
+        // Assert we can send to an active channel.
+
+        assert_eq!(tx.send((true.into(), os_tx)).await.unwrap(), ());
+
+        // Assert there's an item in the stream and that it's been
+        // converted to a `bool` type.
+
+        let (v, f) = s.next().await.unwrap();
+
+        assert_eq!(v, true);
+
+        // Send back the reply -- changing it to `false`. Verify the
+        // received reply is also `false`.
+
+        f(Ok(false));
+
+        assert_eq!(os_rx.await.unwrap().unwrap(), false.into());
+
+        // Now try to send the wrong type to the channel. The stream
+        // should reject the bad settings and return an error. This
+        // means calling `.next()` will block. To avoid our tests from
+        // blocking forever, we drop the `mpsc::Send` handle so the
+        // stream reports end-of-stream. We can then check to see if
+        // our reply was an error.
+
+        let (os_tx, os_rx) = oneshot::channel();
+
+        assert_eq!(tx.send(((1.0).into(), os_tx)).await.unwrap(), ());
+
+        std::mem::drop(tx);
+
+        assert!(s.next().await.is_none());
+        assert!(os_rx.await.unwrap().is_err());
+    }
+}
