@@ -4,11 +4,12 @@ use drmem_api::{
     Result,
 };
 use std::{convert::Infallible, future::Future, pin::Pin};
+use tokio_stream::StreamExt;
 use tracing::{self, error};
 
 pub struct Instance {
     d_memory: driver::ReportReading<device::Value>,
-    s_memory: driver::RxDeviceSetting,
+    s_memory: driver::SettingStream<device::Value>,
 }
 
 impl Instance {
@@ -22,7 +23,7 @@ impl Instance {
 
     pub fn new(
         d_memory: driver::ReportReading<device::Value>,
-        s_memory: driver::RxDeviceSetting,
+        s_memory: driver::SettingStream<device::Value>,
     ) -> Instance {
         Instance { d_memory, s_memory }
     }
@@ -76,9 +77,8 @@ impl driver::API for Instance {
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
             loop {
-                if let Some((v, tx)) = self.s_memory.recv().await {
-                    let _ = tx.send(Ok(v.clone()));
-
+                if let Some((v, reply)) = self.s_memory.next().await {
+                    reply(Ok(v.clone()));
                     (self.d_memory)(v).await
                 } else {
                     panic!("can no longer receive settings");

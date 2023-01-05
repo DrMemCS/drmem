@@ -8,6 +8,7 @@ use crate::types::{
 use std::future::Future;
 use std::{convert::Infallible, pin::Pin};
 use tokio::sync::{mpsc, oneshot};
+use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use toml::value;
 
 use super::Result;
@@ -19,13 +20,27 @@ use super::Result;
 /// values.
 pub type DriverConfig = value::Table;
 
+/// This type represents the data that is transferred in the
+/// communication channel. It simplifies the next two types.
+pub type SettingRequest = (Value, oneshot::Sender<Result<Value>>);
+
 /// Used by client APIs to send setting requests to a driver.
-pub type TxDeviceSetting =
-    mpsc::Sender<(Value, oneshot::Sender<Result<Value>>)>;
+pub type TxDeviceSetting = mpsc::Sender<SettingRequest>;
 
 /// Used by a driver to receive settings from a client.
-pub type RxDeviceSetting =
-    mpsc::Receiver<(Value, oneshot::Sender<Result<Value>>)>;
+pub type RxDeviceSetting = mpsc::Receiver<SettingRequest>;
+
+/// A closure type that defines how a driver replies to a setting
+/// request. It can return `Ok()` to show what value was actually used
+/// or `Err()` to indicate the setting failed.
+pub type SettingReply<T> = Box<dyn FnOnce(Result<T>) + Send>;
+
+/// The driver is given a stream that yields setting requests. If the
+/// driver uses a type that can be converted to and from a
+/// `device::Value`, this stream will automatically reject settings
+/// that aren't of the correct type and pass on converted values.
+pub type SettingStream<T> =
+    Pin<Box<dyn Stream<Item = (T, SettingReply<T>)> + Send>>;
 
 /// A function that drivers use to report updated values of a device.
 pub type ReportReading<T> = Box<
@@ -151,6 +166,34 @@ impl RequestChan {
         }
     }
 
+    // Creates a stream of incoming settings. Since settings are
+    // provided as `device::Value` types, we try to map them to the
+    // desired type. If the conversion can't be done, an error is
+    // automatically sent back to the client and the message isn't
+    // forwarded to the driver. Otherwise the converted value is
+    // yielded.
+
+    fn create_setting_stream<T: TryFrom<Value> + Into<Value>>(
+        rx: RxDeviceSetting,
+    ) -> SettingStream<T> {
+        Box::pin(ReceiverStream::new(rx).filter_map(|(v, tx_rpy)| {
+            match T::try_from(v) {
+                Ok(v) => {
+                    let f: SettingReply<T> = Box::new(|v: Result<T>| {
+                        let _ = tx_rpy.send(v.map(T::into));
+                    });
+
+                    Some((v, f))
+                }
+                Err(_) => {
+                    let _ = tx_rpy.send(Err(Error::TypeError));
+
+                    None
+                }
+            }
+        }))
+    }
+
     /// Registers a read-write device with the framework. `name` is the
     /// last section of the full device name. Typically a driver will
     /// register several devices, each representing a portion of the
@@ -170,7 +213,7 @@ impl RequestChan {
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device<T: Into<Value> + TryFrom<Value>>(
         &self, name: Base, units: Option<&str>, max_history: Option<usize>,
-    ) -> Result<(ReportReading<T>, RxDeviceSetting, Option<T>)> {
+    ) -> Result<(ReportReading<T>, SettingStream<T>, Option<T>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
@@ -187,7 +230,7 @@ impl RequestChan {
             match rx.await {
                 Ok(Ok((rr, rs, prev))) => Ok((
                     Box::new(move |a| rr(a.into())),
-                    rs,
+                    RequestChan::create_setting_stream(rs),
                     prev.and_then(|v| T::try_from(v).ok()),
                 )),
                 Ok(Err(e)) => Err(e),

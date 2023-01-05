@@ -1,14 +1,12 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::{
-        device::{self, Base},
-        Error,
-    },
+    types::{device::Base, Error},
     Result,
 };
 use std::{convert::Infallible, future::Future, pin::Pin};
 use tokio::time;
-use tracing::{self, debug, error, info, warn};
+use tokio_stream::StreamExt;
+use tracing::{self, debug, error, info};
 
 // This enum represents the four states in which the timer can
 // be. They are a combination of the `enable` input and whether we're
@@ -28,7 +26,7 @@ pub struct Instance {
     millis: time::Duration,
     d_output: driver::ReportReading<bool>,
     d_enable: driver::ReportReading<bool>,
-    s_enable: driver::RxDeviceSetting,
+    s_enable: driver::SettingStream<bool>,
 }
 
 impl Instance {
@@ -46,7 +44,7 @@ impl Instance {
         active_level: bool, millis: time::Duration,
         d_output: driver::ReportReading<bool>,
         d_enable: driver::ReportReading<bool>,
-        s_enable: driver::RxDeviceSetting,
+        s_enable: driver::SettingStream<bool>,
     ) -> Instance {
         Instance {
             state: TimerState::Armed,
@@ -251,34 +249,22 @@ impl driver::API for Instance {
                     // handle is saved in the device look-up
                     // table. All other handles are cloned from it.
 
-                    Some((v, tx)) = self.s_enable.recv() => {
+                    Some((b, reply)) = self.s_enable.next() => {
+                        let (out, tmo) = self.update_state(b);
 
-			// If a client sends us something besides a
-			// boolean, return an error and ignore the
-			// setting. Otherwise, echo the value back to
-			// the client and update the state with the
-			// new value.
+                        reply(Ok(b));
 
-			if let device::Value::Bool(b) = v {
-                            let (out, tmo) = self.update_state(b);
-                            let _ = tx.send(Ok(v));
+                        debug!("state {:?} : new input -> {}", &self.state, b);
 
-                            debug!("state {:?} : new input -> {}", &self.state, b);
+                        if let Some(tmo) = tmo {
+			    timeout = tmo
+                        }
 
-                            if let Some(tmo) = tmo {
-				timeout = tmo
-                            }
+                        (self.d_enable)(b).await;
 
-                            (self.d_enable)(b).await;
-
-                            if let Some(out) = out {
-				(self.d_output)(out).await;
-                            }
-			} else {
-                            let _ = tx.send(Err(Error::TypeError));
-
-                            warn!("state {:?} : received bad value -> {:?}", &self.state, &v);
-			}
+                        if let Some(out) = out {
+			    (self.d_output)(out).await;
+                        }
                     }
                 }
             }
@@ -291,7 +277,7 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::{sync::mpsc, time};
+    use tokio::time;
 
     fn fake_report(_v: bool) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         Box::pin(async { () })
@@ -299,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_state_changes() {
-        let (_tx, rx) = mpsc::channel(20);
+        let rx: driver::SettingStream<bool> = Box::pin(tokio_stream::empty());
         let mut timer = Instance::new(
             true,
             time::Duration::from_millis(1000),
