@@ -8,6 +8,7 @@ use crate::types::{
 use std::future::Future;
 use std::{convert::Infallible, pin::Pin};
 use tokio::sync::{mpsc, oneshot};
+use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use toml::value;
 
 use super::Result;
@@ -19,49 +20,62 @@ use super::Result;
 /// values.
 pub type DriverConfig = value::Table;
 
+/// This type represents the data that is transferred in the
+/// communication channel. It simplifies the next two types.
+pub type SettingRequest = (Value, oneshot::Sender<Result<Value>>);
+
 /// Used by client APIs to send setting requests to a driver.
-pub type TxDeviceSetting =
-    mpsc::Sender<(Value, oneshot::Sender<Result<Value>>)>;
+pub type TxDeviceSetting = mpsc::Sender<SettingRequest>;
 
 /// Used by a driver to receive settings from a client.
-pub type RxDeviceSetting =
-    mpsc::Receiver<(Value, oneshot::Sender<Result<Value>>)>;
+pub type RxDeviceSetting = mpsc::Receiver<SettingRequest>;
+
+/// A closure type that defines how a driver replies to a setting
+/// request. It can return `Ok()` to show what value was actually used
+/// or `Err()` to indicate the setting failed.
+pub type SettingReply<T> = Box<dyn FnOnce(Result<T>) + Send>;
+
+/// The driver is given a stream that yields setting requests. If the
+/// driver uses a type that can be converted to and from a
+/// `device::Value`, this stream will automatically reject settings
+/// that aren't of the correct type and pass on converted values.
+pub type SettingStream<T> =
+    Pin<Box<dyn Stream<Item = (T, SettingReply<T>)> + Send>>;
 
 /// A function that drivers use to report updated values of a device.
-pub type ReportReading = Box<
-    dyn Fn(Value) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
-        + Send
-        + Sync
-        + 'static,
->;
+pub type ReportReading<T> =
+    Box<dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Defines the requests that can be sent to core. Drivers don't use
 /// this type directly. They are indirectly used by `RequestChan`.
 pub enum Request {
     /// Registers a read-only device with core.
     ///
-    /// The reply will contain a channel to broadcast values read from
-    /// the hardware.
+    /// The reply is a pair where the first element is a channel to
+    /// report updated values of the device. The second element, if
+    /// not `None`, is the last saved value of the device.
     AddReadonlyDevice {
         driver_name: String,
         dev_name: Name,
         dev_units: Option<String>,
         max_history: Option<usize>,
-        rpy_chan: oneshot::Sender<Result<(ReportReading, Option<Value>)>>,
+        rpy_chan:
+            oneshot::Sender<Result<(ReportReading<Value>, Option<Value>)>>,
     },
 
     /// Registers a writable device with core.
     ///
-    /// The reply is a pair where the first element is a channel to
-    /// broadcast values read from the hardware. The second element is
-    /// a read-handle to acccept incoming setting to the device.
+    /// The reply is a 3-tuple where the first element is a channel to
+    /// report updated values of the device. The second element is a
+    /// stream that yileds incoming settings to the device. The last
+    /// element, if not `None`, is the last saved value of the device.
     AddReadWriteDevice {
         driver_name: String,
         dev_name: Name,
         dev_units: Option<String>,
         max_history: Option<usize>,
         rpy_chan: oneshot::Sender<
-            Result<(ReportReading, RxDeviceSetting, Option<Value>)>,
+            Result<(ReportReading<Value>, RxDeviceSetting, Option<Value>)>,
         >,
     },
 }
@@ -106,9 +120,9 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device(
+    pub async fn add_ro_device<T: Into<Value> + TryFrom<Value>>(
         &self, name: Base, units: Option<&str>, max_history: Option<usize>,
-    ) -> super::Result<(ReportReading, Option<Value>)> {
+    ) -> super::Result<(ReportReading<T>, Option<T>)> {
         // Create a location for the reply.
 
         let (tx, rx) = oneshot::channel();
@@ -130,21 +144,52 @@ impl RequestChan {
         // received a reply, process the payload.
 
         if result.is_ok() {
-            if let Ok(v) = rx.await {
-                return v;
-            } else {
-                return Err(Error::MissingPeer(String::from(
+            match rx.await {
+                Ok(Ok((rr, prev))) => Ok((
+                    Box::new(move |a| rr(a.into())),
+                    prev.and_then(|v| T::try_from(v).ok()),
+                )),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(Error::MissingPeer(String::from(
                     "core didn't reply to request",
-                )));
+                ))),
             }
+        } else {
+            // If either communication direction failed, return an error
+            // indicating we can't talk to core.
+
+            Err(Error::MissingPeer(String::from(
+                "core didn't accept request",
+            )))
         }
+    }
 
-        // If either communication direction failed, return an error
-        // indicating we can't talk to core.
+    // Creates a stream of incoming settings. Since settings are
+    // provided as `device::Value` types, we try to map them to the
+    // desired type. If the conversion can't be done, an error is
+    // automatically sent back to the client and the message isn't
+    // forwarded to the driver. Otherwise the converted value is
+    // yielded.
 
-        Err(Error::MissingPeer(String::from(
-            "core didn't accept request",
-        )))
+    fn create_setting_stream<T: TryFrom<Value> + Into<Value>>(
+        rx: RxDeviceSetting,
+    ) -> SettingStream<T> {
+        Box::pin(ReceiverStream::new(rx).filter_map(|(v, tx_rpy)| {
+            match T::try_from(v) {
+                Ok(v) => {
+                    let f: SettingReply<T> = Box::new(|v: Result<T>| {
+                        let _ = tx_rpy.send(v.map(T::into));
+                    });
+
+                    Some((v, f))
+                }
+                Err(_) => {
+                    let _ = tx_rpy.send(Err(Error::TypeError));
+
+                    None
+                }
+            }
+        }))
     }
 
     /// Registers a read-write device with the framework. `name` is the
@@ -164,9 +209,9 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_rw_device(
+    pub async fn add_rw_device<T: Into<Value> + TryFrom<Value>>(
         &self, name: Base, units: Option<&str>, max_history: Option<usize>,
-    ) -> Result<(ReportReading, RxDeviceSetting, Option<Value>)> {
+    ) -> Result<(ReportReading<T>, SettingStream<T>, Option<T>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
@@ -180,17 +225,22 @@ impl RequestChan {
             .await;
 
         if result.is_ok() {
-            if let Ok(v) = rx.await {
-                return v;
-            } else {
-                return Err(Error::MissingPeer(String::from(
+            match rx.await {
+                Ok(Ok((rr, rs, prev))) => Ok((
+                    Box::new(move |a| rr(a.into())),
+                    RequestChan::create_setting_stream(rs),
+                    prev.and_then(|v| T::try_from(v).ok()),
+                )),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(Error::MissingPeer(String::from(
                     "core didn't reply to request",
-                )));
+                ))),
             }
+        } else {
+            Err(Error::MissingPeer(String::from(
+                "core didn't accept request",
+            )))
         }
-        Err(Error::MissingPeer(String::from(
-            "core didn't accept request",
-        )))
     }
 }
 
@@ -213,12 +263,11 @@ pub trait API: Send {
     /// the driver. By convention, if any errors are found in the
     /// configuration, this method should return `Error::BadConfig`.
     ///
-    /// `drc` is the send handle to a device request channel. The
-    /// driver should store this handle and use it to communicate with
-    /// the framework. Its typical use is to register devices with the
-    /// framework, which is usually done in this method. As other
-    /// request types are added, they can be used while the driver is
-    /// running.
+    /// `drc` is a communication channel with which the driver makes
+    /// requests to the core. Its typical use is to register devices
+    /// with the framework, which is usually done in this method. As
+    /// other request types are added, they can be used while the
+    /// driver is running.
     ///
     /// `max_history` is specified in the configuration file. It is a
     /// hint as to the maximum number of data point to save for each
@@ -240,12 +289,63 @@ pub trait API: Send {
     /// Runs the instance of the driver.
     ///
     /// Since drivers provide access to hardware, this method should
-    /// never return unless something severe occurs. All drivers are
-    /// monitored by a task and if a driver panics or returns an error
-    /// from this method, it gets reported in the log and then, after
-    /// a short delay, the driver is restarted.
+    /// never return unless something severe occurs and, in that case,
+    /// it should use `panic!()`. All drivers are monitored by a task
+    /// and if a driver panics or returns an error from this method,
+    /// it gets reported in the log and then, after a short delay, the
+    /// driver is restarted.
 
     fn run<'a>(
         &'a mut self,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::{mpsc, oneshot};
+
+    #[tokio::test]
+    async fn test_setting_stream() {
+        // Build communication channels, including wrapping the
+        // receive handle in a `SettingStream`.
+
+        let (tx, rx) = mpsc::channel(20);
+        let mut s: SettingStream<bool> = RequestChan::create_setting_stream(rx);
+        let (os_tx, os_rx) = oneshot::channel();
+
+        // Assert we can send to an active channel.
+
+        assert_eq!(tx.send((true.into(), os_tx)).await.unwrap(), ());
+
+        // Assert there's an item in the stream and that it's been
+        // converted to a `bool` type.
+
+        let (v, f) = s.next().await.unwrap();
+
+        assert_eq!(v, true);
+
+        // Send back the reply -- changing it to `false`. Verify the
+        // received reply is also `false`.
+
+        f(Ok(false));
+
+        assert_eq!(os_rx.await.unwrap().unwrap(), false.into());
+
+        // Now try to send the wrong type to the channel. The stream
+        // should reject the bad settings and return an error. This
+        // means calling `.next()` will block. To avoid our tests from
+        // blocking forever, we drop the `mpsc::Send` handle so the
+        // stream reports end-of-stream. We can then check to see if
+        // our reply was an error.
+
+        let (os_tx, os_rx) = oneshot::channel();
+
+        assert_eq!(tx.send(((1.0).into(), os_tx)).await.unwrap(), ());
+
+        std::mem::drop(tx);
+
+        assert!(s.next().await.is_none());
+        assert!(os_rx.await.unwrap().is_err());
+    }
 }

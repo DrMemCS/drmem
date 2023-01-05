@@ -1,6 +1,6 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::{device::Base, Error},
+    types::{device, Error},
     Result,
 };
 use std::future::Future;
@@ -144,10 +144,10 @@ pub struct Instance {
     gpm: f64,
     rx: OwnedReadHalf,
     _tx: OwnedWriteHalf,
-    d_service: driver::ReportReading,
-    d_state: driver::ReportReading,
-    d_duty: driver::ReportReading,
-    d_inflow: driver::ReportReading,
+    d_service: driver::ReportReading<bool>,
+    d_state: driver::ReportReading<bool>,
+    d_duty: driver::ReportReading<f64>,
+    d_inflow: driver::ReportReading<f64>,
 }
 
 impl Instance {
@@ -247,10 +247,10 @@ impl driver::API for Instance {
     ) -> Pin<
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
-        let service_name = "service".parse::<Base>().unwrap();
-        let state_name = "state".parse::<Base>().unwrap();
-        let duty_name = "duty".parse::<Base>().unwrap();
-        let in_flow_name = "in-flow".parse::<Base>().unwrap();
+        let service_name = "service".parse::<device::Base>().unwrap();
+        let state_name = "state".parse::<device::Base>().unwrap();
+        let duty_name = "duty".parse::<device::Base>().unwrap();
+        let in_flow_name = "in-flow".parse::<device::Base>().unwrap();
 
         let fut = async move {
             // Validate the configuration.
@@ -308,13 +308,13 @@ impl driver::API for Instance {
                 Span::current().record("cfg", &addr.as_str());
             }
 
-            (self.d_service)(true.into()).await;
+            (self.d_service)(true).await;
 
             loop {
                 match self.get_reading().await {
                     Ok((stamp, true)) => {
                         if self.state.on_event(stamp) {
-                            (self.d_state)(true.into()).await;
+                            (self.d_state)(true).await;
                         }
                     }
 
@@ -331,15 +331,15 @@ impl driver::API for Instance {
                                 in_flow
                             );
 
-                            (self.d_state)(false.into()).await;
-                            (self.d_duty)(duty.into()).await;
-                            (self.d_inflow)(in_flow.into()).await;
+                            (self.d_state)(false).await;
+                            (self.d_duty)(duty).await;
+                            (self.d_inflow)(in_flow).await;
                         }
                     }
 
                     Err(e) => {
-                        (self.d_state)(false.into()).await;
-                        (self.d_service)(false.into()).await;
+                        (self.d_state)(false).await;
+                        (self.d_service)(false).await;
                         panic!("couldn't read sump state -- {:?}", e);
                     }
                 }

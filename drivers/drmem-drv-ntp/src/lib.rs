@@ -1,6 +1,6 @@
 use drmem_api::{
     driver::{self, DriverConfig},
-    types::{device::Base, Error},
+    types::{device, Error},
     Result,
 };
 use std::future::Future;
@@ -105,10 +105,10 @@ mod server {
 pub struct Instance {
     sock: UdpSocket,
     seq: u16,
-    d_state: driver::ReportReading,
-    d_source: driver::ReportReading,
-    d_offset: driver::ReportReading,
-    d_delay: driver::ReportReading,
+    d_state: driver::ReportReading<bool>,
+    d_source: driver::ReportReading<String>,
+    d_offset: driver::ReportReading<f64>,
+    d_delay: driver::ReportReading<f64>,
 }
 
 impl Instance {
@@ -365,10 +365,10 @@ impl driver::API for Instance {
         // fully-tested, released version of this driver, we would
         // have seen and fixed any panics.
 
-        let state_name = "state".parse::<Base>().unwrap();
-        let source_name = "source".parse::<Base>().unwrap();
-        let offset_name = "offset".parse::<Base>().unwrap();
-        let delay_name = "delay".parse::<Base>().unwrap();
+        let state_name = "state".parse::<device::Base>().unwrap();
+        let source_name = "source".parse::<device::Base>().unwrap();
+        let offset_name = "offset".parse::<device::Base>().unwrap();
+        let delay_name = "delay".parse::<device::Base>().unwrap();
 
         let fut = async move {
             // Validate the configuration.
@@ -451,10 +451,10 @@ impl driver::API for Instance {
                                     tmp.get_offset(),
                                     tmp.get_delay()
                                 );
-                                (self.d_source)(tmp.get_host().into()).await;
-                                (self.d_offset)(tmp.get_offset().into()).await;
-                                (self.d_delay)(tmp.get_delay().into()).await;
-                                (self.d_state)(true.into()).await;
+                                (self.d_source)(tmp.get_host().clone()).await;
+                                (self.d_offset)(tmp.get_offset()).await;
+                                (self.d_delay)(tmp.get_delay()).await;
+                                (self.d_state)(true).await;
                                 info = host_info;
                             }
                             continue;
@@ -463,14 +463,14 @@ impl driver::API for Instance {
                             if info.is_some() {
                                 warn!("no synced host information found");
                                 info = None;
-                                (self.d_state)(false.into()).await;
+                                (self.d_state)(false).await;
                             }
                         }
                     }
                 } else if info.is_some() {
                     warn!("we're not synced to any host");
                     info = None;
-                    (self.d_state)(false.into()).await;
+                    (self.d_state)(false).await;
                 }
             }
         };

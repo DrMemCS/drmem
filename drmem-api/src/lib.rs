@@ -44,7 +44,10 @@ pub trait Store {
     async fn register_read_only_device(
         &mut self, driver: &str, name: &types::device::Name,
         units: &Option<String>, max_history: &Option<usize>,
-    ) -> Result<(driver::ReportReading, Option<types::device::Value>)>;
+    ) -> Result<(
+        driver::ReportReading<types::device::Value>,
+        Option<types::device::Value>,
+    )>;
 
     /// Called when a read-write device is to be registered with the
     /// back-end.
@@ -73,7 +76,7 @@ pub trait Store {
         &mut self, driver: &str, name: &types::device::Name,
         units: &Option<String>, max_history: &Option<usize>,
     ) -> Result<(
-        driver::ReportReading,
+        driver::ReportReading<types::device::Value>,
         driver::RxDeviceSetting,
         Option<types::device::Value>,
     )>;
