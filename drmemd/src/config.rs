@@ -93,18 +93,6 @@ pub struct Logic {
     pub outputs: HashMap<String, Name>,
 }
 
-impl Default for Logic {
-    fn default() -> Self {
-        Logic {
-            name: String::from("unknown"),
-            defs: HashMap::new(),
-            exprs: vec![],
-            inputs: HashMap::new(),
-            outputs: HashMap::new(),
-        }
-    }
-}
-
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
     use clap::{App, Arg};
 
