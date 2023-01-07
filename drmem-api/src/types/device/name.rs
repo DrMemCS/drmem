@@ -36,10 +36,14 @@ impl Segment {
             {
                 Ok(Segment(String::from(s)))
             } else {
-                Err(Error::InvArgument("segment contains invalid character"))
+                Err(Error::InvArgument(String::from(
+                    "segment contains invalid character",
+                )))
             }
         } else {
-            Err(Error::InvArgument("contains zero-length segment"))
+            Err(Error::InvArgument(String::from(
+                "contains zero-length segment",
+            )))
         }
     }
 }
@@ -192,7 +196,7 @@ impl Name {
             .collect::<Result<Vec<Segment>>>()
         {
             Ok(segments) if segments.len() < 2 => Err(Error::InvArgument(
-                "device name requires a path and base name",
+                String::from("device name requires a path and base name"),
             )),
             Ok(segments) => Ok(Name {
                 path: Path(segments[0..segments.len() - 1].to_vec()),

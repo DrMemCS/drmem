@@ -31,7 +31,7 @@ pub enum Error {
     TypeError,
 
     /// An invalid value was provided.
-    InvArgument(&'static str),
+    InvArgument(String),
 
     /// Returned when a communication error occurred with the backend
     /// database. Each backend will have its own recommendations on
