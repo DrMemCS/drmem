@@ -10,11 +10,15 @@ use drmem_api::{
     types::device::{Name, Path},
 };
 
+fn def_log_level() -> String {
+    String::from("warn")
+}
+
 #[derive(Deserialize)]
 pub struct Config {
     #[cfg(feature = "graphql")]
     name: Option<String>,
-    #[serde(default)]
+    #[serde(default = "def_log_level")]
     log_level: String,
     #[cfg(feature = "graphql")]
     pub graphql: Option<std::net::SocketAddr>,
