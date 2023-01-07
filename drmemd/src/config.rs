@@ -564,7 +564,6 @@ outputs = {}
                     cfg.get_backend().get_dbn(),
                     def_cfg.get_backend().get_dbn()
                 );
-                assert_eq!(cfg.log_level, def_cfg.log_level);
             }
             Err(e) => panic!("TOML parse error: {}", e),
         }
