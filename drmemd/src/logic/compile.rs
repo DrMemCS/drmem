@@ -97,9 +97,9 @@ mod tests {
             compile("{on_time} > 10.0 -> {bulb}"),
             Ok(Program::Assign(
                 Expr::Gt(
-		    Box::new(Expr::Var(String::from("on_time"))),
-		    Box::new(Expr::Lit(Value::Flt(10.0))),
-		),
+                    Box::new(Expr::Var(String::from("on_time"))),
+                    Box::new(Expr::Lit(Value::Flt(10.0))),
+                ),
                 String::from("bulb")
             ))
         );
