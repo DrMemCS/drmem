@@ -64,6 +64,22 @@ mod tests {
                 String::from("bulb")
             ))
         );
+
+        assert_eq!(
+            compile("true -> {bulb}"),
+            Ok(Program::Assign(
+                Expr::Lit(Value::Bool(true)),
+                String::from("bulb")
+            ))
+        );
+        assert_eq!(
+            compile("false -> {bulb}"),
+            Ok(Program::Assign(
+                Expr::Lit(Value::Bool(false)),
+                String::from("bulb")
+            ))
+        );
+
         assert_eq!(
             compile("1 -> {bulb}"),
             Ok(Program::Assign(

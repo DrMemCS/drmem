@@ -14,6 +14,9 @@
 -?[0-9]+\.[0-9]*        "FLT"
 -?[0-9]+                "INT"
 
+true                    "TRUE"
+false                   "FALSE"
+
 \{[a-z][0-9a-z_]*\}     "DEVICE"
 
 [\t\n ]+ ;

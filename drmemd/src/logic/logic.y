@@ -2,6 +2,8 @@
 %avoid_insert "INT"
 %avoid_insert "FLT"
 %avoid_insert "DEVICE"
+%avoid_insert "TRUE"
+%avoid_insert "FALSE"
 
 %epp EQ "="
 %epp GT ">"
@@ -36,6 +38,8 @@ Expr -> Result<Expr, ()>:
 
 Factor -> Result<Expr, ()>:
     '(' CmpExpr ')' { $2 }
+    | "TRUE" { Ok(Expr::Lit(Value::Bool(true))) }
+    | "FALSE" { Ok(Expr::Lit(Value::Bool(false))) }
     | "INT"
       {
           let v = $1.map_err(|_| ())?;
