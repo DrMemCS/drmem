@@ -17,3 +17,5 @@
 \{[a-z][0-9a-z_]*\}     "DEVICE"
 
 [\t\n ]+ ;
+
+.                       "UNKNOWN"

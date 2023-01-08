@@ -61,6 +61,10 @@ Device -> Result<Expr, ()>:
     }
     ;
 
+Unknown -> ():
+    "UNKNOWN" { }
+    ;
+
 %%
 
 use drmem_api::types::device::Value;
