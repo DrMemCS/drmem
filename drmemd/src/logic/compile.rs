@@ -14,6 +14,7 @@
 //
 // Parentheses can be used to group subexpressions.
 
+use drmem_api::types::device::Value;
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
 
@@ -24,9 +25,8 @@ lrpar_mod!("logic/logic.y");
 
 #[derive(Debug, PartialEq)]
 pub enum Expr {
-    Int(i32),
-    Flt(f64),
-    Device(String),
+    Lit(Value),
+    Var(String),
 }
 
 #[derive(Debug, PartialEq)]
@@ -54,25 +54,37 @@ mod tests {
         assert_eq!(
             compile("{switch} -> {bulb}"),
             Ok(Program::Assign(
-                Expr::Device(String::from("switch")),
+                Expr::Var(String::from("switch")),
                 String::from("bulb")
             ))
         );
         assert_eq!(
             compile("1 -> {bulb}"),
-            Ok(Program::Assign(Expr::Int(1), String::from("bulb")))
+            Ok(Program::Assign(
+                Expr::Lit(Value::Int(1)),
+                String::from("bulb")
+            ))
         );
         assert_eq!(
             compile("1. -> {bulb}"),
-            Ok(Program::Assign(Expr::Flt(1.0), String::from("bulb")))
+            Ok(Program::Assign(
+                Expr::Lit(Value::Flt(1.0)),
+                String::from("bulb")
+            ))
         );
         assert_eq!(
             compile("1.0 -> {bulb}"),
-            Ok(Program::Assign(Expr::Flt(1.0), String::from("bulb")))
+            Ok(Program::Assign(
+                Expr::Lit(Value::Flt(1.0)),
+                String::from("bulb")
+            ))
         );
         assert_eq!(
             compile("(((10))) -> {bulb}"),
-            Ok(Program::Assign(Expr::Int(10), String::from("bulb")))
+            Ok(Program::Assign(
+                Expr::Lit(Value::Int(10)),
+                String::from("bulb")
+            ))
         );
     }
 }
