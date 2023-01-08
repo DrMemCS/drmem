@@ -1,11 +1,18 @@
 %start Logic
 %avoid_insert "INT"
 %avoid_insert "FLT"
+%avoid_insert "DEVICE"
+
+%epp EQ "="
+%epp GT ">"
+%epp GT_EQ ">="
+%epp LT "<"
+%epp LT_EQ "<="
 
 %%
 
 Logic -> Result<Program, ()>:
-    Expr "CONTROL" "DEVICE"
+    CmpExpr "CONTROL" "DEVICE"
     {
 	let v = $3.map_err(|_| ())?;
 	let s = $lexer.span_str(v.span());
@@ -14,12 +21,21 @@ Logic -> Result<Program, ()>:
     }
     ;
 
+CmpExpr -> Result<Expr, ()>:
+      Expr "EQ" Expr { Ok(Expr::Eq(Box::new($1?), Box::new($3?))) }
+    | Expr "GT" Expr { Ok(Expr::Gt(Box::new($1?), Box::new($3?))) }
+    | Expr "GT_EQ" Expr { Ok(Expr::GtEq(Box::new($1?), Box::new($3?))) }
+    | Expr "LT" Expr { Ok(Expr::Lt(Box::new($1?), Box::new($3?))) }
+    | Expr "LT_EQ" Expr { Ok(Expr::LtEq(Box::new($1?), Box::new($3?))) }
+    | Expr { $1 }
+    ;
+
 Expr -> Result<Expr, ()>:
     Factor { $1 }
     ;
 
 Factor -> Result<Expr, ()>:
-    '(' Expr ')' { $2 }
+    '(' CmpExpr ')' { $2 }
     | "INT"
       {
           let v = $1.map_err(|_| ())?;

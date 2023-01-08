@@ -27,6 +27,12 @@ lrpar_mod!("logic/logic.y");
 pub enum Expr {
     Lit(Value),
     Var(String),
+
+    Eq(Box<Expr>, Box<Expr>),
+    Gt(Box<Expr>, Box<Expr>),
+    GtEq(Box<Expr>, Box<Expr>),
+    Lt(Box<Expr>, Box<Expr>),
+    LtEq(Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -83,6 +89,17 @@ mod tests {
             compile("(((10))) -> {bulb}"),
             Ok(Program::Assign(
                 Expr::Lit(Value::Int(10)),
+                String::from("bulb")
+            ))
+        );
+
+        assert_eq!(
+            compile("{on_time} > 10.0 -> {bulb}"),
+            Ok(Program::Assign(
+                Expr::Gt(
+		    Box::new(Expr::Var(String::from("on_time"))),
+		    Box::new(Expr::Lit(Value::Flt(10.0))),
+		),
                 String::from("bulb")
             ))
         );
