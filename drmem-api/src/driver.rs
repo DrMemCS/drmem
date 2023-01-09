@@ -282,7 +282,7 @@ pub trait API: Send {
 
     fn create_instance(
         cfg: DriverConfig, drc: RequestChan, max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send + 'static>>
+    ) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send>>
     where
         Self: Sized;
 

@@ -144,9 +144,7 @@ impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
         let output_name = "output".parse::<Base>().unwrap();
         let enable_name = "enable".parse::<Base>().unwrap();
 
