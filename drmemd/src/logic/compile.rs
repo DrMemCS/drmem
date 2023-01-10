@@ -126,6 +126,69 @@ pub fn eval(e: &Expr) -> Option<Value> {
             None => None,
         },
 
+        // EQ expressions. Both expressions must be of the same type.
+        Expr::Eq(ref a, ref b) => match (eval(a), eval(b)) {
+            (Some(Value::Bool(a)), Some(Value::Bool(b))) => {
+                Some(Value::Bool(a == b))
+            }
+            (Some(Value::Int(a)), Some(Value::Int(b))) => {
+                Some(Value::Bool(a == b))
+            }
+            (Some(Value::Flt(a)), Some(Value::Flt(b))) => {
+                Some(Value::Bool(a == b))
+            }
+            (Some(Value::Str(a)), Some(Value::Str(b))) => {
+                Some(Value::Bool(a == b))
+            }
+            (Some(a), Some(b)) => {
+                error!("cannot compare {} and {} for equality", &a, &b);
+                None
+            }
+            _ => None,
+        },
+
+        // LT expressions. Both expressions must be of the same type.
+        Expr::Lt(ref a, ref b) => match (eval(a), eval(b)) {
+            (Some(Value::Bool(a)), Some(Value::Bool(b))) => {
+                Some(Value::Bool(a < b))
+            }
+            (Some(Value::Int(a)), Some(Value::Int(b))) => {
+                Some(Value::Bool(a < b))
+            }
+            (Some(Value::Flt(a)), Some(Value::Flt(b))) => {
+                Some(Value::Bool(a < b))
+            }
+            (Some(Value::Str(a)), Some(Value::Str(b))) => {
+                Some(Value::Bool(a < b))
+            }
+            (Some(a), Some(b)) => {
+                error!("cannot compare {} and {} for order", &a, &b);
+                None
+            }
+            _ => None,
+        },
+
+        // LT_EQ expressions. Both expressions must be of the same type.
+        Expr::LtEq(ref a, ref b) => match (eval(a), eval(b)) {
+            (Some(Value::Bool(a)), Some(Value::Bool(b))) => {
+                Some(Value::Bool(a <= b))
+            }
+            (Some(Value::Int(a)), Some(Value::Int(b))) => {
+                Some(Value::Bool(a <= b))
+            }
+            (Some(Value::Flt(a)), Some(Value::Flt(b))) => {
+                Some(Value::Bool(a <= b))
+            }
+            (Some(Value::Str(a)), Some(Value::Str(b))) => {
+                Some(Value::Bool(a <= b))
+            }
+            (Some(a), Some(b)) => {
+                error!("cannot compare {} and {} for order", &a, &b);
+                None
+            }
+            _ => None,
+        },
+
         _ => todo!(),
     }
 }
@@ -273,6 +336,7 @@ mod tests {
         const TRUE: Value = Value::Bool(true);
         const FALSE: Value = Value::Bool(false);
         const ONE: Value = Value::Int(1);
+        const TWO: Value = Value::Int(2);
 
         assert_eq!(eval(&Expr::Lit(FALSE)), Some(FALSE));
         assert_eq!(eval(&Expr::Not(Box::new(Expr::Lit(FALSE)))), Some(TRUE));
@@ -382,6 +446,86 @@ mod tests {
             eval(&Expr::And(
                 Box::new(Expr::Lit(TRUE)),
                 Box::new(Expr::Lit(ONE))
+            )),
+            None
+        );
+
+        assert_eq!(
+            eval(&Expr::Eq(
+                Box::new(Expr::Lit(ONE)),
+                Box::new(Expr::Lit(ONE))
+            )),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(&Expr::Eq(
+                Box::new(Expr::Lit(ONE)),
+                Box::new(Expr::Lit(TWO))
+            )),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::Eq(
+                Box::new(Expr::Lit(ONE)),
+                Box::new(Expr::Lit(FALSE))
+            )),
+            None
+        );
+
+        assert_eq!(
+            eval(&Expr::Lt(
+                Box::new(Expr::Lit(TWO)),
+                Box::new(Expr::Lit(ONE))
+            )),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::Lt(
+                Box::new(Expr::Lit(TWO)),
+                Box::new(Expr::Lit(TWO))
+            )),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::Lt(
+                Box::new(Expr::Lit(ONE)),
+                Box::new(Expr::Lit(TWO))
+            )),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(&Expr::Lt(
+                Box::new(Expr::Lit(ONE)),
+                Box::new(Expr::Lit(FALSE))
+            )),
+            None
+        );
+
+        assert_eq!(
+            eval(&Expr::LtEq(
+                Box::new(Expr::Lit(TWO)),
+                Box::new(Expr::Lit(ONE))
+            )),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::LtEq(
+                Box::new(Expr::Lit(TWO)),
+                Box::new(Expr::Lit(TWO))
+            )),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(&Expr::LtEq(
+                Box::new(Expr::Lit(ONE)),
+                Box::new(Expr::Lit(TWO))
+            )),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(&Expr::LtEq(
+                Box::new(Expr::Lit(ONE)),
+                Box::new(Expr::Lit(FALSE))
             )),
             None
         );
