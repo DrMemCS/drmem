@@ -57,6 +57,29 @@ pub fn compile(s: &str) -> Result<Program, ()> {
     res.unwrap_or_else(|| Err(()))
 }
 
+// This function takes an expression and tries to reduce it.
+
+pub fn optimize(e: Expr) -> Expr {
+    match e {
+        // Look for optimizations with expressions starting with NOT.
+        Expr::Not(ref ne) => match **ne {
+            // If the sub-expression is also a NOT expression. If so,
+            // we throw them both away.
+            Expr::Not(ref e) => optimize(*e.clone()),
+
+            // If the subexpression is either `true` or `false`,
+            // return the complement.
+            Expr::Lit(ref v) => match v {
+                Value::Bool(false) => Expr::Lit(Value::Bool(true)),
+                Value::Bool(true) => Expr::Lit(Value::Bool(false)),
+                _ => e,
+            },
+            _ => e,
+        },
+        _ => e,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,6 +190,39 @@ mod tests {
                 ),
                 String::from("bulb")
             ))
+        );
+    }
+
+    // This function tests the optimizations that can be done on an
+    // expression.
+
+    #[test]
+    fn test_optimizer() {
+        assert_eq!(
+            optimize(Expr::Not(Box::new(Expr::Lit(Value::Bool(true))))),
+            Expr::Lit(Value::Bool(false))
+        );
+        assert_eq!(
+            optimize(Expr::Not(Box::new(Expr::Lit(Value::Bool(false))))),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Not(Box::new(Expr::Not(Box::new(Expr::Lit(
+                Value::Bool(true)
+            )))))),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Not(Box::new(Expr::Not(Box::new(Expr::Not(
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )))))),
+            Expr::Lit(Value::Bool(false))
+        );
+        assert_eq!(
+            optimize(Expr::Not(Box::new(Expr::Not(Box::new(Expr::Not(
+                Box::new(Expr::Not(Box::new(Expr::Lit(Value::Bool(true)))))
+            )))))),
+            Expr::Lit(Value::Bool(true))
         );
     }
 }
