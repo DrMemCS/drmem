@@ -82,6 +82,28 @@ pub fn eval(e: &Expr) -> Option<Value> {
             None => None,
         },
 
+        // OR expressions. If the first subexpression is `true`, the
+        // second subexpression isn't evaluated.
+        Expr::Or(ref a, ref b) => match eval(a) {
+            Some(Value::Bool(true)) => Some(Value::Bool(true)),
+            Some(Value::Bool(false)) => match eval(b) {
+                Some(Value::Bool(v)) => Some(Value::Bool(v)),
+                Some(v) => {
+                    error!(
+                        "OR expression contained non-boolean argument: {}",
+                        &v
+                    );
+                    None
+                }
+                None => None,
+            },
+            Some(v) => {
+                error!("OR expression contained non-boolean argument: {}", &v);
+                None
+            }
+            None => None,
+        },
+
         // AND expressions. If the first subexpression is `false`, the
         // second subexpression isn't evaluated.
         Expr::And(ref a, ref b) => match eval(a) {
@@ -250,11 +272,65 @@ mod tests {
     fn test_eval() {
         const TRUE: Value = Value::Bool(true);
         const FALSE: Value = Value::Bool(false);
-	const ONE: Value = Value::Int(1);
+        const ONE: Value = Value::Int(1);
 
         assert_eq!(eval(&Expr::Lit(FALSE)), Some(FALSE));
         assert_eq!(eval(&Expr::Not(Box::new(Expr::Lit(FALSE)))), Some(TRUE));
         assert_eq!(eval(&Expr::Not(Box::new(Expr::Lit(ONE)))), None);
+
+        assert_eq!(
+            eval(&Expr::Or(
+                Box::new(Expr::Lit(FALSE)),
+                Box::new(Expr::Lit(FALSE))
+            )),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::Or(
+                Box::new(Expr::Lit(TRUE)),
+                Box::new(Expr::Lit(FALSE))
+            )),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(&Expr::Or(
+                Box::new(Expr::Lit(FALSE)),
+                Box::new(Expr::Lit(TRUE))
+            )),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(&Expr::Or(
+                Box::new(Expr::Lit(TRUE)),
+                Box::new(Expr::Lit(TRUE))
+            )),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(&Expr::Or(
+                Box::new(Expr::Lit(ONE)),
+                Box::new(Expr::Lit(TRUE))
+            )),
+            None
+        );
+        assert_eq!(
+            eval(&Expr::Or(
+                Box::new(Expr::Lit(FALSE)),
+                Box::new(Expr::Lit(ONE))
+            )),
+            None
+        );
+        // This is a loophole for expression errors. If the first
+        // subexpression is `true`, we don't evaluate the second so
+        // we won't catch type errors until the first subexpression is
+        // `false`.
+        assert_eq!(
+            eval(&Expr::Or(
+                Box::new(Expr::Lit(TRUE)),
+                Box::new(Expr::Lit(ONE))
+            )),
+            Some(TRUE)
+        );
 
         assert_eq!(
             eval(&Expr::And(
@@ -291,10 +367,10 @@ mod tests {
             )),
             None
         );
-	// This is a loophole for expression errors. If the first
-	// subexpression is `false`, we don't evaluate the second so
-	// we won't catch type errors until the first subexpression is
-	// `true`.
+        // This is a loophole for expression errors. If the first
+        // subexpression is `false`, we don't evaluate the second so
+        // we won't catch type errors until the first subexpression is
+        // `true`.
         assert_eq!(
             eval(&Expr::And(
                 Box::new(Expr::Lit(FALSE)),
