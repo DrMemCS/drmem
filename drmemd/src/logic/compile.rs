@@ -17,6 +17,7 @@
 use drmem_api::types::device::Value;
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
+use tracing::error;
 
 // Pull in the lexer and parser for the Logic Node language.
 
@@ -55,6 +56,56 @@ pub fn compile(s: &str) -> Result<Program, ()> {
     let (res, _) = logic_y::parse(&lexer);
 
     res.unwrap_or_else(|| Err(()))
+}
+
+// Evaluates an expression and returns the computed value. If the
+// function returns `None`, there was an error in the expression and
+// it won't get computed ever again. The log will have a message
+// indicating what the error was.
+
+pub fn eval(e: &Expr) -> Option<Value> {
+    match e {
+        // Literals hold actual `Values`, so simply return it.
+        Expr::Lit(v) => Some(v.clone()),
+
+        // XXX: For now, we return 0.0 for device readings. When we
+        // later pull in the actual readings, this will change.
+        Expr::Var(_) => Some(Value::Flt(0.0)),
+
+        // NOT expressions complement a boolean value.
+        Expr::Not(ref e) => match eval(e) {
+            Some(Value::Bool(v)) => Some(Value::Bool(!v)),
+            Some(v) => {
+                error!("NOT expression contained non-boolean value : {}", &v);
+                None
+            }
+            None => None,
+        },
+
+        // AND expressions. If the first subexpression is `false`, the
+        // second subexpression isn't evaluated.
+        Expr::And(ref a, ref b) => match eval(a) {
+            Some(Value::Bool(false)) => Some(Value::Bool(false)),
+            Some(Value::Bool(true)) => match eval(b) {
+                Some(Value::Bool(v)) => Some(Value::Bool(v)),
+                Some(v) => {
+                    error!(
+                        "AND expression contained non-boolean argument: {}",
+                        &v
+                    );
+                    None
+                }
+                None => None,
+            },
+            Some(v) => {
+                error!("AND expression contained non-boolean argument: {}", &v);
+                None
+            }
+            None => None,
+        },
+
+        _ => todo!(),
+    }
 }
 
 // This function takes an expression and tries to reduce it.
@@ -190,6 +241,73 @@ mod tests {
                 ),
                 String::from("bulb")
             ))
+        );
+    }
+
+    // Test the evaluating function.
+
+    #[test]
+    fn test_eval() {
+        const TRUE: Value = Value::Bool(true);
+        const FALSE: Value = Value::Bool(false);
+	const ONE: Value = Value::Int(1);
+
+        assert_eq!(eval(&Expr::Lit(FALSE)), Some(FALSE));
+        assert_eq!(eval(&Expr::Not(Box::new(Expr::Lit(FALSE)))), Some(TRUE));
+        assert_eq!(eval(&Expr::Not(Box::new(Expr::Lit(ONE)))), None);
+
+        assert_eq!(
+            eval(&Expr::And(
+                Box::new(Expr::Lit(FALSE)),
+                Box::new(Expr::Lit(FALSE))
+            )),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::And(
+                Box::new(Expr::Lit(TRUE)),
+                Box::new(Expr::Lit(FALSE))
+            )),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::And(
+                Box::new(Expr::Lit(FALSE)),
+                Box::new(Expr::Lit(TRUE))
+            )),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::And(
+                Box::new(Expr::Lit(TRUE)),
+                Box::new(Expr::Lit(TRUE))
+            )),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(&Expr::And(
+                Box::new(Expr::Lit(ONE)),
+                Box::new(Expr::Lit(TRUE))
+            )),
+            None
+        );
+	// This is a loophole for expression errors. If the first
+	// subexpression is `false`, we don't evaluate the second so
+	// we won't catch type errors until the first subexpression is
+	// `true`.
+        assert_eq!(
+            eval(&Expr::And(
+                Box::new(Expr::Lit(FALSE)),
+                Box::new(Expr::Lit(ONE))
+            )),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::And(
+                Box::new(Expr::Lit(TRUE)),
+                Box::new(Expr::Lit(ONE))
+            )),
+            None
         );
     }
 
