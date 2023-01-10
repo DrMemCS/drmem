@@ -6,15 +6,24 @@
 %avoid_insert "FALSE"
 
 %epp EQ "="
+%epp NE "<>"
 %epp GT ">"
 %epp GT_EQ ">="
 %epp LT "<"
 %epp LT_EQ "<="
+%epp B_NOT "not"
+%epp B_AND "and"
+%epp B_OR "or"
+%epp ADD "+"
+%epp SUB "-"
+%epp MUL "*"
+%epp DIV "/"
+%epp REM "%"
 
 %%
 
 Logic -> Result<Program, ()>:
-    CmpExpr "CONTROL" "DEVICE"
+    OrExpr "CONTROL" "DEVICE"
     {
 	let v = $3.map_err(|_| ())?;
 	let s = $lexer.span_str(v.span());
@@ -23,12 +32,70 @@ Logic -> Result<Program, ()>:
     }
     ;
 
+OrExpr -> Result<Expr, ()>:
+      AndExpr "B_OR" OrExpr { Ok(Expr::Or(
+			    Box::new($1?),
+			    Box::new($3?)
+			  )) }
+    | AndExpr { $1 }
+    ;
+
+AndExpr -> Result<Expr, ()>:
+      CmpExpr "B_AND" AndExpr { Ok(Expr::And(
+			    Box::new($1?),
+			    Box::new($3?)
+			  )) }
+    | CmpExpr { $1 }
+    ;
+
 CmpExpr -> Result<Expr, ()>:
-      Expr "EQ" Expr { Ok(Expr::Eq(Box::new($1?), Box::new($3?))) }
-    | Expr "GT" Expr { Ok(Expr::Gt(Box::new($1?), Box::new($3?))) }
-    | Expr "GT_EQ" Expr { Ok(Expr::GtEq(Box::new($1?), Box::new($3?))) }
-    | Expr "LT" Expr { Ok(Expr::Lt(Box::new($1?), Box::new($3?))) }
-    | Expr "LT_EQ" Expr { Ok(Expr::LtEq(Box::new($1?), Box::new($3?))) }
+      AddSubExpr "EQ" AddSubExpr { Ok(Expr::Eq(
+			    Box::new($1?),
+			    Box::new($3?)
+			  )) }
+
+    | AddSubExpr "NE" AddSubExpr { Ok(Expr::Not(
+		            Box::new(
+			      Expr::Eq(
+			        Box::new($1?),
+			        Box::new($3?)
+			      )
+			    )
+		          )) }
+
+    | AddSubExpr "GT" AddSubExpr { Ok(Expr::Lt(
+			        Box::new($3?),
+			        Box::new($1?)
+			      )) }
+
+    | AddSubExpr "GT_EQ" AddSubExpr { Ok(Expr::LtEq(
+			        Box::new($3?),
+			        Box::new($1?)
+			      )) }
+
+    | AddSubExpr "LT" AddSubExpr { Ok(Expr::Lt(
+			    Box::new($1?),
+			    Box::new($3?)
+			  )) }
+
+    | AddSubExpr "LT_EQ" AddSubExpr { Ok(Expr::LtEq(
+			       Box::new($1?),
+			       Box::new($3?)
+			     )) }
+
+    | AddSubExpr { $1 }
+    ;
+
+AddSubExpr -> Result<Expr, ()>:
+      MulDivExpr "ADD" AddSubExpr { Ok(Expr::Add(Box::new($1?), Box::new($3?))) }
+    | MulDivExpr "SUB" AddSubExpr { Ok(Expr::Sub(Box::new($1?), Box::new($3?))) }
+    | MulDivExpr { $1 }
+    ;
+
+MulDivExpr -> Result<Expr, ()>:
+      Expr "MUL" MulDivExpr { Ok(Expr::Mul(Box::new($1?), Box::new($3?))) }
+    | Expr "DIV" MulDivExpr { Ok(Expr::Div(Box::new($1?), Box::new($3?))) }
+    | Expr "REM" MulDivExpr { Ok(Expr::Rem(Box::new($1?), Box::new($3?))) }
     | Expr { $1 }
     ;
 
@@ -37,7 +104,8 @@ Expr -> Result<Expr, ()>:
     ;
 
 Factor -> Result<Expr, ()>:
-    '(' CmpExpr ')' { $2 }
+      "B_NOT" Factor { Ok(Expr::Not(Box::new($2?))) }
+    | "(" OrExpr ")" { $2 }
     | "TRUE" { Ok(Expr::Lit(Value::Bool(true))) }
     | "FALSE" { Ok(Expr::Lit(Value::Bool(false))) }
     | "INT"

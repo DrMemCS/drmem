@@ -23,16 +23,25 @@ use lrpar::lrpar_mod;
 lrlex_mod!("logic/logic.l");
 lrpar_mod!("logic/logic.y");
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Lit(Value),
     Var(String),
 
+    Not(Box<Expr>),
+    And(Box<Expr>, Box<Expr>),
+    Or(Box<Expr>, Box<Expr>),
+
     Eq(Box<Expr>, Box<Expr>),
-    Gt(Box<Expr>, Box<Expr>),
-    GtEq(Box<Expr>, Box<Expr>),
     Lt(Box<Expr>, Box<Expr>),
     LtEq(Box<Expr>, Box<Expr>),
+
+    Add(Box<Expr>, Box<Expr>),
+    Sub(Box<Expr>, Box<Expr>),
+
+    Mul(Box<Expr>, Box<Expr>),
+    Div(Box<Expr>, Box<Expr>),
+    Rem(Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -112,9 +121,49 @@ mod tests {
         assert_eq!(
             compile("{on_time} > 10.0 -> {bulb}"),
             Ok(Program::Assign(
-                Expr::Gt(
-                    Box::new(Expr::Var(String::from("on_time"))),
+                Expr::Lt(
                     Box::new(Expr::Lit(Value::Flt(10.0))),
+                    Box::new(Expr::Var(String::from("on_time")))
+                ),
+                String::from("bulb")
+            ))
+        );
+
+        assert_eq!(
+            compile("4 + ({on_time} + 5) * 10 > 10.0 % 3 -> {bulb}"),
+            Ok(Program::Assign(
+                Expr::Lt(
+                    Box::new(Expr::Rem(
+                        Box::new(Expr::Lit(Value::Flt(10.0))),
+                        Box::new(Expr::Lit(Value::Int(3)))
+                    )),
+                    Box::new(Expr::Add(
+                        Box::new(Expr::Lit(Value::Int(4))),
+                        Box::new(Expr::Mul(
+                            Box::new(Expr::Add(
+                                Box::new(Expr::Var(String::from("on_time"))),
+                                Box::new(Expr::Lit(Value::Int(5)))
+                            )),
+                            Box::new(Expr::Lit(Value::Int(10)))
+                        ))
+                    ))
+                ),
+                String::from("bulb")
+            ))
+        );
+
+        assert_eq!(
+            compile("true and false or false and true -> {bulb}"),
+            Ok(Program::Assign(
+                Expr::Or(
+                    Box::new(Expr::And(
+                        Box::new(Expr::Lit(Value::Bool(true))),
+                        Box::new(Expr::Lit(Value::Bool(false)))
+                    )),
+                    Box::new(Expr::And(
+                        Box::new(Expr::Lit(Value::Bool(false))),
+                        Box::new(Expr::Lit(Value::Bool(true)))
+                    ))
                 ),
                 String::from("bulb")
             ))
