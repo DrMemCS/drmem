@@ -55,7 +55,7 @@ pub fn compile(s: &str) -> Result<Program, ()> {
     let lexer = lexerdef.lexer(s);
     let (res, _) = logic_y::parse(&lexer);
 
-    res.unwrap_or_else(|| Err(()))
+    res.unwrap_or(Err(()))
 }
 
 // Evaluates an expression and returns the computed value. If the

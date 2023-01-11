@@ -250,7 +250,7 @@ mod tests {
     use super::*;
 
     fn fake_report(_v: bool) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        Box::pin(async { () })
+        Box::pin(async {})
     }
 
     #[test]
