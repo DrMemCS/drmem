@@ -120,6 +120,13 @@ Factor -> Result<Expr, ()>:
 
 	  parse_flt($lexer.span_str(v.span()))
       }
+    | "STRING"
+    {
+	let v = $1.map_err(|_| ())?;
+	let s = $lexer.span_str(v.span());
+
+	Ok(Expr::Lit(Value::Str(s[1..s.len() - 1].to_string())))
+    }
     | Device { $1 }
     ;
 
