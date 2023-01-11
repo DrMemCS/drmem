@@ -244,9 +244,7 @@ impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
         let service_name = "service".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
         let duty_name = "duty".parse::<device::Base>().unwrap();

@@ -1,27 +1,37 @@
 use super::store;
 use serde_derive::Deserialize;
+use std::collections::HashMap;
 use std::env;
-use toml::value;
+use toml::{self, value};
 use tracing::Level;
 
-use drmem_api::{driver::DriverConfig, types::device::Path};
+use drmem_api::{
+    driver::DriverConfig,
+    types::device::{Name, Path},
+};
+
+fn def_log_level() -> String {
+    String::from("warn")
+}
 
 #[derive(Deserialize)]
 pub struct Config {
     #[cfg(feature = "graphql")]
     name: Option<String>,
-    log_level: Option<String>,
+    #[serde(default = "def_log_level")]
+    log_level: String,
     #[cfg(feature = "graphql")]
     pub graphql: Option<std::net::SocketAddr>,
     pub backend: Option<store::config::Config>,
+    #[serde(default)]
     pub driver: Vec<Driver>,
+    #[serde(default)]
+    pub logic: Vec<Logic>,
 }
 
 impl<'a> Config {
     pub fn get_log_level(&self) -> Level {
-        let v = self.log_level.as_deref().unwrap_or("warn");
-
-        match v {
+        match self.log_level.as_str() {
             "info" => Level::INFO,
             "debug" => Level::DEBUG,
             "trace" => Level::TRACE,
@@ -54,11 +64,12 @@ impl Default for Config {
         Config {
             #[cfg(feature = "graphql")]
             name: None,
-            log_level: None,
+            log_level: String::from("warn"),
             #[cfg(feature = "graphql")]
             graphql: None,
             backend: Some(store::config::Config::new()),
             driver: vec![],
+            logic: vec![],
         }
     }
 }
@@ -69,6 +80,17 @@ pub struct Driver {
     pub prefix: Path,
     pub max_history: Option<usize>,
     pub cfg: Option<DriverConfig>,
+}
+
+#[derive(Deserialize)]
+pub struct Logic {
+    pub name: String,
+    #[serde(default)]
+    pub defs: HashMap<String, String>,
+    pub exprs: Vec<String>,
+    #[serde(default)]
+    pub inputs: HashMap<String, Name>,
+    pub outputs: HashMap<String, Name>,
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
@@ -107,9 +129,9 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 
     match matches.occurrences_of("verbose") {
         0 => (),
-        1 => cfg.log_level = Some(String::from("info")),
-        2 => cfg.log_level = Some(String::from("debug")),
-        _ => cfg.log_level = Some(String::from("trace")),
+        1 => cfg.log_level = String::from("info"),
+        2 => cfg.log_level = String::from("debug"),
+        _ => cfg.log_level = String::from("trace"),
     };
 
     // Return the config built from the command line and a flag
@@ -234,75 +256,45 @@ mod tests {
 
     #[test]
     fn test_config() {
-        // Verify that missing the [[driver]] section fails.
+        // Verify the defaults.
 
-        if let Ok(_) = toml::from_str::<Config>("") {
-            panic!("TOML parser accepted missing [[driver]] section")
+        match toml::from_str::<Config>("") {
+            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
+            Err(e) => panic!("TOML parse error: {}", e),
         }
 
+        // Verify the log_level can be set.
+
+        match toml::from_str::<Config>("log_level = \"trace\"") {
+            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::TRACE),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>("log_level = \"debug\"") {
+            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::DEBUG),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>("log_level = \"info\"") {
+            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::INFO),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>("log_level = \"warn\"") {
+            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_driver_section() {
         // Verify that the [[driver]] section needs an entry to be
         // defined..
 
         assert!(
-            toml::from_str::<Config>(
-                r#"
-[[driver]]
-"#,
-            )
-            .is_err(),
+            toml::from_str::<Config>("[[driver]]").is_err(),
             "TOML parser accepted empty [[driver]] section"
         );
-
-        // Verify the log_level can be set.
-
-        match toml::from_str::<Config>(
-            r#"
-log_level = "trace"
-
-[[driver]]
-name = "none"
-prefix = "null"
-"#,
-        ) {
-            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::TRACE),
-            Err(e) => panic!("TOML parse error: {}", e),
-        }
-        match toml::from_str::<Config>(
-            r#"
-log_level = "debug"
-
-[[driver]]
-name = "none"
-prefix = "null"
-"#,
-        ) {
-            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::DEBUG),
-            Err(e) => panic!("TOML parse error: {}", e),
-        }
-        match toml::from_str::<Config>(
-            r#"
-log_level = "info"
-
-[[driver]]
-name = "none"
-prefix = "null"
-"#,
-        ) {
-            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::INFO),
-            Err(e) => panic!("TOML parse error: {}", e),
-        }
-        match toml::from_str::<Config>(
-            r#"
-log_level = "warn"
-
-[[driver]]
-name = "none"
-prefix = "null"
-"#,
-        ) {
-            Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
-            Err(e) => panic!("TOML parse error: {}", e),
-        }
 
         assert!(
             toml::from_str::<Config>(
@@ -381,6 +373,175 @@ max_history = 10000
         }
     }
 
+    #[test]
+    fn test_logic_section() {
+        // Verify that the [[logic]] section needs an entry to be
+        // defined..
+
+        assert!(
+            toml::from_str::<Config>("[[logic]]").is_err(),
+            "TOML parser accepted empty [[logic]] section"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[logic]]
+name = "none"
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[logic]] section with missing 'exprs' and 'outputs'"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[logic]]
+exprs = []
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[logic]] section with missing 'name' and 'outputs'"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[logic]]
+outputs = {}
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[logic]] section with missing 'name' and 'exprs'"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[logic]]
+name = "none"
+exprs = []
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[logic]] section with missing 'outputs'"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[logic]]
+name = "none"
+outputs = {}
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[logic]] section with missing 'exprs'"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[logic]]
+exprs = []
+outputs = {}
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[logic]] section with missing 'name'"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[logic]]
+exprs = []
+inputs = { bulb = "junk+name" }
+outputs = {}
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[logic]] section with bad device name in 'inputs'"
+        );
+
+        assert!(
+            toml::from_str::<Config>(
+                r#"
+[[logic]]
+exprs = []
+outputs = { bulb = "junk+name" }
+"#,
+            )
+            .is_err(),
+            "TOML parser accepted [[logic]] section with bad device name in 'outputs'"
+        );
+
+        match toml::from_str::<Config>(
+            r#"
+[[logic]]
+name = "none"
+exprs = []
+outputs = {}
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.logic.len(), 1);
+                assert_eq!(cfg.logic[0].name, "none");
+                assert!(cfg.logic[0].defs.is_empty());
+                assert!(cfg.logic[0].exprs.is_empty());
+                assert!(cfg.logic[0].inputs.is_empty());
+                assert!(cfg.logic[0].outputs.is_empty());
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+[[logic]]
+name = "none"
+exprs = []
+outputs = { bulb = "room:bulb:enable" }
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.logic.len(), 1);
+                assert_eq!(cfg.logic[0].name, "none");
+                assert!(cfg.logic[0].defs.is_empty());
+                assert!(cfg.logic[0].exprs.is_empty());
+                assert!(cfg.logic[0].inputs.is_empty());
+                assert_eq!(
+                    cfg.logic[0].outputs.get("bulb"),
+                    Some(&"room:bulb:enable".parse::<Name>().unwrap())
+                );
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+[[logic]]
+name = "none"
+exprs = []
+inputs = { bulb = "room:bulb:enable" }
+outputs = {}
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.logic.len(), 1);
+                assert_eq!(cfg.logic[0].name, "none");
+                assert!(cfg.logic[0].defs.is_empty());
+                assert!(cfg.logic[0].exprs.is_empty());
+                assert!(cfg.logic[0].outputs.is_empty());
+                assert_eq!(
+                    cfg.logic[0].inputs.get("bulb"),
+                    Some(&"room:bulb:enable".parse::<Name>().unwrap())
+                );
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+    }
+
     #[cfg(feature = "simple-backend")]
     #[test]
     fn test_simple_config() {}
@@ -391,13 +552,7 @@ max_history = 10000
         // Verify a missing [backend] results in a properly defined
         // default.
 
-        match toml::from_str::<Config>(
-            r#"
-[[driver]]
-name = "none"
-prefix = "null"
-"#,
-        ) {
+        match toml::from_str::<Config>("") {
             Ok(cfg) => {
                 let def_cfg = Config::default();
 
@@ -409,8 +564,6 @@ prefix = "null"
                     cfg.get_backend().get_dbn(),
                     def_cfg.get_backend().get_dbn()
                 );
-                assert_eq!(cfg.log_level, def_cfg.log_level);
-                assert_eq!(cfg.driver.len(), 1)
             }
             Err(e) => panic!("TOML parse error: {}", e),
         }
@@ -422,10 +575,6 @@ prefix = "null"
             r#"
 [backend]
 addr = "192.168.1.1:6000"
-
-[[driver]]
-name = "none"
-prefix = "null"
 "#,
         ) {
             Ok(cfg) => {
@@ -447,10 +596,6 @@ prefix = "null"
             r#"
 [backend]
 dbn = 3
-
-[[driver]]
-name = "none"
-prefix = "null"
 "#,
         ) {
             Ok(cfg) => {

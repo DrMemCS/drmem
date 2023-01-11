@@ -358,9 +358,7 @@ impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
         // It's safe to use `.unwrap()` for these names because, in a
         // fully-tested, released version of this driver, we would
         // have seen and fixed any panics.

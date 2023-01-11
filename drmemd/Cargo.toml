@@ -13,6 +13,11 @@ keywords = ["control-system", "automation"]
 [badges]
 maintenance = { status = "actively-developed" }
 
+[build-dependencies]
+cfgrammar = "0.12"
+lrlex = "0.12"
+lrpar = "0.12"
+
 [dependencies]
 futures.workspace = true
 
@@ -30,6 +35,10 @@ serde_derive.workspace = true
 clap = { version = "2", default-features = false }
 
 drmem-api = { path = "../drmem-api", version = "0.1" }
+
+cfgrammar = "0.12"
+lrlex = "0.12"
+lrpar = "0.12"
 
 # This section defines the driver dependencies. Most drivers are
 # optional, but a few drivers define common devices for a `drmem`

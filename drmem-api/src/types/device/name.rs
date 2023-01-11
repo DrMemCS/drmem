@@ -36,10 +36,14 @@ impl Segment {
             {
                 Ok(Segment(String::from(s)))
             } else {
-                Err(Error::InvArgument("segment contains invalid character"))
+                Err(Error::InvArgument(String::from(
+                    "segment contains invalid character",
+                )))
             }
         } else {
-            Err(Error::InvArgument("contains zero-length segment"))
+            Err(Error::InvArgument(String::from(
+                "contains zero-length segment",
+            )))
         }
     }
 }
@@ -116,7 +120,8 @@ impl fmt::Display for Path {
 ///
 /// The base name consists of one or more alphanumeric or dash
 /// characters.
-#[derive(Debug, PartialEq, Clone, Hash, Eq)]
+#[derive(Debug, PartialEq, Clone, Deserialize, Hash, Eq)]
+#[serde(try_from = "&str")]
 pub struct Base(Segment);
 
 impl Base {
@@ -124,6 +129,14 @@ impl Base {
     /// invalid character, `Err()` is returned.
     pub fn create(s: &str) -> Result<Self> {
         Segment::create(s).map(Base)
+    }
+}
+
+impl TryFrom<&str> for Base {
+    type Error = Error;
+
+    fn try_from(s: &str) -> Result<Self> {
+        Base::create(s)
     }
 }
 
@@ -165,7 +178,8 @@ impl fmt::Display for Base {
 /// The client API supports looking up device names using patterns, so
 /// a logical path hierarchy can make those searches more productive.
 
-#[derive(Debug, PartialEq, Hash, Eq, Clone)]
+#[derive(Debug, PartialEq, Hash, Eq, Clone, Deserialize)]
+#[serde(try_from = "&str")]
 pub struct Name {
     path: Path,
     base: Base,
@@ -182,7 +196,7 @@ impl Name {
             .collect::<Result<Vec<Segment>>>()
         {
             Ok(segments) if segments.len() < 2 => Err(Error::InvArgument(
-                "device name requires a path and base name",
+                String::from("device name requires a path and base name"),
             )),
             Ok(segments) => Ok(Name {
                 path: Path(segments[0..segments.len() - 1].to_vec()),
@@ -214,6 +228,14 @@ impl Name {
 impl fmt::Display for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", &self.path, &self.base)
+    }
+}
+
+impl TryFrom<&str> for Name {
+    type Error = Error;
+
+    fn try_from(s: &str) -> Result<Self> {
+        Name::create(s)
     }
 }
 

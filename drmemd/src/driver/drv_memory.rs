@@ -51,9 +51,7 @@ impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
         let fut = async move {
             let name = Instance::get_cfg_name(&cfg)?;
 
