@@ -20,9 +20,17 @@ jobs:
   check:
     strategy:
       matrix:
+
+        # These two lines create the 4 configs we use to test.
+
         backend: [simple-backend, redis-backend]
-	client: [no-grapql, graphql]
-	include:
+        client: [no-grapql, graphql]
+
+        # This section builds the `features` parameter. If the
+        # combination includes `no-graphql`, then we specify a
+        # simpler features flag.
+
+        include:
           - features: ${{ matrix.client }},${{ matrix.backend }}
           - features: ${{ matrix.backend }}
             client: no-graphql
@@ -47,4 +55,4 @@ jobs:
     - name: Lint
       run: cargo fmt --all -- --check
     - name: Run tests
-      run: cargo test --verbose --workspace --features graphql,${{ matrix.backend }}
+      run: cargo test --verbose --workspace --features ${{ matrix.features }}
