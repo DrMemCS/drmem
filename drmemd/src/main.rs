@@ -7,6 +7,7 @@ use tracing::{error, trace, warn};
 mod config;
 mod core;
 mod driver;
+mod logic;
 
 // Define a `store` module that pulls in the appropriate backend.
 

@@ -1,1 +1,0 @@
-# Reactive Engine Programming Guide

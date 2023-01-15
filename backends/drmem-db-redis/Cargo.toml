@@ -10,6 +10,9 @@ license = "MIT"
 categories = ["embedded", "database"]
 keywords = ["control-system", "automation", "database"]
 
+[lib]
+doctest = false
+
 [badges]
 maintenance = { status = "actively-developed" }
 

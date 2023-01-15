@@ -16,7 +16,7 @@
   - Simple Storage
   - Redis Storage
 - [Configuration](CONFIGURATION.md)
-- [Reactive Engine](REACTIVE_ENGINE.md)
+- [Logic Nodes](LOGIC_NODES.md)
 
 ## Driver Directory
 
@@ -35,4 +35,4 @@
 
 - [Driver API](DRIVER_API.md)
 - [Client API](CLIENT_API.md))
-- [Reactive Engine Grammar](RE_GRAMMAR.md)
+- [Logic Node Grammar](LN_GRAMMAR.md)

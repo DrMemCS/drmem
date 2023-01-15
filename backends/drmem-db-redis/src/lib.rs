@@ -217,7 +217,7 @@ fn id_to_ts(id: &str) -> Result<time::SystemTime> {
         }
     }
 
-    Err(Error::InvArgument("unknown timestamp format"))
+    Err(Error::InvArgument(String::from("unknown timestamp format")))
 }
 
 type ReadFuture = Pin<

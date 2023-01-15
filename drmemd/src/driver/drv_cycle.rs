@@ -144,9 +144,7 @@ impl driver::API for Instance {
     fn create_instance(
         cfg: DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
         let output_name = "output".parse::<Base>().unwrap();
         let enable_name = "enable".parse::<Base>().unwrap();
 
@@ -252,7 +250,7 @@ mod tests {
     use super::*;
 
     fn fake_report(_v: bool) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        Box::pin(async { () })
+        Box::pin(async {})
     }
 
     #[test]
