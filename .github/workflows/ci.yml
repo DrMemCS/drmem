@@ -21,6 +21,11 @@ jobs:
     strategy:
       matrix:
         backend: [simple-backend, redis-backend]
+	client: [no-grapql, graphql]
+	include:
+          - features: ${{ matrix.client }},${{ matrix.backend }}
+          - features: ${{ matrix.backend }}
+            client: no-graphql
 
     runs-on: ubuntu-latest
 
