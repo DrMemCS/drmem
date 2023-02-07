@@ -15,7 +15,7 @@ should be configured to accept query requests on the interface this
 driver will access.
 
 - `addr` is a string containing the host name, or IP address, and port
-  number of the machine that's actually monitoring the sump pump (in
+  number of the machine that's running the NTP service (in
   **"hostname:#"** or **"\#.#.#.#:#"** format.) The port is almost
   always 123.
 
