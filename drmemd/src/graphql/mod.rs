@@ -16,6 +16,8 @@ use tracing::{error, info, info_span};
 use tracing_futures::Instrument;
 use warp::Filter;
 
+pub mod config;
+
 // The Context parameter for Queries.
 
 #[derive(Clone)]
@@ -459,7 +461,7 @@ fn schema() -> Schema {
 }
 
 pub fn server(
-    node_name: &str, addr: &std::net::SocketAddr, db: crate::driver::DriverDb,
+    cfg: &config::Config, db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
     const FULL_QUERY_PATH: &str = "/query";
@@ -540,7 +542,7 @@ pub fn server(
 
     // Bind to the address.
 
-    let (addr, http_task) = warp::serve(filter).bind_ephemeral(*addr);
+    let (addr, http_task) = warp::serve(filter).bind_ephemeral(cfg.addr);
 
     // Register DrMem's mDNS entry. In the properties field, inform
     // the client with which paths to use for each GraphQL query
@@ -548,9 +550,10 @@ pub fn server(
 
     let service = resp.register(
         "_drmem._tcp".into(),
-        format!("DrMem-{}", node_name),
+        cfg.name.clone(),
         addr.port(),
         &[
+            &format!("location={}", cfg.location),
             &format!("queries={}", FULL_QUERY_PATH),
             &format!("mutations={}", FULL_QUERY_PATH),
             &format!("subscriptions={}", FULL_SUBSCRIBE_PATH),
