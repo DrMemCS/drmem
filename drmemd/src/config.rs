@@ -279,6 +279,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "graphql")]
     #[test]
     fn test_graphql_config() {
         match toml::from_str::<Config>("") {
