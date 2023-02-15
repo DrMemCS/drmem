@@ -16,12 +16,11 @@ fn def_log_level() -> String {
 
 #[derive(Deserialize)]
 pub struct Config {
-    #[cfg(feature = "graphql")]
-    name: Option<String>,
     #[serde(default = "def_log_level")]
     log_level: String,
     #[cfg(feature = "graphql")]
-    pub graphql: Option<std::net::SocketAddr>,
+    #[serde(default)]
+    pub graphql: super::graphql::config::Config,
     pub backend: Option<store::config::Config>,
     #[serde(default)]
     pub driver: Vec<Driver>,
@@ -45,28 +44,21 @@ impl<'a> Config {
 
     #[cfg(feature = "graphql")]
     pub fn get_graphql_addr(&self) -> std::net::SocketAddr {
-        self.graphql.unwrap_or_else(|| {
-            "0.0.0.0:3000".parse::<std::net::SocketAddr>().unwrap()
-        })
+        self.graphql.addr
     }
 
     #[cfg(feature = "graphql")]
     pub fn get_name(&self) -> String {
-        self.name.as_ref().map(String::from).unwrap_or_else(|| {
-            env::var("HOST")
-                .expect("no 'name' in config file and no HOST env var")
-        })
+        self.graphql.name.clone()
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            #[cfg(feature = "graphql")]
-            name: None,
             log_level: String::from("warn"),
             #[cfg(feature = "graphql")]
-            graphql: None,
+            graphql: super::graphql::config::Config::default(),
             backend: Some(store::config::Config::new()),
             driver: vec![],
             logic: vec![],
@@ -253,6 +245,7 @@ pub async fn get() -> Option<Config> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn test_config() {
@@ -282,6 +275,73 @@ mod tests {
 
         match toml::from_str::<Config>("log_level = \"warn\"") {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+    }
+
+    #[cfg(feature = "graphql")]
+    #[test]
+    fn test_graphql_config() {
+        match toml::from_str::<Config>("") {
+            Ok(cfg) => {
+                assert_eq!(cfg.graphql.name, "unknown name");
+                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(
+                    cfg.graphql.addr,
+                    (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
+                );
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+[graphql]
+name = "primary-node"
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.graphql.name, "primary-node");
+                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(
+                    cfg.graphql.addr,
+                    (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
+                );
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+[graphql]
+location = "basement"
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.graphql.name, "unknown name");
+                assert_eq!(cfg.graphql.location, "basement");
+                assert_eq!(
+                    cfg.graphql.addr,
+                    (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
+                );
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+[graphql]
+addr = "10.1.1.0:1234"
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.graphql.name, "unknown name");
+                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(
+                    cfg.graphql.addr,
+                    (Ipv4Addr::new(10, 1, 1, 0), 1234).into()
+                );
+            }
             Err(e) => panic!("TOML parse error: {}", e),
         }
     }
