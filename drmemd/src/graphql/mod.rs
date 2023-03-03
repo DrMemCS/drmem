@@ -553,6 +553,7 @@ pub fn server(
         cfg.name.clone(),
         addr.port(),
         &[
+	    &format!("version={}", env!("CARGO_PKG_VERSION")),
             &format!("location={}", cfg.location),
             &format!("queries={}", FULL_QUERY_PATH),
             &format!("mutations={}", FULL_QUERY_PATH),
