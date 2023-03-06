@@ -33,12 +33,13 @@ to specify this information:
 
 The driver creates these devices:
 
-| Base Name | Type     | Units | Comment                                                   |
-|-----------|----------|-------|-----------------------------------------------------------|
-| `service` | bool, RO |       | Set to `true` when communicating with the remote service. |
-| `state`   | bool, RO |       | Set to `true` when the pump is running.                   |
-| `duty`    | f64, RO  | %     | Indicates duty cycle of the last cycle.                   |
-| `in-flow` | f64, RO  | gpm   | Indicates the in-flow rate for the last cycle.            |
+| Base Name  | Type     | Units | Comment                                                   |
+|------------|----------|-------|-----------------------------------------------------------|
+| `service`  | bool, RO |       | Set to `true` when communicating with the remote service. |
+| `state`    | bool, RO |       | Set to `true` when the pump is running.                   |
+| `duty`     | f64, RO  | %     | Indicates duty cycle of the last cycle.                   |
+| `in-flow`  | f64, RO  | gpm   | Indicates the in-flow rate for the last cycle.            |
+| `duration` | f64, RO  | min   | Indicates the duration of the previous cycle.             |
 
 ## Caveats
 
