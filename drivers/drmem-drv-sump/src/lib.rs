@@ -338,7 +338,10 @@ impl driver::API for Instance {
                             (self.d_state)(false).await;
                             (self.d_duty)(duty).await;
                             (self.d_inflow)(in_flow).await;
-                            (self.d_duration)((cycle as f64) / 60_000.0).await;
+                            (self.d_duration)(
+                                ((cycle as f64) / 600.0).round() / 100.0,
+                            )
+                            .await;
                         }
                     }
 
