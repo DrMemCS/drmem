@@ -14,7 +14,7 @@ use tokio::{
     },
     time,
 };
-use tracing::{error, info, warn, Span};
+use tracing::{debug, error, info, warn, Span};
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -148,6 +148,7 @@ pub struct Instance {
     d_state: driver::ReportReading<bool>,
     d_duty: driver::ReportReading<f64>,
     d_inflow: driver::ReportReading<f64>,
+    d_duration: driver::ReportReading<f64>,
 }
 
 impl Instance {
@@ -249,6 +250,7 @@ impl driver::API for Instance {
         let state_name = "state".parse::<device::Base>().unwrap();
         let duty_name = "duty".parse::<device::Base>().unwrap();
         let in_flow_name = "in-flow".parse::<device::Base>().unwrap();
+        let dur_name = "duration".parse::<device::Base>().unwrap();
 
         let fut = async move {
             // Validate the configuration.
@@ -273,6 +275,9 @@ impl driver::API for Instance {
             let (d_inflow, _) = core
                 .add_ro_device(in_flow_name, Some("gpm"), max_history)
                 .await?;
+            let (d_duration, _) = core
+                .add_ro_device(dur_name, Some("min"), max_history)
+                .await?;
 
             Ok(Box::new(Instance {
                 state: State::Unknown,
@@ -283,6 +288,7 @@ impl driver::API for Instance {
                 d_state,
                 d_duty,
                 d_inflow,
+                d_duration,
             }) as driver::DriverType)
         };
 
@@ -322,7 +328,7 @@ impl driver::API for Instance {
                         if let Some((cycle, duty, in_flow)) =
                             self.state.off_event(stamp, gpm)
                         {
-                            info!(
+                            debug!(
                                 "cycle: {}, duty: {:.1}%, inflow: {:.2} gpm",
                                 Instance::elapsed(cycle),
                                 duty,
@@ -332,6 +338,10 @@ impl driver::API for Instance {
                             (self.d_state)(false).await;
                             (self.d_duty)(duty).await;
                             (self.d_inflow)(in_flow).await;
+                            (self.d_duration)(
+                                ((cycle as f64) / 600.0).round() / 100.0,
+                            )
+                            .await;
                         }
                     }
 
