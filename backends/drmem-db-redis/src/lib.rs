@@ -408,7 +408,7 @@ impl RedisStore {
     ) -> Result<AioConnection> {
         let client = Self::make_client(cfg, &name, &pword)?;
 
-        info!("creating new connection");
+        debug!("creating new redis connection");
 
         client.get_tokio_connection().await.map_err(|e| {
             error!("redis error: {}", &e);
@@ -423,7 +423,7 @@ impl RedisStore {
     ) -> Result<AioMplexConnection> {
         let client = Self::make_client(cfg, &name, &pword)?;
 
-        info!("creating new, shared connection");
+        debug!("creating new, shared redis connection");
 
         client
             .get_multiplexed_tokio_connection()

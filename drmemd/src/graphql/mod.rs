@@ -12,7 +12,7 @@ use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::{playground_filter, subscriptions::serve_graphql_ws};
 use libmdns::Responder;
 use std::{result, sync::Arc};
-use tracing::{error, info, info_span};
+use tracing::{info, info_span, warn};
 use tracing_futures::Instrument;
 use warp::Filter;
 
@@ -495,8 +495,6 @@ pub fn server(
 
                 ws.on_upgrade(move |websocket| {
                     async move {
-                        info!("subscription context created");
-
                         serve_graphql_ws(
                             websocket,
                             Arc::new(root_node),
@@ -504,12 +502,10 @@ pub fn server(
                         )
                         .map(|r| {
                             if let Err(e) = r {
-                                error!("Websocket error: {}", &e);
+                                warn!("{}", &e);
                             }
                         })
                         .await;
-
-                        info!("subscription context canceled")
                     }
                     .instrument(info_span!(
                         "graphql",
@@ -544,6 +540,34 @@ pub fn server(
 
     let (addr, http_task) = warp::serve(filter).bind_ephemeral(cfg.addr);
 
+    // Get the boot-time and store it in the mDNS payload.
+
+    let boot_time: DateTime<Utc> = Utc::now();
+
+    // Build the mDNS payload section. This is a vector of "KEY=VALUE"
+    // strings which will get added to the `txt` section of the mDNS
+    // announcement.
+
+    let mut payload: Vec<String> = vec![
+        format!("version={}", env!("CARGO_PKG_VERSION")),
+        format!("location={}", cfg.location),
+        format!(
+            "boot-time={}",
+            boot_time.to_rfc3339_opts(SecondsFormat::Secs, true)
+        ),
+        format!("queries={}", FULL_QUERY_PATH),
+        format!("mutations={}", FULL_QUERY_PATH),
+        format!("subscriptions={}", FULL_SUBSCRIBE_PATH),
+    ];
+
+    // If the configuration specifies a preferred address to use, add
+    // it to the payload.
+
+    if let Some(host) = &cfg.pref_host {
+        info!("adding preferred address: {}:{}", &host, cfg.pref_port);
+        payload.push(format!("pref-addr={}:{}", &host, cfg.pref_port))
+    }
+
     // Register DrMem's mDNS entry. In the properties field, inform
     // the client with which paths to use for each GraphQL query
     // type.
@@ -552,12 +576,7 @@ pub fn server(
         "_drmem._tcp".into(),
         cfg.name.clone(),
         addr.port(),
-        &[
-            &format!("location={}", cfg.location),
-            &format!("queries={}", FULL_QUERY_PATH),
-            &format!("mutations={}", FULL_QUERY_PATH),
-            &format!("subscriptions={}", FULL_SUBSCRIBE_PATH),
-        ],
+        &payload.iter().map(String::as_str).collect::<Vec<&str>>(),
     );
 
     // Make mDNS run in the background.

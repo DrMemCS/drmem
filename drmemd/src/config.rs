@@ -290,6 +290,22 @@ mod tests {
                     cfg.graphql.addr,
                     (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
                 );
+                assert_eq!(cfg.graphql.pref_host, None);
+                assert_eq!(cfg.graphql.pref_port, 3000)
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>("[graphql]") {
+            Ok(cfg) => {
+                assert_eq!(cfg.graphql.name, "unknown name");
+                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(
+                    cfg.graphql.addr,
+                    (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
+                );
+                assert_eq!(cfg.graphql.pref_host, None);
+                assert_eq!(cfg.graphql.pref_port, 3000)
             }
             Err(e) => panic!("TOML parse error: {}", e),
         }
@@ -307,6 +323,8 @@ name = "primary-node"
                     cfg.graphql.addr,
                     (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
                 );
+                assert_eq!(cfg.graphql.pref_host, None);
+                assert_eq!(cfg.graphql.pref_port, 3000)
             }
             Err(e) => panic!("TOML parse error: {}", e),
         }
@@ -341,6 +359,53 @@ addr = "10.1.1.0:1234"
                     cfg.graphql.addr,
                     (Ipv4Addr::new(10, 1, 1, 0), 1234).into()
                 );
+                assert_eq!(cfg.graphql.pref_host, None);
+                assert_eq!(cfg.graphql.pref_port, 3000)
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+[graphql]
+pref_host = "www.google.com"
+pref_port = 4000
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.graphql.name, "unknown name");
+                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(
+                    cfg.graphql.addr,
+                    (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
+                );
+                assert_eq!(
+                    cfg.graphql.pref_host,
+                    Some(String::from("www.google.com"))
+                );
+                assert_eq!(cfg.graphql.pref_port, 4000)
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+[graphql]
+pref_host = "www.google.com"
+"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.graphql.name, "unknown name");
+                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(
+                    cfg.graphql.addr,
+                    (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
+                );
+                assert_eq!(
+                    cfg.graphql.pref_host,
+                    Some(String::from("www.google.com"))
+                );
+                assert_eq!(cfg.graphql.pref_port, 3000)
             }
             Err(e) => panic!("TOML parse error: {}", e),
         }
