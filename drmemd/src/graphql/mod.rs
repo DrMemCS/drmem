@@ -544,6 +544,30 @@ pub fn server(
 
     let boot_time: DateTime<Utc> = Utc::now();
 
+    // Build the mDNS payload section. This is a vector of "KEY=VALUE"
+    // strings which will get added to the `txt` section of the mDNS
+    // announcement.
+
+    let mut payload: Vec<String> = vec![
+        format!("version={}", env!("CARGO_PKG_VERSION")),
+        format!("location={}", cfg.location),
+        format!(
+            "boot-time={}",
+            boot_time.to_rfc3339_opts(SecondsFormat::Secs, true)
+        ),
+        format!("queries={}", FULL_QUERY_PATH),
+        format!("mutations={}", FULL_QUERY_PATH),
+        format!("subscriptions={}", FULL_SUBSCRIBE_PATH),
+    ];
+
+    // If the configuration specifies a preferred address to use, add
+    // it to the payload.
+
+    if let Some(host) = &cfg.pref_host {
+        info!("adding preferred address: {}:{}", &host, cfg.pref_port);
+        payload.push(format!("pref-addr={}:{}", &host, cfg.pref_port))
+    }
+
     // Register DrMem's mDNS entry. In the properties field, inform
     // the client with which paths to use for each GraphQL query
     // type.
@@ -552,17 +576,7 @@ pub fn server(
         "_drmem._tcp".into(),
         cfg.name.clone(),
         addr.port(),
-        &[
-            &format!("version={}", env!("CARGO_PKG_VERSION")),
-            &format!("location={}", cfg.location),
-            &format!(
-                "boot-time={}",
-                boot_time.to_rfc3339_opts(SecondsFormat::Secs, true)
-            ),
-            &format!("queries={}", FULL_QUERY_PATH),
-            &format!("mutations={}", FULL_QUERY_PATH),
-            &format!("subscriptions={}", FULL_SUBSCRIBE_PATH),
-        ],
+        &payload.iter().map(String::as_str).collect::<Vec<&str>>(),
     );
 
     // Make mDNS run in the background.
