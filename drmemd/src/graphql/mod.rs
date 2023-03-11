@@ -112,12 +112,15 @@ impl DeviceInfo {
     #[graphql(
         description = "Information about the driver that implements this device."
     )]
-    fn driver(&self) -> Option<DriverInfo> {
-        self.db.get_driver(&self.driver_name).map(|di| DriverInfo {
-            name: self.driver_name.clone(),
-            summary: di.summary,
-            description: di.description,
-        })
+    fn driver(&self) -> DriverInfo {
+        self.db
+            .get_driver(&self.driver_name)
+            .map(|di| DriverInfo {
+                name: self.driver_name.clone(),
+                summary: di.summary,
+                description: di.description,
+            })
+            .unwrap()
     }
 }
 
