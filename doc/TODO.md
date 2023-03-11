@@ -15,17 +15,19 @@ to run. It also routes device settings to the appropriate drivers.
 
 ## Client Interface
 
-`drmemd` contains a web server which provides a GraphQL/gRPC interface
-for clients to use. This interface gives clients these abilities:
+`drmemd` contains a web server which provides a GraphQL interface for
+clients to use. This interface gives clients these abilities:
 
 - [ ] Get latest value of a device.
 - [ ] Get time range of data for a device.
-- [ ] Receive stream of updates from a device.
-- [ ] Send settings to devices.
+- [X] Receive stream of updates from a device.
+- [X] Send settings to devices.
 - [X] Get device info.
 - [ ] Set device info.
 - [X] Gets loaded drivers and their information.
 - [X] Gets devices managed by this node.
+
+
 - Security considerations
   - Devices can be marked public/private? Public devices are
     accessible to the Reactive Engine and external clients. Private
@@ -63,7 +65,7 @@ project.
 - [X] Sump pump driver (really only interesting to me.)
   - [X] Needs to monitor sump pump and write results to redis.
   - [X] Needs to use the final driver API
-- [ ] Memory driver (allows typed locations to save settings and report
+- [X] Memory driver (allows typed locations to save settings and report
       as readings.)
 - [X] Weather driver
   - [X] There will probably be multiple drivers based on the source of
