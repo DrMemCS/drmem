@@ -3,7 +3,7 @@ use drmem_api::{
     client,
     types::{device, Error},
 };
-use futures::{Future, FutureExt};
+use futures::Future;
 use juniper::{
     self, executor::FieldError, graphql_subscription, graphql_value,
     FieldResult, GraphQLInputObject, GraphQLObject, RootNode, Value,
@@ -11,8 +11,8 @@ use juniper::{
 use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::{playground_filter, subscriptions::serve_graphql_ws};
 use libmdns::Responder;
-use std::{result, sync::Arc};
-use tracing::{info, info_span, warn};
+use std::{result, sync::Arc, time::Duration};
+use tracing::{info, info_span};
 use tracing_futures::Instrument;
 use warp::Filter;
 
@@ -489,51 +489,45 @@ pub fn server(
 
     // Create the filter that handles subscriptions.
 
-    let sub_filter = warp::ws()
-        .and(warp::addr::remote())
-        .map(
-            move |ws: warp::ws::Ws, addr: Option<std::net::SocketAddr>| {
-                let ctxt = context.clone();
-                let root_node = schema();
+    let sub_filter = warp::ws().and(warp::addr::remote()).map(
+        move |ws: warp::ws::Ws, addr: Option<std::net::SocketAddr>| {
+            let ctxt = context.clone();
+            let root_node = schema();
 
-                ws.on_upgrade(move |websocket| {
-                    async move {
-                        serve_graphql_ws(
-                            websocket,
-                            Arc::new(root_node),
-                            ConnectionConfig::new(ctxt.clone()),
-                        )
-                        .map(|r| {
-                            if let Err(e) = r {
-                                warn!("{}", &e);
-                            }
-                        })
-                        .await;
-                    }
-                    .instrument(info_span!(
-                        "graphql",
-                        client = addr
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| String::from("*unknown*"))
-                            .as_str()
-                    ))
-                })
-            },
-        )
-        .map(|reply| {
-            warp::reply::with_header(
-                reply,
-                "Sec-WebSocket-Protocol",
-                "graphql-ws",
-            )
-        });
+            ws.on_upgrade(move |websocket| {
+                async move {
+                    let _ = serve_graphql_ws(
+                        websocket,
+                        Arc::new(root_node),
+                        ConnectionConfig::new(ctxt.clone()),
+                    )
+                    .await;
+                }
+                .instrument(info_span!(
+                    "graphql",
+                    client = addr
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| String::from("*unknown*"))
+                        .as_str()
+                ))
+            })
+        },
+    );
 
     // Stitch the filters together to build the map of the web
     // interface.
 
-    let filter = (warp::path("graphiql").and(graphiql_filter))
+    let filter = warp::path("graphiql")
+        .and(graphiql_filter)
         .or(warp::path(subscribe_path).and(sub_filter))
-        .or(warp::path(query_path).and(graphql_filter));
+        .or(warp::path(query_path).and(graphql_filter))
+        .with(
+            warp::cors()
+                .allow_any_origin()
+                .allow_headers(vec!["content-type"])
+                .allow_methods(vec!["OPTIONS", "GET", "POST"])
+                .max_age(Duration::from_secs(3_600)),
+        );
 
     // Create the background mDNS task.
 
