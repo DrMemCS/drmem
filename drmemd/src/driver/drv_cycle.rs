@@ -32,7 +32,7 @@ impl Instance {
     pub const NAME: &'static str = "cycle";
 
     pub const SUMMARY: &'static str =
-        "Provides a cycling output that can be enabled and disable.";
+        "Provides a cycling output that can be enabled and disabled.";
 
     pub const DESCRIPTION: &'static str = include_str!("drv_cycle.md");
 
