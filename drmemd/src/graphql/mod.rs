@@ -376,6 +376,17 @@ impl MutRoot {
     }
 }
 
+#[derive(GraphQLInputObject)]
+#[graphql(description = "Defines a range of time between two dates.")]
+struct DateRange {
+    #[graphql(description = "The start of the date range (in UTC.) If \
+			     `null`, it means \"now\".")]
+    start: Option<DateTime<Utc>>,
+    #[graphql(description = "The end of the date range (in UTC.) If `null`, \
+			     it means \"infinity\".")]
+    end: Option<DateTime<Utc>>,
+}
+
 #[derive(GraphQLObject)]
 #[graphql(
     description = "Represents a value of a device at an instant of time."
@@ -428,6 +439,7 @@ impl Subscription {
 			     reply each time a device's value changes.")]
     async fn monitor_device(
         #[graphql(context)] db: &ConfigDb, device: String,
+        _range: Option<DateRange>,
     ) -> device::DataStream<FieldResult<Reading>> {
         use tokio_stream::StreamExt;
 
