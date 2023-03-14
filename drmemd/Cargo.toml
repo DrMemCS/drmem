@@ -32,7 +32,7 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
 
-clap = { version = "2", default-features = false }
+clap = { version = "4", features = ["cargo"] }
 
 chrono.workspace = true
 
