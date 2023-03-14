@@ -86,40 +86,39 @@ pub struct Logic {
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
-    use clap::{App, Arg};
+    use clap::{crate_version, Arg, ArgAction, Command};
 
     // Define the command line arguments.
 
-    let matches = App::new("DrMem Mini Control System")
-        .version("0.1")
+    let matches = Command::new("DrMem Mini Control System")
+        .version(crate_version!())
         .about("A small, yet capable, control system.")
         .arg(
-            Arg::with_name("config")
-                .short("c")
+            Arg::new("config")
+                .short('c')
                 .long("config")
+                .action(ArgAction::Set)
                 .value_name("FILE")
-                .help("Specifies the configuration file")
-                .takes_value(true),
+                .help("Specifies the configuration file"),
         )
         .arg(
-            Arg::with_name("verbose")
-                .short("v")
+            Arg::new("verbose")
+                .short('v')
                 .long("verbose")
-                .multiple(true)
-                .help("Sets verbosity of log; can be used more than once")
-                .takes_value(false),
+                .action(ArgAction::Count)
+                .help("Sets verbosity of log; can be used more than once"),
         )
         .arg(
-            Arg::with_name("print_cfg")
+            Arg::new("print_cfg")
                 .long("print-config")
-                .help("Displays the configuration and exits")
-                .takes_value(false),
+                .action(ArgAction::SetTrue)
+                .help("Displays the configuration and exits"),
         )
         .get_matches();
 
     // The number of '-v' options determines the log level.
 
-    match matches.occurrences_of("verbose") {
+    match matches.get_count("verbose") {
         0 => (),
         1 => cfg.log_level = String::from("info"),
         2 => cfg.log_level = String::from("debug"),
@@ -129,7 +128,7 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
     // Return the config built from the command line and a flag
     // indicating the user wants the final configuration displayed.
 
-    (matches.is_present("print_cfg"), cfg)
+    (matches.contains_id("print_cfg"), cfg)
 }
 
 fn parse_config(path: &str, contents: &str) -> Option<Config> {

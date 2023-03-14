@@ -1,4 +1,7 @@
+%expect-unused Unknown "UNKNOWN"
+
 %start Logic
+
 %avoid_insert "INT"
 %avoid_insert "FLT"
 %avoid_insert "DEVICE"
