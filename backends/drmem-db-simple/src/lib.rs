@@ -10,6 +10,7 @@
 //! with current values.
 
 use async_trait::async_trait;
+use chrono::*;
 use drmem_api::{
     client,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
@@ -322,7 +323,8 @@ impl Store for SimpleStore {
     // by all new updates.
 
     async fn monitor_device(
-        &mut self, name: device::Name,
+        &mut self, name: device::Name, start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
     ) -> Result<device::DataStream<device::Reading>> {
         // Look-up the name of the device. If it doesn't exist, return
         // an error.
@@ -352,14 +354,59 @@ impl Store for SimpleStore {
                         }
                     });
 
-                // If there's a previous value, create a stream that
-                // returns it and starts reading the broadcast stream
-                // for further values (i.e. chain the two streams.)
+                match (start.map(|v| v.into()), end.map(|v| v.into())) {
+                    (None, None) => {
+                        if let Some(prev) = &guard.1 {
+                            Ok(Box::pin(
+                                tokio_stream::once(prev.clone()).chain(strm),
+                            ))
+                        } else {
+                            Ok(Box::pin(strm))
+                        }
+                    }
+                    (None, Some(end)) => {
+                        let not_end = move |v: &device::Reading| v.ts <= end;
 
-                if let Some(prev) = &guard.1 {
-                    Ok(Box::pin(tokio_stream::once(prev.clone()).chain(strm)))
-                } else {
-                    Ok(Box::pin(strm))
+                        if let Some(prev) = &guard.1 {
+                            Ok(Box::pin(
+                                tokio_stream::once(prev.clone())
+                                    .chain(strm)
+                                    .take_while(not_end),
+                            ))
+                        } else {
+                            Ok(Box::pin(strm.take_while(not_end)))
+                        }
+                    }
+                    (Some(start), None) => {
+                        let valid = move |v: &device::Reading| v.ts >= start;
+
+                        if let Some(prev) = &guard.1 {
+                            Ok(Box::pin(
+                                tokio_stream::once(prev.clone())
+                                    .chain(strm)
+                                    .filter(valid),
+                            ))
+                        } else {
+                            Ok(Box::pin(strm.filter(valid)))
+                        }
+                    }
+                    (Some(start_tmp), Some(end_tmp)) => {
+                        let start = std::cmp::min(start_tmp, end_tmp);
+                        let end = std::cmp::max(start_tmp, end_tmp);
+                        let valid = move |v: &device::Reading| v.ts >= start;
+                        let not_end = move |v: &device::Reading| v.ts <= end;
+
+                        if let Some(prev) = &guard.1 {
+                            Ok(Box::pin(
+                                tokio_stream::once(prev.clone())
+                                    .chain(strm)
+                                    .filter(valid)
+                                    .take_while(not_end),
+                            ))
+                        } else {
+                            Ok(Box::pin(strm.filter(valid).take_while(not_end)))
+                        }
+                    }
                 }
             } else {
                 Err(Error::OperationError)
@@ -376,6 +423,8 @@ mod tests {
     use drmem_api::{types::device, Store};
     use std::{collections::HashMap, time};
     use tokio::sync::{mpsc::error::TryRecvError, oneshot};
+    use tokio::time::interval;
+    use tokio_stream::StreamExt;
 
     #[test]
     fn test_timestamp() {

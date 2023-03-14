@@ -439,14 +439,18 @@ impl Subscription {
 			     reply each time a device's value changes.")]
     async fn monitor_device(
         #[graphql(context)] db: &ConfigDb, device: String,
-        _range: Option<DateRange>,
+        range: Option<DateRange>,
     ) -> device::DataStream<FieldResult<Reading>> {
         use tokio_stream::StreamExt;
 
         if let Ok(name) = device.parse::<device::Name>() {
             info!("setting monitor for '{}'", &name);
 
-            if let Ok(rx) = db.1.monitor_device(name.clone()).await {
+            let start = range.as_ref().map_or(None, |v| v.start);
+            let end = range.as_ref().map_or(None, |v| v.end);
+
+            if let Ok(rx) = db.1.monitor_device(name.clone(), start, end).await
+            {
                 let stream = StreamExt::map(rx, Subscription::xlat(device));
 
                 Box::pin(stream) as device::DataStream<FieldResult<Reading>>

@@ -5,6 +5,7 @@
 //! for the `drmemd` executable.
 
 use async_trait::async_trait;
+use chrono::*;
 
 pub mod types;
 
@@ -103,7 +104,8 @@ pub trait Store {
     /// Creates a stream that yields values of a device as it updates.
 
     async fn monitor_device(
-        &mut self, name: types::device::Name,
+        &mut self, name: types::device::Name, start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
     ) -> Result<types::device::DataStream<types::device::Reading>>;
 }
 

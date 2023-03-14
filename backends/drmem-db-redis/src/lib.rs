@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use chrono::*;
 use drmem_api::{
     client,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
@@ -9,15 +10,13 @@ use drmem_api::{
     Result, Store,
 };
 use futures::task::{Context, Poll};
-use futures::{
-    stream::{self, StreamExt},
-    Future, Stream,
-};
+use futures::Future;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::pin::Pin;
 use std::time;
 use tokio::sync::{mpsc, oneshot};
+use tokio_stream::{self, Stream, StreamExt};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
@@ -183,6 +182,41 @@ fn from_value(v: &redis::Value) -> Result<Value> {
     }
 }
 
+// Subtracts 1 microsecond from a SystemTime value. If subtracting
+// can't be done (would put the SystemTime out of range) then the
+// passed in value is returned.
+
+fn st_minus_1us(st: time::SystemTime) -> time::SystemTime {
+    if let Some(val) = st.checked_sub(time::Duration::from_micros(1)) {
+        val
+    } else {
+        st
+    }
+}
+
+// Converts millisecond/microsecond values to SystemTime. The
+// microsecond parameter is clipped to the range 0 - 999.
+
+fn msus_to_st(ms: u64, us: u64) -> Result<time::SystemTime> {
+    let ts = time::UNIX_EPOCH.checked_add(time::Duration::from_millis(ms));
+
+    if let Some(ts) = ts {
+        let ts = ts.checked_add(time::Duration::from_micros(std::cmp::min(
+            us, 999u64,
+        )));
+
+        if let Some(ts) = ts {
+            return Ok(ts);
+        }
+    }
+    Err(Error::InvArgument(String::from("bad timestamp value")))
+}
+
+// Converts a redis stream ID ("###-###") into a `SystemTime`. In
+// DrMem, we follow the redis convention that the main portion of the
+// ID is milliseconds from 1970. The secondary portion is used to hold
+// microseconds ("0" - "999", not "000" - "999").
+
 fn id_to_ts(id: &str) -> Result<time::SystemTime> {
     let fields: Vec<&str> = id.split('-').collect();
 
@@ -198,22 +232,8 @@ fn id_to_ts(id: &str) -> Result<time::SystemTime> {
         // microsecond field. This code will accept the second field
         // to be 0 - 999. If it exceeds 999, we'll clip it.
 
-        if let Ok(ms) = a.parse::<u64>() {
-            let ts =
-                time::UNIX_EPOCH.checked_add(time::Duration::from_millis(ms));
-
-            if let Some(ts) = ts {
-                if let Ok(us) = b.parse::<u64>() {
-                    let ts = ts.checked_add(std::cmp::min(
-                        time::Duration::from_micros(us),
-                        time::Duration::from_micros(999u64),
-                    ));
-
-                    if let Some(ts) = ts {
-                        return Ok(ts);
-                    }
-                }
-            }
+        if let (Ok(ms), Ok(us)) = (a.parse::<u64>(), b.parse::<u64>()) {
+            return msus_to_st(ms, us);
         }
     }
 
@@ -262,7 +282,7 @@ impl ReadingStream {
     }
 
     // Create a future that returns the next device reading from a
-    // redis stream (or times out trying.) The connection is
+    // redis stream (or times-out trying.) The connection is
     // "threaded" through the future (i.e. it takes ownership and
     // returns it with the result.) This is necessary because an
     // AioConnection isn't clonable.
@@ -307,7 +327,13 @@ impl ReadingStream {
     }
 }
 
-// Implements a stream. Note this stream is not cancel-safe.
+// Implements a stream. Note this stream is probably not cancel-safe;
+// without knowing the internals of the Future that returns the redis
+// result, we can only assume the connection can be put in a bad state
+// if this future (poll_next) is canceled. In DrMem, we typically
+// consume the entire stream and, in the case of a client canceling
+// its use of the stream, we've going to tear down the redis
+// connection.
 
 impl Stream for ReadingStream {
     type Item = device::Reading;
@@ -902,36 +928,76 @@ impl Store for RedisStore {
     }
 
     async fn monitor_device(
-        &mut self, name: device::Name,
+        &mut self, name: device::Name, start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
     ) -> Result<device::DataStream<device::Reading>> {
         match Self::make_connection(&self.cfg, None, None).await {
             Ok(con) => {
                 let name = name.to_string();
                 let key = RedisStore::hist_key(&name);
 
-                // If there is a history for the device, create two
-                // streams: one which returns the last value, another
-                // which returns all future values and then chain them
-                // together.
+                match (start.map(|v| v.into()), end.map(|v| v.into())) {
+                    // With no start time, use the latest value of the
+                    // device. If there's an end time, add a stream
+                    // combinator that ends the stream once the date
+                    // reaches it.
+                    (None, end) => {
+                        let ts = self
+                            .last_value(&name)
+                            .await
+                            .map(|tmp| st_minus_1us(tmp.ts));
 
-                if let Some(prev) = self.last_value(&name).await {
-                    let strm2 = ReadingStream::new(con, &key, Some(prev.ts));
-                    let strm = stream::once(async { prev });
+                        // If there's an end date, append a filter to
+                        // the stream so it stops once the timestamp
+                        // reach it.
 
-                    Ok(Box::pin(strm.chain(strm2))
-                        as device::DataStream<device::Reading>)
-                } else {
-                    let strm2 = ReadingStream::new(con, &key, None);
-                    let strm = stream::empty();
+                        if let Some(end) = end {
+                            let date_test =
+                                move |v: &device::Reading| v.ts <= end;
 
-                    Ok(Box::pin(strm.chain(strm2))
-                        as device::DataStream<device::Reading>)
+                            Ok(Box::pin(
+                                ReadingStream::new(con, &key, ts)
+                                    .take_while(date_test),
+                            )
+                                as device::DataStream<device::Reading>)
+                        } else {
+                            Ok(Box::pin(ReadingStream::new(con, &key, ts))
+                                as device::DataStream<device::Reading>)
+                        }
+                    }
+
+                    // Given a start time with no end time, start
+                    // reading the redis stream at that point.
+                    (Some(start), None) => Ok(Box::pin(ReadingStream::new(
+                        con,
+                        &key,
+                        Some(st_minus_1us(start)),
+                    ))
+                        as device::DataStream<device::Reading>),
+
+                    // Start reading at the start time and stop the
+                    // stream at the end time.
+                    (Some(start_tmp), Some(end_tmp)) => {
+                        let start = std::cmp::min(start_tmp, end_tmp);
+                        let end = std::cmp::max(start_tmp, end_tmp);
+                        let date_test = move |v: &device::Reading| v.ts <= end;
+
+                        Ok(Box::pin(
+                            ReadingStream::new(
+                                con,
+                                &key,
+                                Some(st_minus_1us(start)),
+                            )
+                            .take_while(date_test),
+                        )
+                            as device::DataStream<device::Reading>)
+                    }
                 }
             }
             Err(e) => {
                 error!("couldn't make a connection : {}", e);
 
-                Ok(Box::pin(stream::empty())
+                Ok(Box::pin(tokio_stream::empty())
                     as device::DataStream<device::Reading>)
             }
         }
