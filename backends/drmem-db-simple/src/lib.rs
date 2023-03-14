@@ -10,6 +10,7 @@
 //! with current values.
 
 use async_trait::async_trait;
+use chrono::*;
 use drmem_api::{
     client,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
@@ -322,7 +323,8 @@ impl Store for SimpleStore {
     // by all new updates.
 
     async fn monitor_device(
-        &mut self, name: device::Name,
+        &mut self, name: device::Name, start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
     ) -> Result<device::DataStream<device::Reading>> {
         // Look-up the name of the device. If it doesn't exist, return
         // an error.
@@ -352,14 +354,59 @@ impl Store for SimpleStore {
                         }
                     });
 
-                // If there's a previous value, create a stream that
-                // returns it and starts reading the broadcast stream
-                // for further values (i.e. chain the two streams.)
+                match (start.map(|v| v.into()), end.map(|v| v.into())) {
+                    (None, None) => {
+                        if let Some(prev) = &guard.1 {
+                            Ok(Box::pin(
+                                tokio_stream::once(prev.clone()).chain(strm),
+                            ))
+                        } else {
+                            Ok(Box::pin(strm))
+                        }
+                    }
+                    (None, Some(end)) => {
+                        let not_end = move |v: &device::Reading| v.ts <= end;
 
-                if let Some(prev) = &guard.1 {
-                    Ok(Box::pin(tokio_stream::once(prev.clone()).chain(strm)))
-                } else {
-                    Ok(Box::pin(strm))
+                        if let Some(prev) = &guard.1 {
+                            Ok(Box::pin(
+                                tokio_stream::once(prev.clone())
+                                    .chain(strm)
+                                    .take_while(not_end),
+                            ))
+                        } else {
+                            Ok(Box::pin(strm.take_while(not_end)))
+                        }
+                    }
+                    (Some(start), None) => {
+                        let valid = move |v: &device::Reading| v.ts >= start;
+
+                        if let Some(prev) = &guard.1 {
+                            Ok(Box::pin(
+                                tokio_stream::once(prev.clone())
+                                    .chain(strm)
+                                    .filter(valid),
+                            ))
+                        } else {
+                            Ok(Box::pin(strm.filter(valid)))
+                        }
+                    }
+                    (Some(start_tmp), Some(end_tmp)) => {
+                        let start = std::cmp::min(start_tmp, end_tmp);
+                        let end = std::cmp::max(start_tmp, end_tmp);
+                        let valid = move |v: &device::Reading| v.ts >= start;
+                        let not_end = move |v: &device::Reading| v.ts <= end;
+
+                        if let Some(prev) = &guard.1 {
+                            Ok(Box::pin(
+                                tokio_stream::once(prev.clone())
+                                    .chain(strm)
+                                    .filter(valid)
+                                    .take_while(not_end),
+                            ))
+                        } else {
+                            Ok(Box::pin(strm.filter(valid).take_while(not_end)))
+                        }
+                    }
                 }
             } else {
                 Err(Error::OperationError)
@@ -376,12 +423,415 @@ mod tests {
     use drmem_api::{types::device, Store};
     use std::{collections::HashMap, time};
     use tokio::sync::{mpsc::error::TryRecvError, oneshot};
+    use tokio::time::interval;
+    use tokio_stream::StreamExt;
 
     #[test]
     fn test_timestamp() {
         assert!(time::UNIX_EPOCH
             .checked_add(time::Duration::new(i64::MAX as u64, 999_999_999))
             .is_some())
+    }
+
+    #[tokio::test]
+    async fn test_read_live_stream() {
+        let mut db = SimpleStore(HashMap::new());
+        let name = "test:device".parse::<device::Name>().unwrap();
+
+        if let Ok((f, None)) = db
+            .register_read_only_device("test", &name, &None, &None)
+            .await
+        {
+            // Test that priming the history with one value returns
+            // the entire sequence.
+
+            {
+                let data = vec![1, 2, 3];
+
+                f(device::Value::Int(data[0]));
+
+                let s = db
+                    .monitor_device(name.clone(), None, None)
+                    .await
+                    .unwrap()
+                    .timeout(time::Duration::from_millis(100));
+
+                tokio::pin!(s);
+
+                for ii in &data[1..] {
+                    f(device::Value::Int(*ii));
+                }
+
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(1)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(2)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(3)
+                );
+                assert!(s.try_next().await.is_err());
+            }
+
+            // Test that priming the history with two values only
+            // returns the latest and all remaining.
+
+            {
+                let data = vec![1, 2, 3, 4];
+
+                f(device::Value::Int(data[0]));
+                f(device::Value::Int(data[1]));
+
+                let s = db
+                    .monitor_device(name.clone(), None, None)
+                    .await
+                    .unwrap()
+                    .timeout(time::Duration::from_millis(100));
+
+                tokio::pin!(s);
+
+                for ii in &data[2..] {
+                    f(device::Value::Int(*ii));
+                }
+
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(2)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(3)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(4)
+                );
+                assert!(s.try_next().await.is_err());
+            }
+        } else {
+            panic!("error registering read-only device on empty database")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_start_stream() {
+        let mut db = SimpleStore(HashMap::new());
+        let name = "test:device".parse::<device::Name>().unwrap();
+
+        if let Ok((f, None)) = db
+            .register_read_only_device("test", &name, &None, &None)
+            .await
+        {
+            // Verify that monitoring device, starting now, picks up
+            // all future inserted data.
+
+            {
+                let data = vec![1, 2, 3];
+
+                let s = db
+                    .monitor_device(
+                        name.clone(),
+                        Some(time::SystemTime::now().into()),
+                        None,
+                    )
+                    .await
+                    .unwrap()
+                    .timeout(time::Duration::from_millis(100));
+
+                tokio::pin!(s);
+
+                assert!(s.try_next().await.is_err());
+
+                for ii in data {
+                    f(device::Value::Int(ii));
+                }
+
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(1)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(2)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(3)
+                );
+                assert!(s.try_next().await.is_err());
+            }
+
+            // Verify that, if the latest point is before the starting
+            // timestamp, it doesn't get returned.
+
+            {
+                let data = vec![1, 2, 3];
+
+                f(device::Value::Int(data[0]));
+
+                let s = db
+                    .monitor_device(
+                        name.clone(),
+                        Some(time::SystemTime::now().into()),
+                        None,
+                    )
+                    .await
+                    .unwrap()
+                    .timeout(time::Duration::from_millis(100));
+
+                tokio::pin!(s);
+
+                for ii in &data[1..] {
+                    f(device::Value::Int(*ii));
+                }
+
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(2)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(3)
+                );
+                assert!(s.try_next().await.is_err());
+            }
+        } else {
+            panic!("error registering read-only device on empty database")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_end_stream() {
+        let mut db = SimpleStore(HashMap::new());
+        let name = "test:device".parse::<device::Name>().unwrap();
+
+        if let Ok((f, None)) = db
+            .register_read_only_device("test", &name, &None, &None)
+            .await
+        {
+            // Verify that, if the latest point is before the starting
+            // timestamp, it doesn't get returned.
+
+            {
+                let data = vec![1, 2, 3];
+
+                f(device::Value::Int(data[0]));
+
+                let s = db
+                    .monitor_device(
+                        name.clone(),
+                        None,
+                        Some(time::SystemTime::now().into()),
+                    )
+                    .await
+                    .unwrap()
+                    .timeout(time::Duration::from_millis(100));
+
+                tokio::pin!(s);
+
+                for ii in &data[1..] {
+                    f(device::Value::Int(*ii));
+                }
+
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(1)
+                );
+                assert_eq!(s.try_next().await.unwrap(), None);
+            }
+        } else {
+            panic!("error registering read-only device on empty database")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_start_end_stream() {
+        let mut db = SimpleStore(HashMap::new());
+        let name = "test:device".parse::<device::Name>().unwrap();
+
+        if let Ok((f, None)) = db
+            .register_read_only_device("test", &name, &None, &None)
+            .await
+        {
+            // Verify that, if both times are before the data, nothing
+            // is returned.
+
+            {
+                let data = vec![1, 2, 3, 4, 5];
+
+                let mut interval = interval(time::Duration::from_millis(100));
+
+                let now = time::SystemTime::now();
+                let s = db
+                    .monitor_device(
+                        name.clone(),
+                        Some(
+                            now.checked_sub(time::Duration::from_millis(500))
+                                .unwrap()
+                                .into(),
+                        ),
+                        Some(
+                            now.checked_sub(time::Duration::from_millis(250))
+                                .unwrap()
+                                .into(),
+                        ),
+                    )
+                    .await
+                    .unwrap()
+                    .timeout(time::Duration::from_millis(100));
+
+                tokio::pin!(s);
+
+                for ii in data {
+                    interval.tick().await;
+                    f(device::Value::Int(ii));
+                }
+
+                assert_eq!(s.try_next().await.unwrap(), None);
+            }
+
+            // Verify that, if the latest point is before the starting
+            // timestamp, it doesn't get returned.
+
+            {
+                let data = vec![1, 2, 3, 4, 5];
+
+                f(device::Value::Int(data[0]));
+                let mut interval = interval(time::Duration::from_millis(100));
+
+                let now = time::SystemTime::now();
+                let s = db
+                    .monitor_device(
+                        name.clone(),
+                        Some(now.into()),
+                        Some(
+                            now.checked_add(time::Duration::from_millis(250))
+                                .unwrap()
+                                .into(),
+                        ),
+                    )
+                    .await
+                    .unwrap()
+                    .timeout(time::Duration::from_millis(100));
+
+                tokio::pin!(s);
+
+                for ii in &data[1..] {
+                    interval.tick().await;
+                    f(device::Value::Int(*ii));
+                }
+
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(2)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(3)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(4)
+                );
+                assert_eq!(s.try_next().await.unwrap(), None);
+            }
+
+            // Verify that, if the latest point is after the starting
+            // timestamp, it isn't part of the results.
+
+            {
+                let data = vec![1, 2, 3, 4, 5];
+
+                let mut interval = interval(time::Duration::from_millis(100));
+
+                let now = time::SystemTime::now();
+                let s = db
+                    .monitor_device(
+                        name.clone(),
+                        Some(now.into()),
+                        Some(
+                            now.checked_add(time::Duration::from_millis(250))
+                                .unwrap()
+                                .into(),
+                        ),
+                    )
+                    .await
+                    .unwrap()
+                    .timeout(time::Duration::from_millis(100));
+
+                tokio::pin!(s);
+
+                for ii in data {
+                    interval.tick().await;
+                    f(device::Value::Int(ii));
+                }
+
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(1)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(2)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(3)
+                );
+                assert_eq!(s.try_next().await.unwrap(), None);
+            }
+
+            // Verify that, if the latest point is after the starting
+            // timestamp, it isn't part of the results.
+
+            {
+                let data = vec![1, 2, 3, 4, 5];
+
+                let mut interval = interval(time::Duration::from_millis(100));
+
+                let now = time::SystemTime::now();
+                let s = db
+                    .monitor_device(
+                        name.clone(),
+                        Some(
+                            now.checked_add(time::Duration::from_millis(150))
+                                .unwrap()
+                                .into(),
+                        ),
+                        Some(
+                            now.checked_add(time::Duration::from_millis(350))
+                                .unwrap()
+                                .into(),
+                        ),
+                    )
+                    .await
+                    .unwrap()
+                    .timeout(time::Duration::from_millis(100));
+
+                tokio::pin!(s);
+
+                for ii in data {
+                    interval.tick().await;
+                    f(device::Value::Int(ii));
+                }
+
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(3)
+                );
+                assert_eq!(
+                    s.try_next().await.unwrap().unwrap().value,
+                    device::Value::Int(4)
+                );
+                assert_eq!(s.try_next().await.unwrap(), None);
+            }
+        } else {
+            panic!("error registering read-only device on empty database")
+        }
     }
 
     #[tokio::test]

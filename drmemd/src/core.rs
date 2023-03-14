@@ -102,8 +102,13 @@ impl State {
                 }
             }
 
-            client::Request::MonitorDevice { name, rpy_chan } => {
-                let fut = self.backend.monitor_device(name);
+            client::Request::MonitorDevice {
+                name,
+                rpy_chan,
+                start,
+                end,
+            } => {
+                let fut = self.backend.monitor_device(name, start, end);
 
                 if rpy_chan.send(fut.await).is_err() {
                     warn!("client exited before a reply could be sent")

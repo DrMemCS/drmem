@@ -36,6 +36,7 @@ use crate::{
     types::{device, Error},
     Result,
 };
+use chrono::*;
 use tokio::sync::{mpsc, oneshot};
 
 /// Holds information about a device. A back-end is free to store this
@@ -72,6 +73,8 @@ pub enum Request {
 
     MonitorDevice {
         name: device::Name,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
         rpy_chan: oneshot::Sender<Result<device::DataStream<device::Reading>>>,
     },
 }
@@ -97,12 +100,18 @@ impl RequestChan {
     /// readings as the device is updated.
 
     pub async fn monitor_device(
-        &self, name: device::Name,
+        &self, name: device::Name, start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
     ) -> Result<device::DataStream<device::Reading>> {
         // Create our reply channel and build the request message.
 
         let (tx, rx) = oneshot::channel();
-        let msg = Request::MonitorDevice { name, rpy_chan: tx };
+        let msg = Request::MonitorDevice {
+            name,
+            rpy_chan: tx,
+            start,
+            end,
+        };
 
         // Send the message.
 

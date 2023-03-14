@@ -11,9 +11,9 @@ default-members = ["drmemd"]
 async-trait = "0.1"
 
 futures = { version = "0.3", features = ["std"] }
-futures-util = "0.3"
 
 toml = "0.5"
+chrono = "0.4"
 
 tokio = { version = "1", features = ["macros", "time", "sync"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
