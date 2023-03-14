@@ -86,7 +86,7 @@ pub struct Logic {
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
-    use clap::{Command, Arg, ArgAction, crate_version};
+    use clap::{crate_version, Arg, ArgAction, Command};
 
     // Define the command line arguments.
 
@@ -97,22 +97,22 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
             Arg::new("config")
                 .short('c')
                 .long("config")
-		.action(ArgAction::Set)
+                .action(ArgAction::Set)
                 .value_name("FILE")
-                .help("Specifies the configuration file")
+                .help("Specifies the configuration file"),
         )
         .arg(
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
-		.action(ArgAction::Count)
-                .help("Sets verbosity of log; can be used more than once")
+                .action(ArgAction::Count)
+                .help("Sets verbosity of log; can be used more than once"),
         )
         .arg(
             Arg::new("print_cfg")
                 .long("print-config")
-		.action(ArgAction::SetTrue)
-                .help("Displays the configuration and exits")
+                .action(ArgAction::SetTrue)
+                .help("Displays the configuration and exits"),
         )
         .get_matches();
 
