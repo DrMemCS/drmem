@@ -11,6 +11,10 @@ use drmem_api::{
 };
 use futures::task::{Context, Poll};
 use futures::Future;
+use redis::{
+    aio,
+    streams::{StreamId, StreamInfoStreamReply},
+};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::pin::Pin;
@@ -20,8 +24,8 @@ use tokio_stream::{self, Stream, StreamExt};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
-type AioMplexConnection = redis::aio::MultiplexedConnection;
-type AioConnection = redis::aio::Connection;
+type AioMplexConnection = aio::MultiplexedConnection;
+type AioConnection = aio::Connection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;
 
 pub mod config;
@@ -575,6 +579,15 @@ impl RedisStore {
         redis::Cmd::hgetall(&info_key)
     }
 
+    // Creates the redis command to pull stream information associated
+    // with the device's history.
+
+    fn xinfo_cmd(name: &str) -> redis::Cmd {
+        let hist_key = Self::hist_key(name);
+
+        redis::Cmd::xinfo_stream(&hist_key)
+    }
+
     // Generates a redis command pipeline that adds a value to a
     // device's history.
 
@@ -619,9 +632,26 @@ impl RedisStore {
                 units,
                 settable: st.contains_key(name),
                 driver,
+                total_points: 0,
+                first_point: None,
+                last_point: None,
             })
         } else {
             Err(Error::NotFound)
+        }
+    }
+
+    // Converts the `StreamId` type, from redis, into our
+    // `device::Reading` type.
+
+    fn stream_id_to_reading(sid: &StreamId) -> Result<device::Reading> {
+        if let Some(val) = sid.map.get("value") {
+            Ok(device::Reading {
+                ts: id_to_ts(sid.id.as_str())?,
+                value: from_value(val)?,
+            })
+        } else {
+            Err(Error::TypeError)
         }
     }
 
@@ -631,13 +661,34 @@ impl RedisStore {
     async fn lookup_device(
         &mut self, name: device::Name,
     ) -> Result<client::DevInfoReply> {
-        Self::device_info_cmd(name.to_string().as_str())
+        let info = Self::device_info_cmd(name.to_string().as_str())
             .query_async::<AioMplexConnection, HashMap<String, String>>(
                 &mut self.db_con,
             )
             .await
             .map_err(xlat_err)
-            .and_then(|v| Self::hash_to_info(&self.table, &name, &v))
+            .and_then(|v| Self::hash_to_info(&self.table, &name, &v))?;
+
+        Self::xinfo_cmd(name.to_string().as_str())
+            .query_async::<AioMplexConnection, StreamInfoStreamReply>(
+                &mut self.db_con,
+            )
+            .await
+            .map_err(xlat_err)
+            .and_then(move |v| {
+                let info = client::DevInfoReply {
+                    total_points: v.length as u32,
+                    first_point: Some(Self::stream_id_to_reading(
+                        &v.first_entry,
+                    )?),
+                    last_point: Some(Self::stream_id_to_reading(
+                        &v.last_entry,
+                    )?),
+                    ..info
+                };
+
+                Ok(info)
+            })
     }
 
     fn parse_last_value(
@@ -1607,6 +1658,9 @@ $4\r\nEXEC\r\n"
                 units: Some(String::from("gpm")),
                 settable: false,
                 driver: String::from("*missing*"),
+                total_points: 0,
+                first_point: None,
+                last_point: None,
             })
         );
 
@@ -1619,6 +1673,9 @@ $4\r\nEXEC\r\n"
                 units: Some(String::from("gpm")),
                 settable: false,
                 driver: String::from("sump"),
+                total_points: 0,
+                first_point: None,
+                last_point: None,
             })
         );
 
@@ -1632,6 +1689,9 @@ $4\r\nEXEC\r\n"
                 units: Some(String::from("gpm")),
                 settable: true,
                 driver: String::from("sump"),
+                total_points: 0,
+                first_point: None,
+                last_point: None,
             })
         );
     }

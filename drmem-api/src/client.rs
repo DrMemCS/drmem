@@ -53,7 +53,10 @@ pub struct DevInfoReply {
     pub units: Option<String>,
     /// Indicates whether the device is settable.
     pub settable: bool,
-    /// The name of the driver that suports this device.
+    pub total_points: u32,
+    pub first_point: Option<device::Reading>,
+    pub last_point: Option<device::Reading>,
+    /// The name of the driver that supports this device.
     pub driver: String,
 }
 

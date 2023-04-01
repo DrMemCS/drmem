@@ -75,6 +75,26 @@ struct SettingData {
     f_string: Option<String>,
 }
 
+// Contains information about a device's history in the backend.
+
+#[derive(GraphQLObject)]
+struct DeviceHistory {
+    #[graphql(description = "Total number of points in backend storage.")]
+    total_points: i32,
+    #[graphql(description = "The oldest data point in storage. If the total\
+			     is 0, then this field will be null. Note that\
+			     this value is accurate at the time of this\
+			     query. However, at any moment, the oldest data\
+			     point could be thrown away if new data arrives.")]
+    first_point: Option<Reading>,
+    #[graphql(description = "The latest data point in storage. If the total\
+			     is 0, then this field will be null. Note that\
+			     this value is accurate at the time of this\
+			     query. However, at any moment, newer data could\
+			     be added.")]
+    last_point: Option<Reading>,
+}
+
 // `DeviceInfo` is a GraphQL object which contains information about a
 // device.
 
@@ -83,6 +103,7 @@ struct DeviceInfo {
     units: Option<String>,
     settable: bool,
     driver_name: String,
+    history: DeviceHistory,
     db: crate::driver::DriverDb,
 }
 
@@ -121,6 +142,10 @@ impl DeviceInfo {
                 description: di.description,
             })
             .unwrap()
+    }
+
+    fn history(&self) -> &DeviceHistory {
+        &self.history
     }
 }
 
@@ -197,20 +222,16 @@ impl Config {
 
     #[graphql(
         description = "Returns information associated with the devices that \
-			     are active in the running system. Arguments to the \
-			     query will filter the results.\n\n\
-			     \
-			     If the argument `pattern` is provided, only the devices \
-			     whose name matches the pattern will be included in the \
-			     results. The pattern follows the shell \"glob\" style.\n\n\
-			     \
-			     If the argument `settable` is provided, it returns \
-			     devices that are or aren't settable, depending on the \
-			     value of the agument.\n\n\
-			     \
-			     NOTE: At this point, the only supported pattern is the \
-			     entire device name. Proper pattern handling will be \
-			     added soon."
+		     are active in the running system. Arguments to the \
+		     query will filter the results.\n\n\
+		     \
+		     If the argument `pattern` is provided, only the devices \
+		     whose name matches the pattern will be included in the \
+		     results. The pattern follows the shell \"glob\" style.\n\n\
+		     \
+		     If the argument `settable` is provided, it returns \
+		     devices that are or aren't settable, depending on the \
+		     value of the agument."
     )]
     async fn device_info(
         #[graphql(context)] db: &ConfigDb,
@@ -251,6 +272,21 @@ impl Config {
                         units: e.units.clone(),
                         settable: e.settable,
                         driver_name: e.driver.clone(),
+                        history: DeviceHistory {
+                            total_points: e.total_points as i32,
+                            first_point: e.first_point.as_ref().map(|v| {
+                                Reading {
+                                    device: e.name.to_string(),
+                                    ..v.into()
+                                }
+                            }),
+                            last_point: e.last_point.as_ref().map(|v| {
+                                Reading {
+                                    device: e.name.to_string(),
+                                    ..v.into()
+                                }
+                            }),
+                        },
                         db: db.0.clone(),
                     })
                     .collect()
@@ -402,6 +438,45 @@ struct Reading {
     bool_value: Option<bool>,
     #[graphql(description = "Placeholder for string values.")]
     string_value: Option<String>,
+}
+
+impl From<&device::Reading> for Reading {
+    fn from(value: &device::Reading) -> Self {
+        match &value.value {
+            device::Value::Bool(v) => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: None,
+                float_value: None,
+                bool_value: Some(*v),
+                string_value: None,
+            },
+            device::Value::Int(v) => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: Some(*v),
+                float_value: None,
+                bool_value: None,
+                string_value: None,
+            },
+            device::Value::Flt(v) => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: None,
+                float_value: Some(*v),
+                bool_value: None,
+                string_value: None,
+            },
+            device::Value::Str(v) => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: None,
+                float_value: None,
+                bool_value: None,
+                string_value: Some(v.to_string()),
+            },
+        }
+    }
 }
 
 struct Subscription;
