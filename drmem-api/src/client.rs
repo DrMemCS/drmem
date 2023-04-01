@@ -44,7 +44,7 @@ use tokio::sync::{mpsc, oneshot};
 /// GraphQL queries, so it should be reasonably efficient to assemble
 /// this reply.
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct DevInfoReply {
     /// The full name of the device.
     pub name: device::Name,
