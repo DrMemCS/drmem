@@ -521,8 +521,8 @@ impl Subscription {
         if let Ok(name) = device.parse::<device::Name>() {
             info!("setting monitor for '{}'", &name);
 
-            let start = range.as_ref().map_or(None, |v| v.start);
-            let end = range.as_ref().map_or(None, |v| v.end);
+            let start = range.as_ref().and_then(|v| v.start);
+            let end = range.as_ref().and_then(|v| v.end);
 
             if let Ok(rx) = db.1.monitor_device(name.clone(), start, end).await
             {
