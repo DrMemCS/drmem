@@ -36,6 +36,8 @@ clap = { version = "4", features = ["cargo"] }
 
 chrono.workspace = true
 
+lazy_static = "1"
+
 drmem-api = { path = "../drmem-api", version = "0.1" }
 
 cfgrammar = "0.13"

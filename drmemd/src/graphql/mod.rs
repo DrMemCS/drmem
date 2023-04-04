@@ -554,64 +554,82 @@ fn schema() -> Schema {
     Schema::new(Config {}, MutRoot {}, Subscription {})
 }
 
+// Define the URI paths used by the GraphQL interface.
+
+mod paths {
+    pub const BASE: &str = "drmem";
+    pub const QUERY: &str = "q";
+    pub const SUBSCRIBE: &str = "s";
+
+    // Until we can build strings at compile-time, we use the
+    // `lazy_static` macro.
+
+    lazy_static! {
+        pub static ref FULL_QUERY: String = format!("/{}/{}", BASE, QUERY);
+        pub static ref FULL_SUBSCRIBE: String =
+            format!("/{}/{}", BASE, SUBSCRIBE);
+    }
+}
+
 pub fn server(
     cfg: &config::Config, db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
-    const FULL_QUERY_PATH: &str = "/query";
-    const FULL_SUBSCRIBE_PATH: &str = "/subscribe";
-
-    let query_path: &str = &FULL_QUERY_PATH[1..];
-    let subscribe_path: &str = &FULL_SUBSCRIBE_PATH[1..];
-
     let context = ConfigDb(db, cchan);
 
     // Create filter that handles GraphQL queries and mutations.
 
     let ctxt = context.clone();
     let state = warp::any().map(move || ctxt.clone());
-    let graphql_filter =
-        juniper_warp::make_graphql_filter(schema(), state.boxed());
+    let query_filter = warp::path(paths::QUERY)
+        .and(warp::path::end())
+        .and(warp::post().or(warp::get()).unify())
+        .and(juniper_warp::make_graphql_filter(schema(), state.boxed()));
 
-    // Create filter that handle the interactive GraphQL app.
+    // Create filter that handle the interactive GraphQL app. This
+    // service is found at the BASE path.
 
-    let graphiql_filter =
-        playground_filter(FULL_QUERY_PATH, Some(FULL_SUBSCRIBE_PATH));
+    let graphiql_filter = warp::path::end().and(
+        playground_filter(&*paths::FULL_QUERY, Some(&*paths::FULL_SUBSCRIBE)),
+    );
 
     // Create the filter that handles subscriptions.
 
-    let sub_filter = warp::ws().and(warp::addr::remote()).map(
-        move |ws: warp::ws::Ws, addr: Option<std::net::SocketAddr>| {
-            let ctxt = context.clone();
-            let root_node = schema();
+    let sub_filter = warp::path(paths::SUBSCRIBE)
+        .and(warp::path::end())
+        .and(warp::get())
+        .and(warp::ws())
+        .and(warp::addr::remote())
+        .map(
+            move |ws: warp::ws::Ws, addr: Option<std::net::SocketAddr>| {
+                let ctxt = context.clone();
+                let root_node = schema();
 
-            ws.on_upgrade(move |websocket| {
-                async move {
-                    let _ = serve_graphql_ws(
-                        websocket,
-                        Arc::new(root_node),
-                        ConnectionConfig::new(ctxt.clone()),
-                    )
-                    .await;
-                }
-                .instrument(info_span!(
-                    "graphql",
-                    client = addr
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| String::from("*unknown*"))
-                        .as_str()
-                ))
-            })
-        },
-    );
+                ws.on_upgrade(move |websocket| {
+                    async move {
+                        let _ = serve_graphql_ws(
+                            websocket,
+                            Arc::new(root_node),
+                            ConnectionConfig::new(ctxt.clone()),
+                        )
+                        .await;
+                    }
+                    .instrument(info_span!(
+                        "graphql",
+                        client = addr
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| String::from("*unknown*"))
+                            .as_str()
+                    ))
+                })
+            },
+        );
 
     // Stitch the filters together to build the map of the web
     // interface.
 
-    let filter = warp::path("graphiql")
-        .and(graphiql_filter)
-        .or(warp::path(subscribe_path).and(sub_filter))
-        .or(warp::path(query_path).and(graphql_filter))
+    let filter = warp::path(paths::BASE)
+        .and(graphiql_filter.or(query_filter).or(sub_filter))
         .with(
             warp::cors()
                 .allow_any_origin()
@@ -643,9 +661,9 @@ pub fn server(
             "boot-time={}",
             boot_time.to_rfc3339_opts(SecondsFormat::Secs, true)
         ),
-        format!("queries={}", FULL_QUERY_PATH),
-        format!("mutations={}", FULL_QUERY_PATH),
-        format!("subscriptions={}", FULL_SUBSCRIBE_PATH),
+        format!("queries={}", &*paths::FULL_QUERY),
+        format!("mutations={}", &*paths::FULL_QUERY),
+        format!("subscriptions={}", &*paths::FULL_SUBSCRIBE),
     ];
 
     // If the configuration specifies a preferred address to use, add
