@@ -113,6 +113,7 @@ redis-backend = ["drmem-db-redis"]
 
 no-client = []
 graphql = ["warp", "juniper", "juniper_graphql_ws", "juniper_warp", "libmdns"]
+graphiql = ["graphql"]
 
 # Drivers
 

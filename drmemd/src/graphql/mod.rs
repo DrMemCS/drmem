@@ -9,7 +9,7 @@ use juniper::{
     FieldResult, GraphQLInputObject, GraphQLObject, RootNode, Value,
 };
 use juniper_graphql_ws::ConnectionConfig;
-use juniper_warp::{playground_filter, subscriptions::serve_graphql_ws};
+use juniper_warp::subscriptions::serve_graphql_ws;
 use libmdns::Responder;
 use std::{result, sync::Arc, time::Duration};
 use tracing::{info, info_span};
@@ -575,6 +575,9 @@ pub fn server(
     cfg: &config::Config, db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
+    #[cfg(feature = "graphiql")]
+    use juniper_warp::playground_filter;
+
     let context = ConfigDb(db, cchan);
 
     // Create filter that handles GraphQL queries and mutations.
@@ -589,9 +592,11 @@ pub fn server(
     // Create filter that handle the interactive GraphQL app. This
     // service is found at the BASE path.
 
-    let graphiql_filter = warp::path::end().and(
-        playground_filter(&*paths::FULL_QUERY, Some(&*paths::FULL_SUBSCRIBE)),
-    );
+    #[cfg(feature = "graphiql")]
+    let graphiql_filter = warp::path::end().and(playground_filter(
+        &*paths::FULL_QUERY,
+        Some(&*paths::FULL_SUBSCRIBE),
+    ));
 
     // Create the filter that handles subscriptions.
 
@@ -625,11 +630,21 @@ pub fn server(
             },
         );
 
+    #[cfg(feature = "graphiql")]
+    let site = query_filter
+	.or(graphiql_filter)
+	.or(sub_filter);
+
+    #[cfg(not(feature = "graphiql"))]
+    let site = query_filter
+	.or(sub_filter);
+
     // Stitch the filters together to build the map of the web
     // interface.
 
     let filter = warp::path(paths::BASE)
-        .and(graphiql_filter.or(query_filter).or(sub_filter))
+        .and(site)
+        .with(warp::log("gql::drmem"))
         .with(
             warp::cors()
                 .allow_any_origin()
