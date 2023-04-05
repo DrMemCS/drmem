@@ -11,6 +11,10 @@ use drmem_api::{
 };
 use futures::task::{Context, Poll};
 use futures::Future;
+use redis::{
+    aio,
+    streams::{StreamId, StreamInfoStreamReply},
+};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::pin::Pin;
@@ -20,8 +24,8 @@ use tokio_stream::{self, Stream, StreamExt};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
-type AioMplexConnection = redis::aio::MultiplexedConnection;
-type AioConnection = redis::aio::Connection;
+type AioMplexConnection = aio::MultiplexedConnection;
+type AioConnection = aio::Connection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;
 
 pub mod config;
@@ -575,6 +579,15 @@ impl RedisStore {
         redis::Cmd::hgetall(&info_key)
     }
 
+    // Creates the redis command to pull stream information associated
+    // with the device's history.
+
+    fn xinfo_cmd(name: &str) -> redis::Cmd {
+        let hist_key = Self::hist_key(name);
+
+        redis::Cmd::xinfo_stream(&hist_key)
+    }
+
     // Generates a redis command pipeline that adds a value to a
     // device's history.
 
@@ -619,9 +632,26 @@ impl RedisStore {
                 units,
                 settable: st.contains_key(name),
                 driver,
+                total_points: 0,
+                first_point: None,
+                last_point: None,
             })
         } else {
             Err(Error::NotFound)
+        }
+    }
+
+    // Converts the `StreamId` type, from redis, into our
+    // `device::Reading` type.
+
+    fn stream_id_to_reading(sid: &StreamId) -> Result<device::Reading> {
+        if let Some(val) = sid.map.get("value") {
+            Ok(device::Reading {
+                ts: id_to_ts(sid.id.as_str())?,
+                value: from_value(val)?,
+            })
+        } else {
+            Err(Error::TypeError)
         }
     }
 
@@ -631,13 +661,34 @@ impl RedisStore {
     async fn lookup_device(
         &mut self, name: device::Name,
     ) -> Result<client::DevInfoReply> {
-        Self::device_info_cmd(name.to_string().as_str())
+        let info = Self::device_info_cmd(name.to_string().as_str())
             .query_async::<AioMplexConnection, HashMap<String, String>>(
                 &mut self.db_con,
             )
             .await
             .map_err(xlat_err)
-            .and_then(|v| Self::hash_to_info(&self.table, &name, &v))
+            .and_then(|v| Self::hash_to_info(&self.table, &name, &v))?;
+
+        Self::xinfo_cmd(name.to_string().as_str())
+            .query_async::<AioMplexConnection, StreamInfoStreamReply>(
+                &mut self.db_con,
+            )
+            .await
+            .map_err(xlat_err)
+            .and_then(move |v| {
+                let info = client::DevInfoReply {
+                    total_points: v.length as u32,
+                    first_point: Some(Self::stream_id_to_reading(
+                        &v.first_entry,
+                    )?),
+                    last_point: Some(Self::stream_id_to_reading(
+                        &v.last_entry,
+                    )?),
+                    ..info
+                };
+
+                Ok(info)
+            })
     }
 
     fn parse_last_value(
@@ -1377,6 +1428,17 @@ $1\r\n1\r\n"
     }
 
     #[test]
+    fn test_xinfo_cmd() {
+        assert_eq!(
+            &RedisStore::xinfo_cmd("junk").get_packed_command(),
+            b"*3\r
+$5\r\nXINFO\r
+$6\r\nSTREAM\r
+$9\r\njunk#hist\r\n"
+        );
+    }
+
+    #[test]
     fn test_report_value_cmd() {
         assert_eq!(
             &RedisStore::report_new_value_cmd("key", &(true.into()))
@@ -1584,6 +1646,142 @@ $4\r\nEXEC\r\n"
     }
 
     #[test]
+    fn test_streamid_to_reading() {
+        // Look for various failure modes.
+
+        assert!(RedisStore::stream_id_to_reading(&StreamId {
+            id: "1000-0".into(),
+            map: HashMap::from([])
+        })
+        .is_err());
+        assert!(RedisStore::stream_id_to_reading(&StreamId {
+            id: "1000-0".into(),
+            map: HashMap::from([(
+                "junk".into(),
+                redis::Value::Data(b"10".to_vec())
+            )])
+        })
+        .is_err());
+        assert!(RedisStore::stream_id_to_reading(&StreamId {
+            id: "1000-0".into(),
+            map: HashMap::from([(
+                "value".into(),
+                redis::Value::Data(b"10".to_vec())
+            )])
+        })
+        .is_err());
+
+        // Look for valid conversions.
+
+        assert_eq!(
+            RedisStore::stream_id_to_reading(&StreamId {
+                id: "1000-0".into(),
+                map: HashMap::from([(
+                    "value".into(),
+                    redis::Value::Data(to_redis(&device::Value::Bool(true)))
+                )])
+            }),
+            Ok(device::Reading {
+                ts: time::UNIX_EPOCH + time::Duration::from_millis(1000),
+                value: device::Value::Bool(true)
+            })
+        );
+        assert_eq!(
+            RedisStore::stream_id_to_reading(&StreamId {
+                id: "1500-0".into(),
+                map: HashMap::from([(
+                    "value".into(),
+                    redis::Value::Data(to_redis(&device::Value::Int(123)))
+                )])
+            }),
+            Ok(device::Reading {
+                ts: time::UNIX_EPOCH + time::Duration::from_millis(1500),
+                value: device::Value::Int(123)
+            })
+        );
+        assert_eq!(
+            RedisStore::stream_id_to_reading(&StreamId {
+                id: "2500-0".into(),
+                map: HashMap::from([(
+                    "value".into(),
+                    redis::Value::Data(to_redis(&device::Value::Int(-321)))
+                )])
+            }),
+            Ok(device::Reading {
+                ts: time::UNIX_EPOCH + time::Duration::from_millis(2500),
+                value: device::Value::Int(-321)
+            })
+        );
+        assert_eq!(
+            RedisStore::stream_id_to_reading(&StreamId {
+                id: "2500-0".into(),
+                map: HashMap::from([(
+                    "value".into(),
+                    redis::Value::Data(to_redis(&device::Value::Flt(1.0)))
+                )])
+            }),
+            Ok(device::Reading {
+                ts: time::UNIX_EPOCH + time::Duration::from_millis(2500),
+                value: device::Value::Flt(1.0)
+            })
+        );
+        assert_eq!(
+            RedisStore::stream_id_to_reading(&StreamId {
+                id: "2500-0".into(),
+                map: HashMap::from([(
+                    "value".into(),
+                    redis::Value::Data(to_redis(&device::Value::Flt(-1.0)))
+                )])
+            }),
+            Ok(device::Reading {
+                ts: time::UNIX_EPOCH + time::Duration::from_millis(2500),
+                value: device::Value::Flt(-1.0)
+            })
+        );
+        assert_eq!(
+            RedisStore::stream_id_to_reading(&StreamId {
+                id: "2500-0".into(),
+                map: HashMap::from([(
+                    "value".into(),
+                    redis::Value::Data(to_redis(&device::Value::Flt(1.0e100)))
+                )])
+            }),
+            Ok(device::Reading {
+                ts: time::UNIX_EPOCH + time::Duration::from_millis(2500),
+                value: device::Value::Flt(1.0e100)
+            })
+        );
+        assert_eq!(
+            RedisStore::stream_id_to_reading(&StreamId {
+                id: "2500-0".into(),
+                map: HashMap::from([(
+                    "value".into(),
+                    redis::Value::Data(to_redis(&device::Value::Flt(1.0e-100)))
+                )])
+            }),
+            Ok(device::Reading {
+                ts: time::UNIX_EPOCH + time::Duration::from_millis(2500),
+                value: device::Value::Flt(1.0e-100)
+            })
+        );
+        assert_eq!(
+            RedisStore::stream_id_to_reading(&StreamId {
+                id: "2500-0".into(),
+                map: HashMap::from([(
+                    "value".into(),
+                    redis::Value::Data(to_redis(&device::Value::Str(
+                        "Hello".into()
+                    )))
+                )])
+            }),
+            Ok(device::Reading {
+                ts: time::UNIX_EPOCH + time::Duration::from_millis(2500),
+                value: device::Value::Str("Hello".into())
+            })
+        );
+    }
+
+    #[test]
     fn test_hash_to_info() {
         let device = "path:junk".parse::<device::Name>().unwrap();
         let mut st = HashMap::new();
@@ -1607,6 +1805,9 @@ $4\r\nEXEC\r\n"
                 units: Some(String::from("gpm")),
                 settable: false,
                 driver: String::from("*missing*"),
+                total_points: 0,
+                first_point: None,
+                last_point: None,
             })
         );
 
@@ -1619,6 +1820,9 @@ $4\r\nEXEC\r\n"
                 units: Some(String::from("gpm")),
                 settable: false,
                 driver: String::from("sump"),
+                total_points: 0,
+                first_point: None,
+                last_point: None,
             })
         );
 
@@ -1632,6 +1836,9 @@ $4\r\nEXEC\r\n"
                 units: Some(String::from("gpm")),
                 settable: true,
                 driver: String::from("sump"),
+                total_points: 0,
+                first_point: None,
+                last_point: None,
             })
         );
     }

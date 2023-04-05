@@ -9,7 +9,7 @@ use juniper::{
     FieldResult, GraphQLInputObject, GraphQLObject, RootNode, Value,
 };
 use juniper_graphql_ws::ConnectionConfig;
-use juniper_warp::{playground_filter, subscriptions::serve_graphql_ws};
+use juniper_warp::subscriptions::serve_graphql_ws;
 use libmdns::Responder;
 use std::{result, sync::Arc, time::Duration};
 use tracing::{info, info_span};
@@ -75,6 +75,26 @@ struct SettingData {
     f_string: Option<String>,
 }
 
+// Contains information about a device's history in the backend.
+
+#[derive(GraphQLObject)]
+struct DeviceHistory {
+    #[graphql(description = "Total number of points in backend storage.")]
+    total_points: i32,
+    #[graphql(description = "The oldest data point in storage. If the total\
+			     is 0, then this field will be null. Note that\
+			     this value is accurate at the time of this\
+			     query. However, at any moment, the oldest data\
+			     point could be thrown away if new data arrives.")]
+    first_point: Option<Reading>,
+    #[graphql(description = "The latest data point in storage. If the total\
+			     is 0, then this field will be null. Note that\
+			     this value is accurate at the time of this\
+			     query. However, at any moment, newer data could\
+			     be added.")]
+    last_point: Option<Reading>,
+}
+
 // `DeviceInfo` is a GraphQL object which contains information about a
 // device.
 
@@ -83,6 +103,7 @@ struct DeviceInfo {
     units: Option<String>,
     settable: bool,
     driver_name: String,
+    history: DeviceHistory,
     db: crate::driver::DriverDb,
 }
 
@@ -121,6 +142,10 @@ impl DeviceInfo {
                 description: di.description,
             })
             .unwrap()
+    }
+
+    fn history(&self) -> &DeviceHistory {
+        &self.history
     }
 }
 
@@ -197,20 +222,16 @@ impl Config {
 
     #[graphql(
         description = "Returns information associated with the devices that \
-			     are active in the running system. Arguments to the \
-			     query will filter the results.\n\n\
-			     \
-			     If the argument `pattern` is provided, only the devices \
-			     whose name matches the pattern will be included in the \
-			     results. The pattern follows the shell \"glob\" style.\n\n\
-			     \
-			     If the argument `settable` is provided, it returns \
-			     devices that are or aren't settable, depending on the \
-			     value of the agument.\n\n\
-			     \
-			     NOTE: At this point, the only supported pattern is the \
-			     entire device name. Proper pattern handling will be \
-			     added soon."
+		     are active in the running system. Arguments to the \
+		     query will filter the results.\n\n\
+		     \
+		     If the argument `pattern` is provided, only the devices \
+		     whose name matches the pattern will be included in the \
+		     results. The pattern follows the shell \"glob\" style.\n\n\
+		     \
+		     If the argument `settable` is provided, it returns \
+		     devices that are or aren't settable, depending on the \
+		     value of the agument."
     )]
     async fn device_info(
         #[graphql(context)] db: &ConfigDb,
@@ -251,6 +272,21 @@ impl Config {
                         units: e.units.clone(),
                         settable: e.settable,
                         driver_name: e.driver.clone(),
+                        history: DeviceHistory {
+                            total_points: e.total_points as i32,
+                            first_point: e.first_point.as_ref().map(|v| {
+                                Reading {
+                                    device: e.name.to_string(),
+                                    ..v.into()
+                                }
+                            }),
+                            last_point: e.last_point.as_ref().map(|v| {
+                                Reading {
+                                    device: e.name.to_string(),
+                                    ..v.into()
+                                }
+                            }),
+                        },
                         db: db.0.clone(),
                     })
                     .collect()
@@ -404,6 +440,45 @@ struct Reading {
     string_value: Option<String>,
 }
 
+impl From<&device::Reading> for Reading {
+    fn from(value: &device::Reading) -> Self {
+        match &value.value {
+            device::Value::Bool(v) => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: None,
+                float_value: None,
+                bool_value: Some(*v),
+                string_value: None,
+            },
+            device::Value::Int(v) => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: Some(*v),
+                float_value: None,
+                bool_value: None,
+                string_value: None,
+            },
+            device::Value::Flt(v) => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: None,
+                float_value: Some(*v),
+                bool_value: None,
+                string_value: None,
+            },
+            device::Value::Str(v) => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: None,
+                float_value: None,
+                bool_value: None,
+                string_value: Some(v.to_string()),
+            },
+        }
+    }
+}
+
 struct Subscription;
 
 impl Subscription {
@@ -446,8 +521,8 @@ impl Subscription {
         if let Ok(name) = device.parse::<device::Name>() {
             info!("setting monitor for '{}'", &name);
 
-            let start = range.as_ref().map_or(None, |v| v.start);
-            let end = range.as_ref().map_or(None, |v| v.end);
+            let start = range.as_ref().and_then(|v| v.start);
+            let end = range.as_ref().and_then(|v| v.end);
 
             if let Ok(rx) = db.1.monitor_device(name.clone(), start, end).await
             {
@@ -479,15 +554,29 @@ fn schema() -> Schema {
     Schema::new(Config {}, MutRoot {}, Subscription {})
 }
 
+// Define the URI paths used by the GraphQL interface.
+
+mod paths {
+    pub const BASE: &str = "drmem";
+    pub const QUERY: &str = "q";
+    pub const SUBSCRIBE: &str = "s";
+
+    // Until we can build strings at compile-time, we use the
+    // `lazy_static` macro.
+
+    lazy_static! {
+        pub static ref FULL_QUERY: String = format!("/{}/{}", BASE, QUERY);
+        pub static ref FULL_SUBSCRIBE: String =
+            format!("/{}/{}", BASE, SUBSCRIBE);
+    }
+}
+
 pub fn server(
     cfg: &config::Config, db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
-    const FULL_QUERY_PATH: &str = "/query";
-    const FULL_SUBSCRIBE_PATH: &str = "/subscribe";
-
-    let query_path: &str = &FULL_QUERY_PATH[1..];
-    let subscribe_path: &str = &FULL_SUBSCRIBE_PATH[1..];
+    #[cfg(feature = "graphiql")]
+    use juniper_warp::playground_filter;
 
     let context = ConfigDb(db, cchan);
 
@@ -495,48 +584,63 @@ pub fn server(
 
     let ctxt = context.clone();
     let state = warp::any().map(move || ctxt.clone());
-    let graphql_filter =
-        juniper_warp::make_graphql_filter(schema(), state.boxed());
+    let query_filter = warp::path(paths::QUERY)
+        .and(warp::path::end())
+        .and(warp::post().or(warp::get()).unify())
+        .and(juniper_warp::make_graphql_filter(schema(), state.boxed()));
 
-    // Create filter that handle the interactive GraphQL app.
+    // Create filter that handle the interactive GraphQL app. This
+    // service is found at the BASE path.
 
-    let graphiql_filter =
-        playground_filter(FULL_QUERY_PATH, Some(FULL_SUBSCRIBE_PATH));
+    #[cfg(feature = "graphiql")]
+    let graphiql_filter = warp::path::end().and(playground_filter(
+        &*paths::FULL_QUERY,
+        Some(&*paths::FULL_SUBSCRIBE),
+    ));
 
     // Create the filter that handles subscriptions.
 
-    let sub_filter = warp::ws().and(warp::addr::remote()).map(
-        move |ws: warp::ws::Ws, addr: Option<std::net::SocketAddr>| {
-            let ctxt = context.clone();
-            let root_node = schema();
+    let sub_filter = warp::path(paths::SUBSCRIBE)
+        .and(warp::path::end())
+        .and(warp::ws())
+        .and(warp::addr::remote())
+        .map(
+            move |ws: warp::ws::Ws, addr: Option<std::net::SocketAddr>| {
+                let ctxt = context.clone();
+                let root_node = schema();
 
-            ws.on_upgrade(move |websocket| {
-                async move {
-                    let _ = serve_graphql_ws(
-                        websocket,
-                        Arc::new(root_node),
-                        ConnectionConfig::new(ctxt.clone()),
-                    )
-                    .await;
-                }
-                .instrument(info_span!(
-                    "graphql",
-                    client = addr
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| String::from("*unknown*"))
-                        .as_str()
-                ))
-            })
-        },
-    );
+                ws.on_upgrade(move |websocket| {
+                    async move {
+                        let _ = serve_graphql_ws(
+                            websocket,
+                            Arc::new(root_node),
+                            ConnectionConfig::new(ctxt.clone()),
+                        )
+                        .await;
+                    }
+                    .instrument(info_span!(
+                        "graphql",
+                        client = addr
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| String::from("*unknown*"))
+                            .as_str()
+                    ))
+                })
+            },
+        );
+
+    #[cfg(feature = "graphiql")]
+    let site = query_filter.or(graphiql_filter).or(sub_filter);
+
+    #[cfg(not(feature = "graphiql"))]
+    let site = query_filter.or(sub_filter);
 
     // Stitch the filters together to build the map of the web
     // interface.
 
-    let filter = warp::path("graphiql")
-        .and(graphiql_filter)
-        .or(warp::path(subscribe_path).and(sub_filter))
-        .or(warp::path(query_path).and(graphql_filter))
+    let filter = warp::path(paths::BASE)
+        .and(site)
+        .with(warp::log("gql::drmem"))
         .with(
             warp::cors()
                 .allow_any_origin()
@@ -568,9 +672,9 @@ pub fn server(
             "boot-time={}",
             boot_time.to_rfc3339_opts(SecondsFormat::Secs, true)
         ),
-        format!("queries={}", FULL_QUERY_PATH),
-        format!("mutations={}", FULL_QUERY_PATH),
-        format!("subscriptions={}", FULL_SUBSCRIBE_PATH),
+        format!("queries={}", &*paths::FULL_QUERY),
+        format!("mutations={}", &*paths::FULL_QUERY),
+        format!("subscriptions={}", &*paths::FULL_SUBSCRIBE),
     ];
 
     // If the configuration specifies a preferred address to use, add

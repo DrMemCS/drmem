@@ -1,3 +1,7 @@
+#[cfg(feature = "graphql")]
+#[macro_use]
+extern crate lazy_static;
+
 use drmem_api::{driver::RequestChan, types::Error, Result};
 use futures::{future, FutureExt};
 use std::convert::Infallible;

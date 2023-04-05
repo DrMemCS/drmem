@@ -280,11 +280,26 @@ impl Store for SimpleStore {
             .0
             .iter()
             .filter(pred)
-            .map(|(k, v)| client::DevInfoReply {
-                name: k.clone(),
-                units: v.units.clone(),
-                settable: v.tx_setting.is_some(),
-                driver: v.owner.clone(),
+            .map(|(k, v)| {
+                let (tot, rdg) = if let Ok(data) = v.reading.lock() {
+                    if data.1.is_some() {
+                        (1, data.1.clone())
+                    } else {
+                        (0, None)
+                    }
+                } else {
+                    (0, None)
+                };
+
+                client::DevInfoReply {
+                    name: k.clone(),
+                    units: v.units.clone(),
+                    settable: v.tx_setting.is_some(),
+                    driver: v.owner.clone(),
+                    total_points: tot,
+                    first_point: rdg.clone(),
+                    last_point: rdg,
+                }
             })
             .collect();
 

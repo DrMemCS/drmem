@@ -128,7 +128,7 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
     // Return the config built from the command line and a flag
     // indicating the user wants the final configuration displayed.
 
-    (matches.contains_id("print_cfg"), cfg)
+    (matches.get_flag("print_cfg"), cfg)
 }
 
 fn parse_config(path: &str, contents: &str) -> Option<Config> {

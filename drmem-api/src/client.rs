@@ -44,7 +44,7 @@ use tokio::sync::{mpsc, oneshot};
 /// GraphQL queries, so it should be reasonably efficient to assemble
 /// this reply.
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct DevInfoReply {
     /// The full name of the device.
     pub name: device::Name,
@@ -53,7 +53,10 @@ pub struct DevInfoReply {
     pub units: Option<String>,
     /// Indicates whether the device is settable.
     pub settable: bool,
-    /// The name of the driver that suports this device.
+    pub total_points: u32,
+    pub first_point: Option<device::Reading>,
+    pub last_point: Option<device::Reading>,
+    /// The name of the driver that supports this device.
     pub driver: String,
 }
 
