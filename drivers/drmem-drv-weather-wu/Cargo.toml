@@ -24,4 +24,4 @@ tracing-subscriber.workspace = true
 reqwest = { default-features = false, version = "0.11" }
 weather-underground = "0.1"
 
-drmem-api = { path = "../../drmem-api", version = "0.1" }
+drmem-api = { path = "../../drmem-api", version = "0.2" }

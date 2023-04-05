@@ -35,4 +35,4 @@ serde_derive.workspace = true
 
 redis = { version = "0.22", features = ["tokio-comp"] }
 
-drmem-api = { path = "../../drmem-api", version = "0.1" }
+drmem-api = { path = "../../drmem-api", version = "0.2" }

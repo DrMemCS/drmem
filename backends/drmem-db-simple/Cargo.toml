@@ -31,4 +31,4 @@ tracing.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
 
-drmem-api = { path = "../../drmem-api", version = "0.1" }
+drmem-api = { path = "../../drmem-api", version = "0.2" }

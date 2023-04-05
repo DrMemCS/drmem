@@ -38,7 +38,7 @@ chrono.workspace = true
 
 lazy_static = "1"
 
-drmem-api = { path = "../drmem-api", version = "0.1" }
+drmem-api = { path = "../drmem-api", version = "0.2" }
 
 cfgrammar = "0.13"
 lrlex = "0.13"
@@ -50,29 +50,29 @@ lrpar = "0.13"
 
 [dependencies.drmem-drv-sump]
 path = "../drivers/drmem-drv-sump"
-version = "0.1"
+version = "0.2"
 optional = true
 
 [dependencies.drmem-drv-ntp]
 path = "../drivers/drmem-drv-ntp"
-version = "0.1"
+version = "0.2"
 optional = true
 
 [dependencies.drmem-drv-weather-wu]
 path = "../drivers/drmem-drv-weather-wu"
-version = "0.1"
+version = "0.2"
 optional = true
 
 # This section defines the optional dependencies for backend storage.
 
 [dependencies.drmem-db-redis]
 path = "../backends/drmem-db-redis"
-version = "0.1"
+version = "0.2"
 optional = true
 
 [dependencies.drmem-db-simple]
 path = "../backends/drmem-db-simple"
-version = "0.1"
+version = "0.2"
 optional = true
 
 # This section defines the optional dependencies for the 'graphql'
