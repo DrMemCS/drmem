@@ -1,6 +1,6 @@
 [package]
 name = "drmem-drv-weather-wu"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 homepage = "https://github.com/DrMemCS/drmem"
@@ -24,4 +24,4 @@ tracing-subscriber.workspace = true
 reqwest = { default-features = false, version = "0.11" }
 weather-underground = "0.1"
 
-drmem-api = { path = "../../drmem-api", version = "0.1" }
+drmem-api = { path = "../../drmem-api", version = "0.2" }
