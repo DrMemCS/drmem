@@ -630,13 +630,10 @@ pub fn server(
         );
 
     #[cfg(feature = "graphiql")]
-    let site = query_filter
-	.or(graphiql_filter)
-	.or(sub_filter);
+    let site = query_filter.or(graphiql_filter).or(sub_filter);
 
     #[cfg(not(feature = "graphiql"))]
-    let site = query_filter
-	.or(sub_filter);
+    let site = query_filter.or(sub_filter);
 
     // Stitch the filters together to build the map of the web
     // interface.
