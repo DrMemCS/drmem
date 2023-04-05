@@ -602,7 +602,6 @@ pub fn server(
 
     let sub_filter = warp::path(paths::SUBSCRIBE)
         .and(warp::path::end())
-        .and(warp::get())
         .and(warp::ws())
         .and(warp::addr::remote())
         .map(
