@@ -2,9 +2,10 @@
 
 For this tutorial, we'll build a very simple instance of `drmemd`. In
 this version, we'll use the simple backend, no external drivers, and
-include the GraphQL interface.
+include the GraphQL interface. We'll also enable the built-in GraphQL
+editing interface.
 
-This tutorial is based on v0.1.0.
+This tutorial is based on v0.2.0.
 
 ## Build `drmemd`
 
@@ -13,13 +14,10 @@ Download and build the executable:
 ```
 $ git clone git@github.com:DrMemCS/drmem.git
 $ cd drmem
-$ cargo build --features simple-backend,graphql
+$ cargo build --features simple-backend,graphql,graphiql
 ```
 
 This builds the debug version which is found at `target/debug/drmemd`.
-If you want to build a release version, use `cargo build --release
---features simple-backend,graphql` and use the executable built at
-`target/release/drmemd`.
 
 ## Configure
 
@@ -32,6 +30,9 @@ Several small, useful drivers are always available so we'll use one of
 them. Create the file `.drmem.toml` with the following contents:
 
 ```
+[graphql]
+name = "tutorial"
+
 [[driver]]
 name = "timer"
 prefix = "demo-timer"
@@ -63,9 +64,10 @@ starts up. It also opens port 3000 for GraphQL clients.
 
 ## Interacting via GraphQL
 
-`drmemd` includes a GraphQL client so you can use a browser to
-interact with it. Ambitious users can write web or mobile apps with
-GraphQL client libraries to control and browse `drmemd` devices.
+When the `graphiql` feature is used, `drmemd` includes a GraphQL
+client so you can use a browser to interact with it. Ambitious users
+can write web or mobile apps with GraphQL client libraries to control
+and browse `drmemd` devices.
 
 Open a browser window and go to "http://MACHINE:3000/graphiql/" --
 replacing MACHINE with the name/address of the machine running
