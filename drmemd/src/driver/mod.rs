@@ -14,7 +14,7 @@ mod drv_memory;
 mod drv_timer;
 
 type Factory = fn(
-    DriverConfig,
+    &DriverConfig,
     RequestChan,
     Option<usize>,
 ) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send>>;
@@ -44,7 +44,7 @@ impl Driver {
             // Create a Future that creates an instance of the driver
             // using the provided configuration parameters.
 
-            let result = factory(cfg.clone(), req_chan.clone(), max_history)
+            let result = factory(&cfg, req_chan.clone(), max_history)
                 .instrument(info_span!("init"));
 
             match result.await {

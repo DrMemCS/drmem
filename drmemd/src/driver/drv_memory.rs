@@ -49,11 +49,13 @@ impl Instance {
 
 impl driver::API for Instance {
     fn create_instance(
-        cfg: DriverConfig, core: driver::RequestChan,
+        cfg: &DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
+        let name = Instance::get_cfg_name(cfg);
+
         let fut = async move {
-            let name = Instance::get_cfg_name(&cfg)?;
+            let name = name?;
 
             // This device is settable. Any setting is forwarded to
             // the backend.

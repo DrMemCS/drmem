@@ -176,17 +176,20 @@ impl Instance {
 
 impl driver::API for Instance {
     fn create_instance(
-        cfg: DriverConfig, core: driver::RequestChan,
+        cfg: &DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
         let output_name = "output".parse::<Base>().unwrap();
         let enable_name = "enable".parse::<Base>().unwrap();
 
+        let millis = Instance::get_cfg_millis(cfg);
+        let level = Instance::get_cfg_level(cfg);
+
         let fut = async move {
             // Validate the configuration.
 
-            let millis = Instance::get_cfg_millis(&cfg)?;
-            let level = Instance::get_cfg_level(&cfg)?;
+            let millis = millis?;
+            let level = level?;
 
             // Define the devices managed by this driver.
             //

@@ -243,7 +243,7 @@ impl Instance {
 
 impl driver::API for Instance {
     fn create_instance(
-        cfg: DriverConfig, core: driver::RequestChan,
+        cfg: &DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
         let service_name = "service".parse::<device::Base>().unwrap();
@@ -252,11 +252,14 @@ impl driver::API for Instance {
         let in_flow_name = "in-flow".parse::<device::Base>().unwrap();
         let dur_name = "duration".parse::<device::Base>().unwrap();
 
+        let addr = Instance::get_cfg_address(cfg);
+        let gpm = Instance::get_cfg_gpm(cfg);
+
         let fut = async move {
             // Validate the configuration.
 
-            let addr = Instance::get_cfg_address(&cfg)?;
-            let gpm = Instance::get_cfg_gpm(&cfg)?;
+            let addr = addr?;
+            let gpm = gpm?;
 
             // Connect with the remote process that is connected to
             // the sump pump.
