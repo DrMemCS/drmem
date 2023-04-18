@@ -131,9 +131,9 @@ fn eval_as_not_expr(e: &Expr) -> Option<Value> {
 // subexpression isn't evaluated.
 fn eval_as_or_expr(a: &Expr, b: &Expr) -> Option<Value> {
     match eval(a) {
-        Some(Value::Bool(true)) => Some(Value::Bool(true)),
+        v @ Some(Value::Bool(true)) => v,
         Some(Value::Bool(false)) => match eval(b) {
-            Some(Value::Bool(v)) => Some(Value::Bool(v)),
+            v @ Some(Value::Bool(_)) => v,
             Some(v) => {
                 error!("OR expression contains non-boolean argument: {}", &v);
                 None
@@ -152,9 +152,9 @@ fn eval_as_or_expr(a: &Expr, b: &Expr) -> Option<Value> {
 // subexpression isn't evaluated.
 fn eval_as_and_expr(a: &Expr, b: &Expr) -> Option<Value> {
     match eval(a) {
-        Some(Value::Bool(false)) => Some(Value::Bool(false)),
+        v @ Some(Value::Bool(false)) => v,
         Some(Value::Bool(true)) => match eval(b) {
-            Some(Value::Bool(v)) => Some(Value::Bool(v)),
+            v @ Some(Value::Bool(_)) => v,
             Some(v) => {
                 error!("AND expression contains non-boolean argument: {}", &v);
                 None
@@ -393,14 +393,12 @@ pub fn optimize(e: Expr) -> Expr {
 
         Expr::And(ref a, ref b) => {
             match (optimize(*a.clone()), optimize(*b.clone())) {
-                (Expr::Lit(Value::Bool(false)), _)
-                | (_, Expr::Lit(Value::Bool(false))) => {
-                    Expr::Lit(Value::Bool(false))
-                }
+                (v @ Expr::Lit(Value::Bool(false)), _)
+                | (_, v @ Expr::Lit(Value::Bool(false))) => v,
                 (
+                    v @ Expr::Lit(Value::Bool(true)),
                     Expr::Lit(Value::Bool(true)),
-                    Expr::Lit(Value::Bool(true)),
-                ) => Expr::Lit(Value::Bool(true)),
+                ) => v,
                 (Expr::Lit(Value::Bool(true)), e)
                 | (e, Expr::Lit(Value::Bool(true))) => e,
                 _ => e,
@@ -409,14 +407,12 @@ pub fn optimize(e: Expr) -> Expr {
 
         Expr::Or(ref a, ref b) => {
             match (optimize(*a.clone()), optimize(*b.clone())) {
-                (Expr::Lit(Value::Bool(true)), _)
-                | (_, Expr::Lit(Value::Bool(true))) => {
-                    Expr::Lit(Value::Bool(true))
-                }
+                (v @ Expr::Lit(Value::Bool(true)), _)
+                | (_, v @ Expr::Lit(Value::Bool(true))) => v,
                 (
+                    v @ Expr::Lit(Value::Bool(false)),
                     Expr::Lit(Value::Bool(false)),
-                    Expr::Lit(Value::Bool(false)),
-                ) => Expr::Lit(Value::Bool(false)),
+                ) => v,
                 (Expr::Lit(Value::Bool(false)), e)
                 | (e, Expr::Lit(Value::Bool(false))) => e,
                 _ => e,

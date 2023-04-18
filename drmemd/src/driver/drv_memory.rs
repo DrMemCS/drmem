@@ -33,8 +33,8 @@ impl Instance {
     fn get_cfg_name(cfg: &DriverConfig) -> Result<device::Base> {
         match cfg.get("name") {
             Some(toml::value::Value::String(name)) => {
-                if let Ok(name) = name.parse::<device::Base>() {
-                    return Ok(name);
+                if let v @ Ok(_) = name.parse::<device::Base>() {
+                    return v;
                 } else {
                     error!("'name' isn't a proper, base name for a device")
                 }
