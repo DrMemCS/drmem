@@ -402,6 +402,7 @@ mod tests {
     fn test_parser() {
         assert!(compile("").is_err());
         assert!(compile("{switch -> {bulb}").is_err());
+        assert!(compile("switch} -> {bulb}").is_err());
 
         assert_eq!(
             compile("{switch} -> {bulb}"),
