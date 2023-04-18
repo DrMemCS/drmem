@@ -407,6 +407,22 @@ pub fn optimize(e: Expr) -> Expr {
             }
         }
 
+        Expr::Or(ref a, ref b) => {
+            match (optimize(*a.clone()), optimize(*b.clone())) {
+                (Expr::Lit(Value::Bool(true)), _)
+                | (_, Expr::Lit(Value::Bool(true))) => {
+                    Expr::Lit(Value::Bool(true))
+                }
+                (
+                    Expr::Lit(Value::Bool(false)),
+                    Expr::Lit(Value::Bool(false)),
+                ) => Expr::Lit(Value::Bool(false)),
+                (Expr::Lit(Value::Bool(false)), e)
+                | (e, Expr::Lit(Value::Bool(false))) => e,
+                _ => e,
+            }
+        }
+
         _ => e,
     }
 }
@@ -1429,6 +1445,104 @@ mod tests {
                 Box::new(Expr::And(
                     Box::new(Expr::Lit(Value::Bool(true))),
                     Box::new(Expr::Lit(Value::Bool(true)))
+                )),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn test_or_optimizer() {
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(false))),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(false))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(false))),
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(false))),
+                Box::new(Expr::Lit(Value::Str(String::from("test"))))
+            )),
+            Expr::Lit(Value::Str(String::from("test")))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Lit(Value::Str(String::from("test"))))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(true)))
+                ))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(true)))
+                )),
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(false)))
+                ))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(true)))
+                )),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(false))),
+                    Box::new(Expr::Lit(Value::Bool(false)))
                 )),
                 Box::new(Expr::Lit(Value::Bool(false)))
             )),
