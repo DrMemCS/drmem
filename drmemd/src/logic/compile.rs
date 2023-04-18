@@ -1302,7 +1302,7 @@ mod tests {
     // expression.
 
     #[test]
-    fn test_optimizer() {
+    fn test_not_optimizer() {
         assert_eq!(
             optimize(Expr::Not(Box::new(Expr::Lit(Value::Bool(true))))),
             Expr::Lit(Value::Bool(false))
