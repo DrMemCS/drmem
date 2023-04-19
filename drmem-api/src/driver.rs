@@ -144,15 +144,17 @@ impl RequestChan {
         // received a reply, process the payload.
 
         if result.is_ok() {
-            match rx.await {
-                Ok(Ok((rr, prev))) => Ok((
-                    Box::new(move |a| rr(a.into())),
-                    prev.and_then(|v| T::try_from(v).ok()),
-                )),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(Error::MissingPeer(String::from(
+            if let Ok(v) = rx.await {
+                v.map(|(rr, prev)| {
+                    (
+                        Box::new(move |a: T| rr(a.into())) as ReportReading<T>,
+                        prev.and_then(|v| T::try_from(v).ok()),
+                    )
+                })
+            } else {
+                Err(Error::MissingPeer(String::from(
                     "core didn't reply to request",
-                ))),
+                )))
             }
         } else {
             // If either communication direction failed, return an error
@@ -225,16 +227,18 @@ impl RequestChan {
             .await;
 
         if result.is_ok() {
-            match rx.await {
-                Ok(Ok((rr, rs, prev))) => Ok((
-                    Box::new(move |a| rr(a.into())),
-                    RequestChan::create_setting_stream(rs),
-                    prev.and_then(|v| T::try_from(v).ok()),
-                )),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(Error::MissingPeer(String::from(
+            if let Ok(v) = rx.await {
+                v.map(|(rr, rs, prev)| {
+                    (
+                        Box::new(move |a: T| rr(a.into())) as ReportReading<T>,
+                        RequestChan::create_setting_stream(rs),
+                        prev.and_then(|v| T::try_from(v).ok()),
+                    )
+                })
+            } else {
+                Err(Error::MissingPeer(String::from(
                     "core didn't reply to request",
-                ))),
+                )))
             }
         } else {
             Err(Error::MissingPeer(String::from(
