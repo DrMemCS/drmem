@@ -145,25 +145,18 @@ impl RequestChan {
 
         if result.is_ok() {
             if let Ok(v) = rx.await {
-                v.map(|(rr, prev)| {
+                return v.map(|(rr, prev)| {
                     (
                         Box::new(move |a: T| rr(a.into())) as ReportReading<T>,
                         prev.and_then(|v| T::try_from(v).ok()),
                     )
-                })
-            } else {
-                Err(Error::MissingPeer(String::from(
-                    "core didn't reply to request",
-                )))
+                });
             }
-        } else {
-            // If either communication direction failed, return an error
-            // indicating we can't talk to core.
-
-            Err(Error::MissingPeer(String::from(
-                "core didn't accept request",
-            )))
         }
+
+        Err(Error::MissingPeer(String::from(
+            "can't communicate with core",
+        )))
     }
 
     // Creates a stream of incoming settings. Since settings are
@@ -228,23 +221,19 @@ impl RequestChan {
 
         if result.is_ok() {
             if let Ok(v) = rx.await {
-                v.map(|(rr, rs, prev)| {
+                return v.map(|(rr, rs, prev)| {
                     (
                         Box::new(move |a: T| rr(a.into())) as ReportReading<T>,
                         RequestChan::create_setting_stream(rs),
                         prev.and_then(|v| T::try_from(v).ok()),
                     )
-                })
-            } else {
-                Err(Error::MissingPeer(String::from(
-                    "core didn't reply to request",
-                )))
+                });
             }
-        } else {
-            Err(Error::MissingPeer(String::from(
-                "core didn't accept request",
-            )))
         }
+
+        Err(Error::MissingPeer(String::from(
+            "can't communicate with core",
+        )))
     }
 }
 
