@@ -131,9 +131,9 @@ fn eval_as_not_expr(e: &Expr) -> Option<Value> {
 // subexpression isn't evaluated.
 fn eval_as_or_expr(a: &Expr, b: &Expr) -> Option<Value> {
     match eval(a) {
-        Some(Value::Bool(true)) => Some(Value::Bool(true)),
+        v @ Some(Value::Bool(true)) => v,
         Some(Value::Bool(false)) => match eval(b) {
-            Some(Value::Bool(v)) => Some(Value::Bool(v)),
+            v @ Some(Value::Bool(_)) => v,
             Some(v) => {
                 error!("OR expression contains non-boolean argument: {}", &v);
                 None
@@ -152,9 +152,9 @@ fn eval_as_or_expr(a: &Expr, b: &Expr) -> Option<Value> {
 // subexpression isn't evaluated.
 fn eval_as_and_expr(a: &Expr, b: &Expr) -> Option<Value> {
     match eval(a) {
-        Some(Value::Bool(false)) => Some(Value::Bool(false)),
+        v @ Some(Value::Bool(false)) => v,
         Some(Value::Bool(true)) => match eval(b) {
-            Some(Value::Bool(v)) => Some(Value::Bool(v)),
+            v @ Some(Value::Bool(_)) => v,
             Some(v) => {
                 error!("AND expression contains non-boolean argument: {}", &v);
                 None
@@ -390,6 +390,35 @@ pub fn optimize(e: Expr) -> Expr {
             },
             _ => e,
         },
+
+        Expr::And(ref a, ref b) => {
+            match (optimize(*a.clone()), optimize(*b.clone())) {
+                (v @ Expr::Lit(Value::Bool(false)), _)
+                | (_, v @ Expr::Lit(Value::Bool(false))) => v,
+                (
+                    v @ Expr::Lit(Value::Bool(true)),
+                    Expr::Lit(Value::Bool(true)),
+                ) => v,
+                (Expr::Lit(Value::Bool(true)), e)
+                | (e, Expr::Lit(Value::Bool(true))) => e,
+                _ => e,
+            }
+        }
+
+        Expr::Or(ref a, ref b) => {
+            match (optimize(*a.clone()), optimize(*b.clone())) {
+                (v @ Expr::Lit(Value::Bool(true)), _)
+                | (_, v @ Expr::Lit(Value::Bool(true))) => v,
+                (
+                    v @ Expr::Lit(Value::Bool(false)),
+                    Expr::Lit(Value::Bool(false)),
+                ) => v,
+                (Expr::Lit(Value::Bool(false)), e)
+                | (e, Expr::Lit(Value::Bool(false))) => e,
+                _ => e,
+            }
+        }
+
         _ => e,
     }
 }
@@ -402,6 +431,7 @@ mod tests {
     fn test_parser() {
         assert!(compile("").is_err());
         assert!(compile("{switch -> {bulb}").is_err());
+        assert!(compile("switch} -> {bulb}").is_err());
 
         assert_eq!(
             compile("{switch} -> {bulb}"),
@@ -1301,7 +1331,7 @@ mod tests {
     // expression.
 
     #[test]
-    fn test_optimizer() {
+    fn test_not_optimizer() {
         assert_eq!(
             optimize(Expr::Not(Box::new(Expr::Lit(Value::Bool(true))))),
             Expr::Lit(Value::Bool(false))
@@ -1327,6 +1357,192 @@ mod tests {
                 Box::new(Expr::Not(Box::new(Expr::Lit(Value::Bool(true)))))
             )))))),
             Expr::Lit(Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn test_and_optimizer() {
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::Lit(Value::Bool(false))),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(false))
+        );
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::Lit(Value::Bool(false))),
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )),
+            Expr::Lit(Value::Bool(false))
+        );
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::Lit(Value::Bool(false))),
+                Box::new(Expr::Lit(Value::Str(String::from("test"))))
+            )),
+            Expr::Lit(Value::Bool(false))
+        );
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(false))
+        );
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Lit(Value::Str(String::from("test"))))
+            )),
+            Expr::Lit(Value::Str(String::from("test")))
+        );
+
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::And(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(true)))
+                ))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::And(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(true)))
+                )),
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::And(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(false)))
+                ))
+            )),
+            Expr::Lit(Value::Bool(false))
+        );
+        assert_eq!(
+            optimize(Expr::And(
+                Box::new(Expr::And(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(true)))
+                )),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn test_or_optimizer() {
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(false))),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(false))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(false))),
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(false))),
+                Box::new(Expr::Lit(Value::Str(String::from("test"))))
+            )),
+            Expr::Lit(Value::Str(String::from("test")))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Lit(Value::Str(String::from("test"))))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(true)))
+                ))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(true)))
+                )),
+                Box::new(Expr::Lit(Value::Bool(true)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Lit(Value::Bool(true))),
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(false)))
+                ))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(true))),
+                    Box::new(Expr::Lit(Value::Bool(true)))
+                )),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::Or(
+                Box::new(Expr::Or(
+                    Box::new(Expr::Lit(Value::Bool(false))),
+                    Box::new(Expr::Lit(Value::Bool(false)))
+                )),
+                Box::new(Expr::Lit(Value::Bool(false)))
+            )),
+            Expr::Lit(Value::Bool(false))
         );
     }
 }

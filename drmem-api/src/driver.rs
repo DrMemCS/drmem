@@ -144,24 +144,19 @@ impl RequestChan {
         // received a reply, process the payload.
 
         if result.is_ok() {
-            match rx.await {
-                Ok(Ok((rr, prev))) => Ok((
-                    Box::new(move |a| rr(a.into())),
-                    prev.and_then(|v| T::try_from(v).ok()),
-                )),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(Error::MissingPeer(String::from(
-                    "core didn't reply to request",
-                ))),
+            if let Ok(v) = rx.await {
+                return v.map(|(rr, prev)| {
+                    (
+                        Box::new(move |a: T| rr(a.into())) as ReportReading<T>,
+                        prev.and_then(|v| T::try_from(v).ok()),
+                    )
+                });
             }
-        } else {
-            // If either communication direction failed, return an error
-            // indicating we can't talk to core.
-
-            Err(Error::MissingPeer(String::from(
-                "core didn't accept request",
-            )))
         }
+
+        Err(Error::MissingPeer(String::from(
+            "can't communicate with core",
+        )))
     }
 
     // Creates a stream of incoming settings. Since settings are
@@ -225,22 +220,20 @@ impl RequestChan {
             .await;
 
         if result.is_ok() {
-            match rx.await {
-                Ok(Ok((rr, rs, prev))) => Ok((
-                    Box::new(move |a| rr(a.into())),
-                    RequestChan::create_setting_stream(rs),
-                    prev.and_then(|v| T::try_from(v).ok()),
-                )),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(Error::MissingPeer(String::from(
-                    "core didn't reply to request",
-                ))),
+            if let Ok(v) = rx.await {
+                return v.map(|(rr, rs, prev)| {
+                    (
+                        Box::new(move |a: T| rr(a.into())) as ReportReading<T>,
+                        RequestChan::create_setting_stream(rs),
+                        prev.and_then(|v| T::try_from(v).ok()),
+                    )
+                });
             }
-        } else {
-            Err(Error::MissingPeer(String::from(
-                "core didn't accept request",
-            )))
         }
+
+        Err(Error::MissingPeer(String::from(
+            "can't communicate with core",
+        )))
     }
 }
 
@@ -281,7 +274,7 @@ pub trait API: Send {
     /// bound.
 
     fn create_instance(
-        cfg: DriverConfig, drc: RequestChan, max_history: Option<usize>,
+        cfg: &DriverConfig, drc: RequestChan, max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send>>
     where
         Self: Sized;

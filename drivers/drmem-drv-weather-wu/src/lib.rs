@@ -57,30 +57,37 @@ impl Instance {
         Err(Error::BadConfig)
     }
 
-    async fn get_cfg_key_and_interval(
-        con: &mut reqwest::Client, cfg: &DriverConfig,
-    ) -> Result<(String, Duration)> {
-        let interval: u64 = match cfg.get("interval") {
+    fn get_cfg_interval(cfg: &DriverConfig) -> Result<u64> {
+        match cfg.get("interval") {
             Some(toml::value::Value::Integer(val)) => {
-                std::cmp::max(*val as u64, 1)
+                Ok(std::cmp::max(*val as u64, 1))
             }
             Some(_) => {
                 error!(
                     "'interval' config parameter should be a positive integer"
                 );
-                return Err(Error::BadConfig);
+                Err(Error::BadConfig)
             }
-            None => DEFAULT_INTERVAL,
-        };
+            None => Ok(DEFAULT_INTERVAL),
+        }
+    }
 
+    fn get_cfg_key(cfg: &DriverConfig) -> Result<Option<String>> {
         match cfg.get("key") {
-            Some(toml::value::Value::String(val)) => {
-                Ok((val.to_string(), Duration::from_secs(interval * 60)))
-            }
+            Some(toml::value::Value::String(val)) => Ok(Some(val.to_string())),
             Some(_) => {
                 error!("'key' config parameter should be a string");
                 Err(Error::BadConfig)
             }
+            None => Ok(None),
+        }
+    }
+
+    async fn get_cfg_key_and_interval(
+        con: &mut reqwest::Client, key: Option<String>, interval: u64,
+    ) -> Result<(String, Duration)> {
+        match key {
+            Some(val) => Ok((val, Duration::from_secs(interval * 60))),
             None => {
                 if let Ok(api_key) = wu::fetch_api_key(con).await {
                     Ok((
@@ -277,7 +284,7 @@ impl Instance {
 
 impl driver::API for Instance {
     fn create_instance(
-        cfg: DriverConfig, core: driver::RequestChan,
+        cfg: &DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
         let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();
@@ -294,19 +301,26 @@ impl driver::API for Instance {
         let wind_dir_name = "wind-dir".parse::<device::Base>().unwrap();
         let wind_gust_name = "wind-gust".parse::<device::Base>().unwrap();
         let wind_speed_name = "wind-speed".parse::<device::Base>().unwrap();
+        debug!("reading config parameters");
+
+        let station = Instance::get_cfg_station(cfg);
+        let units = Instance::get_cfg_units(cfg);
+        let interval = Instance::get_cfg_interval(cfg);
+        let key = Instance::get_cfg_key(cfg);
 
         let fut = async move {
             match wu::create_client(Duration::from_secs(5)) {
                 Ok(mut con) => {
                     // Validate the driver parameters.
 
-                    debug!("reading config parameters");
+                    let station = station?;
+                    let units = units?;
 
-                    let station = Instance::get_cfg_station(&cfg)?;
                     let (api_key, interval) =
-                        Instance::get_cfg_key_and_interval(&mut con, &cfg)
-                            .await?;
-                    let units = Instance::get_cfg_units(&cfg)?;
+                        Instance::get_cfg_key_and_interval(
+                            &mut con, key?, interval?,
+                        )
+                        .await?;
 
                     let temp_unit = Some(if let wu::Unit::English = units {
                         "°F"

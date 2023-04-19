@@ -356,7 +356,7 @@ impl Instance {
 
 impl driver::API for Instance {
     fn create_instance(
-        cfg: DriverConfig, core: driver::RequestChan,
+        cfg: &DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
         // It's safe to use `.unwrap()` for these names because, in a
@@ -368,10 +368,12 @@ impl driver::API for Instance {
         let offset_name = "offset".parse::<device::Base>().unwrap();
         let delay_name = "delay".parse::<device::Base>().unwrap();
 
+        let addr = Instance::get_cfg_address(cfg);
+
         let fut = async move {
             // Validate the configuration.
 
-            let addr = Instance::get_cfg_address(&cfg)?;
+            let addr = addr?;
             let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();
 
             if let Ok(sock) = UdpSocket::bind(loc_if).await {
