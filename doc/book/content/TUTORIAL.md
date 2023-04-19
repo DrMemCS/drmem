@@ -21,13 +21,13 @@ This builds the debug version which is found at `target/debug/drmemd`.
 
 ## Configure
 
-`drmemd` looks for configuration information in a `.drmem.toml`
-file. This file can be in the current directory, your home directory,
-or in a system-wide location. For this tutorial, we'll simply store it
-in the current directory.
+`drmemd` looks for configuration information in a `drmem.toml`
+file. This file can be in the current directory, your home directory
+(as `.drmem.toml`), or in a system-wide location. For this tutorial,
+we'll simply store it in the current directory.
 
 Several small, useful drivers are always available so we'll use one of
-them. Create the file `.drmem.toml` with the following contents:
+them. Create the file `drmem.toml` with the following contents:
 
 ```
 [graphql]
