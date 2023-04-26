@@ -23,7 +23,10 @@
 //     +,-,*,/,%         Perform addition, substraction, multiplication,
 //                       division, and modulo operations
 
-use drmem_api::types::device::Value;
+use drmem_api::{
+    types::{device::Value, Error},
+    Result,
+};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
 use tracing::error;
@@ -62,12 +65,15 @@ pub enum Program {
     Assign(Expr, String),
 }
 
-pub fn compile(s: &str) -> Result<Program, ()> {
+pub fn compile(s: &str) -> Result<Program> {
     let lexerdef = logic_l::lexerdef();
     let lexer = lexerdef.lexer(s);
     let (res, _) = logic_y::parse(&lexer);
 
-    res.unwrap_or(Err(()))
+    res.unwrap_or(Err(Error::BadConfig(format!(
+        "expression '{}' couldn't compile",
+        s
+    ))))
 }
 
 // Evaluates an expression and returns the computed value. If the

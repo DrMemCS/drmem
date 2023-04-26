@@ -6,7 +6,7 @@ use drmem_api::{
 use std::{convert::Infallible, future::Future, pin::Pin};
 use tokio::time;
 use tokio_stream::StreamExt;
-use tracing::{self, debug, error, info};
+use tracing::{debug, info};
 
 // This enum represents the four states in which the timer can
 // be. They are a combination of the `enable` input and whether we're
@@ -80,30 +80,32 @@ impl Instance {
         match cfg.get("millis") {
             Some(toml::value::Value::Integer(millis)) => {
                 if (50..=3_600_000).contains(millis) {
-                    return Ok(time::Duration::from_millis(*millis as u64));
+                    Ok(time::Duration::from_millis(*millis as u64))
                 } else {
-                    error!("'millis' out of range")
+                    Err(Error::BadConfig(String::from("'millis' out of range")))
                 }
             }
-            Some(_) => error!("'millis' config parameter should be an integer"),
-            None => error!("missing 'millis' parameter in config"),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'millis' config parameter should be an integer",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'millis' parameter in config",
+            ))),
         }
-
-        Err(Error::BadConfig)
     }
 
     // Validates the logic level parameter.
 
     fn get_cfg_level(cfg: &DriverConfig) -> Result<bool> {
         match cfg.get("active_level") {
-            Some(toml::value::Value::Boolean(level)) => return Ok(*level),
-            Some(_) => {
-                error!("'active_level' config parameter should be a boolean")
-            }
-            None => error!("missing 'active_level' parameter in config"),
+            Some(toml::value::Value::Boolean(level)) => Ok(*level),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'active_level' config parameter should be a boolean",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'active_level' parameter in config",
+            ))),
         }
-
-        Err(Error::BadConfig)
     }
 
     // Updates the state based on new `enable`. Returns an optional

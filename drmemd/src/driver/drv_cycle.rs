@@ -68,30 +68,30 @@ impl Instance {
                 // drmem-api crate indicating the max sample rate?
 
                 if (100..=3_600_000).contains(millis) {
-                    return Ok(time::Duration::from_millis(*millis as u64 / 2));
+                    Ok(time::Duration::from_millis(*millis as u64 / 2))
                 } else {
-                    error!("'millis' out of range")
+                    Err(Error::BadConfig(String::from("'millis' out of range")))
                 }
             }
-            Some(_) => error!("'millis' config parameter should be an integer"),
-            None => error!("missing 'millis' parameter in config"),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'millis' config parameter should be an integer",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'millis' parameter in config",
+            ))),
         }
-
-        Err(Error::BadConfig)
     }
 
     // Validates the enable-at-boot parameter.
 
     fn get_cfg_enabled(cfg: &DriverConfig) -> Result<bool> {
         match cfg.get("enabled") {
-            Some(toml::value::Value::Boolean(level)) => return Ok(*level),
-            Some(_) => {
-                error!("'enabled' config parameter should be a boolean")
-            }
-            None => return Ok(false),
+            Some(toml::value::Value::Boolean(level)) => Ok(*level),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'enabled' config parameter should be a boolean",
+            ))),
+            None => Ok(false),
         }
-
-        Err(Error::BadConfig)
     }
 
     fn time_expired(&mut self) -> Option<bool> {

@@ -125,16 +125,20 @@ impl Instance {
         match cfg.get("addr") {
             Some(toml::value::Value::String(addr)) => {
                 if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                    return Ok(addr);
+                    Ok(addr)
                 } else {
-                    error!("'addr' not in hostname:port format")
+                    Err(Error::BadConfig(String::from(
+                        "'addr' not in hostname:port format",
+                    )))
                 }
             }
-            Some(_) => error!("'addr' config parameter should be a string"),
-            None => error!("missing 'addr' parameter in config"),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'addr' config parameter should be a string",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'addr' parameter in config",
+            ))),
         }
-
-        Err(Error::BadConfig)
     }
 
     // Combines and returns the first two bytes from a buffer as a

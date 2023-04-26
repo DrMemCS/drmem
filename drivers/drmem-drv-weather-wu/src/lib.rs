@@ -49,12 +49,15 @@ impl Instance {
     fn get_cfg_station(cfg: &DriverConfig) -> Result<String> {
         match cfg.get("station") {
             Some(toml::value::Value::String(station)) => {
-                return Ok(station.to_string())
+                Ok(station.to_string())
             }
-            Some(_) => error!("'station' config parameter should be a string"),
-            None => error!("missing 'station' parameter in config"),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'station' config parameter should be a string",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'station' parameter in config",
+            ))),
         }
-        Err(Error::BadConfig)
     }
 
     fn get_cfg_interval(cfg: &DriverConfig) -> Result<u64> {
@@ -62,12 +65,9 @@ impl Instance {
             Some(toml::value::Value::Integer(val)) => {
                 Ok(std::cmp::max(*val as u64, 1))
             }
-            Some(_) => {
-                error!(
-                    "'interval' config parameter should be a positive integer"
-                );
-                Err(Error::BadConfig)
-            }
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'interval' config parameter should be a positive integer",
+            ))),
             None => Ok(DEFAULT_INTERVAL),
         }
     }
@@ -75,10 +75,9 @@ impl Instance {
     fn get_cfg_key(cfg: &DriverConfig) -> Result<Option<String>> {
         match cfg.get("key") {
             Some(toml::value::Value::String(val)) => Ok(Some(val.to_string())),
-            Some(_) => {
-                error!("'key' config parameter should be a string");
-                Err(Error::BadConfig)
-            }
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'key' config parameter should be a string",
+            ))),
             None => Ok(None),
         }
     }
@@ -109,15 +108,13 @@ impl Instance {
             Some(toml::value::Value::String(val)) => match val.as_str() {
                 "metric" => Ok(wu::Unit::Metric),
                 "imperial" => Ok(wu::Unit::English),
-                _ => {
-                    error!("'units' parameter should be \"imperial\" or \"metric\"");
-                    Err(Error::BadConfig)
-                }
+                _ => Err(Error::BadConfig(String::from(
+                    "'units' parameter should be \"imperial\" or \"metric\"",
+                ))),
             },
-            Some(_) => {
-                error!("'units' parameter should be a string");
-                Err(Error::BadConfig)
-            }
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'units' parameter should be a string",
+            ))),
             None => Ok(wu::Unit::Metric),
         }
     }
@@ -442,10 +439,10 @@ impl driver::API for Instance {
                         d_wndspd,
                     }) as driver::DriverType)
                 }
-                Err(e) => {
-                    error!("couldn't build client connection -- {}", &e);
-                    Err(Error::BadConfig)
-                }
+                Err(e) => Err(Error::BadConfig(format!(
+                    "couldn't build client connection -- {}",
+                    &e
+                ))),
             }
         };
 

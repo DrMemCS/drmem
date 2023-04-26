@@ -14,7 +14,7 @@ use tokio::{
     },
     time,
 };
-use tracing::{debug, error, info, warn, Span};
+use tracing::{debug, info, warn, Span};
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -188,16 +188,20 @@ impl Instance {
         match cfg.get("addr") {
             Some(toml::value::Value::String(addr)) => {
                 if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                    return Ok(addr);
+                    Ok(addr)
                 } else {
-                    error!("'addr' not in hostname:port format")
+                    Err(Error::BadConfig(String::from(
+                        "'addr' not in hostname:port format",
+                    )))
                 }
             }
-            Some(_) => error!("'addr' config parameter should be a string"),
-            None => error!("missing 'addr' parameter in config"),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'addr' config parameter should be a string",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'addr' parameter in config",
+            ))),
         }
-
-        Err(Error::BadConfig)
     }
 
     // Attempts to pull the gal-per-min parameter from the driver's
@@ -206,13 +210,15 @@ impl Instance {
 
     fn get_cfg_gpm(cfg: &DriverConfig) -> Result<f64> {
         match cfg.get("gpm") {
-            Some(toml::value::Value::Integer(gpm)) => return Ok(*gpm as f64),
-            Some(toml::value::Value::Float(gpm)) => return Ok(*gpm),
-            Some(_) => error!("'gpm' config parameter should be a number"),
-            None => error!("missing 'gpm' parameter in config"),
+            Some(toml::value::Value::Integer(gpm)) => Ok(*gpm as f64),
+            Some(toml::value::Value::Float(gpm)) => Ok(*gpm),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'gpm' config parameter should be a number",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'gpm' parameter in config",
+            ))),
         }
-
-        Err(Error::BadConfig)
     }
 
     async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {

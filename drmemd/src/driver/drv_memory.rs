@@ -5,7 +5,6 @@ use drmem_api::{
 };
 use std::{convert::Infallible, future::Future, pin::Pin};
 use tokio_stream::StreamExt;
-use tracing::{self, error};
 
 pub struct Instance {
     d_memory: driver::ReportReading<device::Value>,
@@ -34,16 +33,20 @@ impl Instance {
         match cfg.get("name") {
             Some(toml::value::Value::String(name)) => {
                 if let v @ Ok(_) = name.parse::<device::Base>() {
-                    return v;
+                    v
                 } else {
-                    error!("'name' isn't a proper, base name for a device")
+                    Err(Error::BadConfig(String::from(
+                        "'name' isn't a proper, base name for a device",
+                    )))
                 }
             }
-            Some(_) => error!("'name' config parameter should be a string"),
-            None => error!("missing 'name' parameter in config"),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'name' config parameter should be a string",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'name' parameter in config",
+            ))),
         }
-
-        Err(Error::BadConfig)
     }
 }
 
