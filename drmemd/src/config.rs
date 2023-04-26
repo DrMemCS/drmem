@@ -77,6 +77,7 @@ pub struct Driver {
 #[derive(Deserialize)]
 pub struct Logic {
     pub name: String,
+    pub summary: Option<String>,
     #[serde(default)]
     pub defs: HashMap<String, String>,
     pub exprs: Vec<String>,

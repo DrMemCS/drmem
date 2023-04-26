@@ -78,7 +78,8 @@ async fn wrap_task(
 }
 
 // Runs the main body of the application. This top-level task reads
-// the config, starts the drivers, and monitors their health.
+// the config, starts the drivers and logic node, and monitors their
+// health.
 
 async fn run() -> Result<()> {
     if let Some(cfg) = init_app().await {
@@ -136,6 +137,17 @@ async fn run() -> Result<()> {
                 return Err(Error::NotFound);
             }
         }
+
+        // Iterate through the [[logic]] sections of the config.
+
+        for logic in cfg.logic {
+            let instance =
+                logic::Node::start(tx_clnt_req.clone(), &logic).await?;
+
+            tasks.push(wrap_task(instance))
+        }
+
+        // Now run all the tasks.
 
         let _ = future::join_all(tasks).await;
 
