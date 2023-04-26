@@ -209,17 +209,26 @@ impl DriverDb {
         DriverDb(Arc::new(table))
     }
 
+    /// Searches the map for a driver with the specified name. If
+    /// present, the driver's information is returned.
+
     pub fn get_driver(&self, key: &str) -> Option<&Driver> {
         self.0.get(key)
     }
 
+    /// Searches the map for a driver with the specified name. If
+    /// found, it extracts the information needed for the GraphQL
+    /// query and returns it.
+
     pub fn find(
         &self, key: &str,
     ) -> Option<(String, &'static str, &'static str)> {
-        self.0
-            .get(key)
+        self.get_driver(key)
             .map(|info| (key.to_string(), info.summary, info.description))
     }
+
+    /// Similar to `.find()`, but returns all the drivers'
+    /// information.
 
     pub fn get_all(
         &self,
