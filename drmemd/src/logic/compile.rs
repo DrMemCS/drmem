@@ -84,6 +84,12 @@ impl fmt::Display for Expr {
 #[derive(Debug, PartialEq)]
 pub struct Program(Expr, String);
 
+impl Program {
+    pub fn optimize(self) -> Self {
+        Program(optimize(self.0), self.1)
+    }
+}
+
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} -> {{{}}}", &self.0, &self.1)

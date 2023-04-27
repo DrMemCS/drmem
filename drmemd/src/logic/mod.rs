@@ -29,7 +29,9 @@ impl Node {
         let exprs: Result<Vec<compile::Program>> = cfg
             .exprs
             .iter()
-            .map(|s| compile::compile(s.as_str()))
+            .map(|s| {
+                compile::compile(s.as_str()).map(compile::Program::optimize)
+            })
             .inspect(|e| match e {
                 Ok(ex) => info!("loaded : {}", &ex),
                 Err(e) => error!("{}", &e),
