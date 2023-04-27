@@ -27,9 +27,11 @@ impl Node {
             .exprs
             .iter()
             .map(|s| compile::compile(s.as_str()))
+            .inspect(|e| match e {
+                Ok(ex) => info!("loaded : {}", &ex),
+                Err(e) => error!("{}", &e),
+            })
             .collect();
-
-        debug!("initialization is complete");
 
         Ok(Node {
             notes: cfg.summary.clone(),
