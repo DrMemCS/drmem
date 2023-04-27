@@ -29,6 +29,7 @@ use drmem_api::{
 };
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
+use std::fmt;
 use tracing::error;
 
 // Pull in the lexer and parser for the Logic Node language.
@@ -60,9 +61,33 @@ pub enum Expr {
     Rem(Box<Expr>, Box<Expr>),
 }
 
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expr::Lit(v) => write!(f, "{}", &v),
+            Expr::Var(v) => write!(f, "{{{}}}", &v),
+            Expr::Not(e) => write!(f, "not ({})", &e),
+            Expr::And(a, b) => write!(f, "({}) and ({})", &a, &b),
+            Expr::Or(a, b) => write!(f, "({}) or ({})", &a, &b),
+            Expr::Eq(a, b) => write!(f, "({}) = ({})", &a, &b),
+            Expr::Lt(a, b) => write!(f, "({}) < ({})", &a, &b),
+            Expr::LtEq(a, b) => write!(f, "({}) <= ({})", &a, &b),
+            Expr::Add(a, b) => write!(f, "({}) + ({})", &a, &b),
+            Expr::Sub(a, b) => write!(f, "({}) - ({})", &a, &b),
+            Expr::Mul(a, b) => write!(f, "({}) * ({})", &a, &b),
+            Expr::Div(a, b) => write!(f, "({}) / ({})", &a, &b),
+            Expr::Rem(a, b) => write!(f, "({}) % ({})", &a, &b),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
-pub enum Program {
-    Assign(Expr, String),
+pub struct Program(Expr, String);
+
+impl fmt::Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} -> {{{}}}", &self.0, &self.1)
+    }
 }
 
 pub fn compile(s: &str) -> Result<Program> {
@@ -441,7 +466,7 @@ mod tests {
 
         assert_eq!(
             compile("{switch} -> {bulb}"),
-            Ok(Program::Assign(
+            Ok(Program(
                 Expr::Var(String::from("switch")),
                 String::from("bulb")
             ))
@@ -449,79 +474,52 @@ mod tests {
 
         assert_eq!(
             compile("true -> {bulb}"),
-            Ok(Program::Assign(
-                Expr::Lit(Value::Bool(true)),
-                String::from("bulb")
-            ))
+            Ok(Program(Expr::Lit(Value::Bool(true)), String::from("bulb")))
         );
         assert_eq!(
             compile("false -> {bulb}"),
-            Ok(Program::Assign(
-                Expr::Lit(Value::Bool(false)),
-                String::from("bulb")
-            ))
+            Ok(Program(Expr::Lit(Value::Bool(false)), String::from("bulb")))
         );
 
         assert_eq!(
             compile("1 -> {bulb}"),
-            Ok(Program::Assign(
-                Expr::Lit(Value::Int(1)),
-                String::from("bulb")
-            ))
+            Ok(Program(Expr::Lit(Value::Int(1)), String::from("bulb")))
         );
         assert_eq!(
             compile("1. -> {bulb}"),
-            Ok(Program::Assign(
-                Expr::Lit(Value::Flt(1.0)),
-                String::from("bulb")
-            ))
+            Ok(Program(Expr::Lit(Value::Flt(1.0)), String::from("bulb")))
         );
         assert_eq!(
             compile("1.0 -> {bulb}"),
-            Ok(Program::Assign(
-                Expr::Lit(Value::Flt(1.0)),
-                String::from("bulb")
-            ))
+            Ok(Program(Expr::Lit(Value::Flt(1.0)), String::from("bulb")))
         );
         assert_eq!(
             compile("-1.0 -> {bulb}"),
-            Ok(Program::Assign(
-                Expr::Lit(Value::Flt(-1.0)),
-                String::from("bulb")
-            ))
+            Ok(Program(Expr::Lit(Value::Flt(-1.0)), String::from("bulb")))
         );
         assert_eq!(
             compile("1.5 -> {bulb}"),
-            Ok(Program::Assign(
-                Expr::Lit(Value::Flt(1.5)),
-                String::from("bulb")
-            ))
+            Ok(Program(Expr::Lit(Value::Flt(1.5)), String::from("bulb")))
         );
         assert_eq!(
             compile("1.0e10 -> {bulb}"),
-            Ok(Program::Assign(
-                Expr::Lit(Value::Flt(1.0e10)),
-                String::from("bulb")
-            ))
+            Ok(Program(Expr::Lit(Value::Flt(1.0e10)), String::from("bulb")))
         );
         assert_eq!(
             compile("2.75e-10 -> {bulb}"),
-            Ok(Program::Assign(
+            Ok(Program(
                 Expr::Lit(Value::Flt(2.75e-10)),
                 String::from("bulb")
             ))
         );
         assert_eq!(
             compile("(((10))) -> {bulb}"),
-            Ok(Program::Assign(
-                Expr::Lit(Value::Int(10)),
-                String::from("bulb")
-            ))
+            Ok(Program(Expr::Lit(Value::Int(10)), String::from("bulb")))
         );
 
         assert_eq!(
             compile("{on_time} > 10.0 -> {bulb}"),
-            Ok(Program::Assign(
+            Ok(Program(
                 Expr::Lt(
                     Box::new(Expr::Lit(Value::Flt(10.0))),
                     Box::new(Expr::Var(String::from("on_time")))
@@ -532,7 +530,7 @@ mod tests {
 
         assert_eq!(
             compile("4 + ({on_time} + 5) * 10 > 10.0 % 3 -> {bulb}"),
-            Ok(Program::Assign(
+            Ok(Program(
                 Expr::Lt(
                     Box::new(Expr::Rem(
                         Box::new(Expr::Lit(Value::Flt(10.0))),
@@ -555,7 +553,7 @@ mod tests {
 
         assert_eq!(
             compile("true and false or false and true -> {bulb}"),
-            Ok(Program::Assign(
+            Ok(Program(
                 Expr::Or(
                     Box::new(Expr::And(
                         Box::new(Expr::Lit(Value::Bool(true))),
@@ -572,7 +570,7 @@ mod tests {
 
         assert_eq!(
             compile("\"Hello, world!\" -> {bulb}"),
-            Ok(Program::Assign(
+            Ok(Program(
                 Expr::Lit(Value::Str("Hello, world!".to_string())),
                 String::from("bulb")
             ))
@@ -1549,6 +1547,62 @@ mod tests {
                 Box::new(Expr::Lit(Value::Bool(false)))
             )),
             Expr::Lit(Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn test_to_string() {
+        assert_eq!(compile("{a} -> {b}").unwrap().to_string(), "{a} -> {b}");
+
+        assert_eq!(compile("true -> {b}").unwrap().to_string(), "true -> {b}");
+        assert_eq!(
+            compile("not true -> {b}").unwrap().to_string(),
+            "not (true) -> {b}"
+        );
+        assert_eq!(
+            compile("{a} and {b} -> {c}").unwrap().to_string(),
+            "({a}) and ({b}) -> {c}"
+        );
+        assert_eq!(
+            compile("{a} or {b} -> {c}").unwrap().to_string(),
+            "({a}) or ({b}) -> {c}"
+        );
+        assert_eq!(
+            compile("{a} = {b} -> {c}").unwrap().to_string(),
+            "({a}) = ({b}) -> {c}"
+        );
+        assert_eq!(
+            compile("{a} < {b} -> {c}").unwrap().to_string(),
+            "({a}) < ({b}) -> {c}"
+        );
+        assert_eq!(
+            compile("{a} <= {b} -> {c}").unwrap().to_string(),
+            "({a}) <= ({b}) -> {c}"
+        );
+        assert_eq!(
+            compile("{a} + {b} -> {c}").unwrap().to_string(),
+            "({a}) + ({b}) -> {c}"
+        );
+        assert_eq!(
+            compile("{a} - {b} -> {c}").unwrap().to_string(),
+            "({a}) - ({b}) -> {c}"
+        );
+        assert_eq!(
+            compile("{a} * {b} -> {c}").unwrap().to_string(),
+            "({a}) * ({b}) -> {c}"
+        );
+        assert_eq!(
+            compile("{a} / {b} -> {c}").unwrap().to_string(),
+            "({a}) / ({b}) -> {c}"
+        );
+        assert_eq!(
+            compile("{a} % {b} -> {c}").unwrap().to_string(),
+            "({a}) % ({b}) -> {c}"
+        );
+
+        assert_eq!(
+            compile("{a} * 3 + {b} > 4 -> {c}").unwrap().to_string(),
+            "(4) < ((({a}) * (3)) + ({b})) -> {c}"
         );
     }
 }

@@ -33,7 +33,7 @@ Logic -> Result<Program>:
             ))?;
 	let s = $lexer.span_str(v.span());
 
-	Ok(Program::Assign($1?, parse_device(s)))
+	Ok(Program($1?, parse_device(s)))
     }
     ;
 
