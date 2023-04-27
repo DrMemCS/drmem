@@ -141,10 +141,10 @@ async fn run() -> Result<()> {
         // Iterate through the [[logic]] sections of the config.
 
         for logic in cfg.logic {
-            let instance =
-                logic::Node::start(tx_clnt_req.clone(), &logic).await?;
-
-            tasks.push(wrap_task(instance))
+            match logic::Node::start(tx_clnt_req.clone(), &logic).await {
+                Ok(instance) => tasks.push(wrap_task(instance)),
+                Err(_) => error!("logic node '{}' is not running", &logic.name),
+            }
         }
 
         // Now run all the tasks.

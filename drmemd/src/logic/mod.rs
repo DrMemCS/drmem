@@ -23,6 +23,9 @@ impl Node {
     ) -> Result<Node> {
         debug!("compiling expressions");
 
+        // Iterate through the vector of strings. For each, compile it
+        // into a `Program` type. Report the success or failure.
+
         let exprs: Result<Vec<compile::Program>> = cfg
             .exprs
             .iter()
@@ -32,6 +35,8 @@ impl Node {
                 Err(e) => error!("{}", &e),
             })
             .collect();
+
+        // Return the initialize `Node`.
 
         Ok(Node {
             notes: cfg.summary.clone(),
