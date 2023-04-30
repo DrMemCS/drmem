@@ -6,7 +6,7 @@ use drmem_api::{
 use std::{convert::Infallible, future::Future, pin::Pin};
 use tokio::time;
 use tokio_stream::StreamExt;
-use tracing::{self, debug, error};
+use tracing::{self, debug};
 
 // This enum represents the three states in which the device can be.
 

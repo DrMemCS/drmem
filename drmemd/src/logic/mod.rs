@@ -119,8 +119,8 @@ impl Node {
         let (outputs, out_chans) =
             Node::setup_outputs(&c_req, &cfg.outputs).await?;
 
-	// Create the input/output environment that the compiler can
-	// use to compute the variables in the expression.
+        // Create the input/output environment that the compiler can
+        // use to compute the variables in the expression.
 
         let env = (&inputs[..], &outputs[..]);
 
@@ -154,7 +154,53 @@ impl Node {
 
     async fn run(&mut self) -> Result<Infallible> {
         info!("starting");
-        future::pending().await
+
+        // Wait for the next reading to arrive. All the incoming
+        // streams have been combined into one and the returned value
+        // is a pair consisting of an index and the actual reading.
+
+        while let Some((idx, reading)) = self.in_stream.next().await {
+            // Save the reading in our array for future
+            // recalculations.
+
+            self.inputs[idx] = Some(reading.value);
+
+            // Loop through each defined expression.
+
+            for compile::Program(expr, idx) in &self.exprs {
+                // Compute the result of the expression, given the set
+                // of inputs. If the result is None, then something in
+                // the expression was wrong (either one or more input
+                // values are None or the expression performed a bad
+                // operation, like dividing by 0.)
+
+                if let Some(result) = compile::eval(expr, &self.inputs) {
+                    let (tx_rpy, rx_rpy) = oneshot::channel();
+
+                    // Send the result to the correct setting channel.
+
+                    if let Ok(()) =
+                        self.outputs[*idx].send((result, tx_rpy)).await
+                    {
+                        // Wait for the result. It is possible that
+                        // the driver returns a different value
+                        // (clipping a setting, for instance.) We
+                        // don't pay it any mind because the outer
+                        // loop will receive the updated value.
+
+                        if let Err(e) = rx_rpy.await {
+                            error!("setting failed : {}", &e)
+                        }
+                    }
+                }
+            }
+        }
+
+        // This code should never be reached. If so, report the
+        // problem and return an error.
+
+        error!("all inputs have closed ... terminating");
+        Err(Error::OperationError)
     }
 
     // Starts a new instance of a logic node.
