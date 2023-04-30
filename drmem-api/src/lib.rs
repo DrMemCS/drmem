@@ -101,6 +101,10 @@ pub trait Store {
         &self, name: types::device::Name, value: types::device::Value,
     ) -> Result<types::device::Value>;
 
+    async fn get_setting_chan(
+        &self, name: types::device::Name, own: bool,
+    ) -> Result<driver::TxDeviceSetting>;
+
     /// Creates a stream that yields values of a device as it updates.
 
     async fn monitor_device(

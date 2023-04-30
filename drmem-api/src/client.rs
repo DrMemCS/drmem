@@ -33,6 +33,7 @@
 //! ```
 
 use crate::{
+    driver,
     types::{device, Error},
     Result,
 };
@@ -72,6 +73,12 @@ pub enum Request {
         name: device::Name,
         value: device::Value,
         rpy_chan: oneshot::Sender<Result<device::Value>>,
+    },
+
+    GetSettingChan {
+        name: device::Name,
+        _own: bool,
+        rpy_chan: oneshot::Sender<Result<driver::TxDeviceSetting>>,
     },
 
     MonitorDevice {
@@ -161,6 +168,29 @@ impl RequestChan {
         // into the type that was used.
 
         rx.await?.and_then(T::try_from)
+    }
+
+    pub async fn get_setting_chan(
+        &self, name: device::Name, own: bool,
+    ) -> Result<driver::TxDeviceSetting> {
+        // Create the reply channel and the request message that will
+        // be sent.
+
+        let (tx, rx) = oneshot::channel();
+        let msg = Request::GetSettingChan {
+            name,
+            _own: own,
+            rpy_chan: tx,
+        };
+
+        // Send the request to the driver.
+
+        self.req_chan.send(msg).await?;
+
+        // Wait for the reply and try to convert the set value back
+        // into the type that was used.
+
+        rx.await?
     }
 
     /// Requests device information for devices whose name matches the

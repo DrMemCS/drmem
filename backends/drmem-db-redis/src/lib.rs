@@ -978,6 +978,16 @@ impl Store for RedisStore {
         }
     }
 
+    async fn get_setting_chan(
+        &self, name: device::Name, _own: bool,
+    ) -> Result<TxDeviceSetting> {
+        if let Some(tx) = self.table.get(&name) {
+            Ok(tx.clone())
+        } else {
+            Err(Error::NotFound)
+        }
+    }
+
     async fn monitor_device(
         &mut self, name: device::Name, start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,

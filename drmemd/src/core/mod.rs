@@ -102,6 +102,18 @@ impl State {
                 }
             }
 
+            client::Request::GetSettingChan {
+                name,
+                _own,
+                rpy_chan,
+            } => {
+                let fut = self.backend.get_setting_chan(name, _own);
+
+                if rpy_chan.send(fut.await).is_err() {
+                    warn!("client exited before a reply could be sent")
+                }
+            }
+
             client::Request::MonitorDevice {
                 name,
                 rpy_chan,

@@ -332,6 +332,17 @@ impl Store for SimpleStore {
         }
     }
 
+    async fn get_setting_chan(
+        &self, name: device::Name, _own: bool,
+    ) -> Result<TxDeviceSetting> {
+        if let Some(di) = self.0.get(&name) {
+            if let Some(tx) = &di.tx_setting {
+                return Ok(tx.clone());
+            }
+        }
+        Err(Error::NotFound)
+    }
+
     // Handles a request to monitor a device's changing value. The
     // caller must pass in the name of the device. Returns a stream
     // which returns the last value reported for the device followed
