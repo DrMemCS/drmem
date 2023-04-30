@@ -1,6 +1,7 @@
 %expect-unused Unknown "UNKNOWN"
 
 %start Logic
+%parse-param p: &(&[String], &[String])
 
 %avoid_insert "INT"
 %avoid_insert "FLT"
@@ -33,7 +34,7 @@ Logic -> Result<Program>:
             ))?;
 	let s = $lexer.span_str(v.span());
 
-	Ok(Program($1?, parse_device(s)))
+	Ok(Program($1?, parse_device(s, p.1)?))
     }
     ;
 
@@ -149,7 +150,7 @@ Device -> Result<Expr>:
             ))?;
 	let s = $lexer.span_str(v.span());
 
-	Ok(Expr::Var(parse_device(s)))
+	Ok(Expr::Var(parse_device(s, p.0)?))
     }
     ;
 
@@ -180,6 +181,13 @@ fn parse_flt(s: &str) -> Result<Expr> {
 	))
 }
 
-fn parse_device(s: &str) -> String {
-    s[1..s.len() - 1].to_string()
+fn parse_device(s: &str, env: &[String]) -> Result<usize> {
+    let name = s[1..s.len() - 1].to_string();
+
+    for ii in env.iter().enumerate() {
+        if *ii.1 == name {
+	    return Ok(ii.0);
+	}
+    }
+    Err(Error::ParseError(format!("variable '{}' is not defined", &name)))
 }

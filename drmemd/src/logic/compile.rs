@@ -40,7 +40,7 @@ lrpar_mod!("logic/logic.y");
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Lit(Value),
-    Var(String),
+    Var(usize),
 
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
@@ -65,7 +65,7 @@ impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Lit(v) => write!(f, "{}", &v),
-            Expr::Var(v) => write!(f, "{{{}}}", &v),
+            Expr::Var(v) => write!(f, "inp[{}]", &v),
             Expr::Not(e) => write!(f, "not ({})", &e),
             Expr::And(a, b) => write!(f, "({}) and ({})", &a, &b),
             Expr::Or(a, b) => write!(f, "({}) or ({})", &a, &b),
@@ -81,30 +81,45 @@ impl fmt::Display for Expr {
     }
 }
 
+// This is the "environment" of a compile. The first element is a list
+// of names associated with devices that are to be read. The second
+// element is a list of names associated with devices to be set. The
+// `Program::compile` function uses this environment to compute the
+// `Expr::Var` and `Program` values.
+
+type Env<'a> = (&'a [String], &'a [String]);
+
 #[derive(Debug, PartialEq)]
-pub struct Program(Expr, String);
+pub struct Program(pub Expr, pub usize);
 
 impl Program {
     pub fn optimize(self) -> Self {
         Program(optimize(self.0), self.1)
     }
+
+    pub fn compile(s: &str, env: &Env) -> Result<Program> {
+        let lexerdef = logic_l::lexerdef();
+        let lexer = lexerdef.lexer(s);
+        let (res, errs) = logic_y::parse(&lexer, env);
+
+        res.unwrap_or_else(|| {
+            let res = errs.iter().fold(
+                format!("expression '{}' couldn't compile", s),
+                |mut acc, e| {
+                    acc.push_str(&format!("\n    {}", &e));
+                    acc
+                },
+            );
+
+            Err(Error::ParseError(res))
+        })
+    }
 }
 
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} -> {{{}}}", &self.0, &self.1)
+        write!(f, "{} -> out[{}]", &self.0, &self.1)
     }
-}
-
-pub fn compile(s: &str) -> Result<Program> {
-    let lexerdef = logic_l::lexerdef();
-    let lexer = lexerdef.lexer(s);
-    let (res, _) = logic_y::parse(&lexer);
-
-    res.unwrap_or(Err(Error::BadConfig(format!(
-        "expression '{}' couldn't compile",
-        s
-    ))))
 }
 
 // Evaluates an expression and returns the computed value. If the
@@ -112,49 +127,48 @@ pub fn compile(s: &str) -> Result<Program> {
 // it won't get computed ever again. The log will have a message
 // indicating what the error was.
 
-pub fn eval(e: &Expr) -> Option<Value> {
+pub fn eval(e: &Expr, inp: &[Option<Value>]) -> Option<Value> {
     match e {
         // Literals hold actual `Values`, so simply return it.
         Expr::Lit(v) => Some(v.clone()),
 
-        Expr::Var(n) => eval_as_var(n),
+        Expr::Var(n) => eval_as_var(*n, inp),
 
-        Expr::Not(ref e) => eval_as_not_expr(e),
+        Expr::Not(ref e) => eval_as_not_expr(e, inp),
 
-        Expr::Or(ref a, ref b) => eval_as_or_expr(a, b),
+        Expr::Or(ref a, ref b) => eval_as_or_expr(a, b, inp),
 
-        Expr::And(ref a, ref b) => eval_as_and_expr(a, b),
+        Expr::And(ref a, ref b) => eval_as_and_expr(a, b, inp),
 
-        Expr::Eq(ref a, ref b) => eval_as_eq_expr(a, b),
+        Expr::Eq(ref a, ref b) => eval_as_eq_expr(a, b, inp),
 
-        Expr::Lt(ref a, ref b) => eval_as_lt_expr(a, b),
+        Expr::Lt(ref a, ref b) => eval_as_lt_expr(a, b, inp),
 
-        Expr::LtEq(ref a, ref b) => eval_as_lteq_expr(a, b),
+        Expr::LtEq(ref a, ref b) => eval_as_lteq_expr(a, b, inp),
 
-        Expr::Add(ref a, ref b) => eval_as_add_expr(a, b),
+        Expr::Add(ref a, ref b) => eval_as_add_expr(a, b, inp),
 
-        Expr::Sub(ref a, ref b) => eval_as_sub_expr(a, b),
+        Expr::Sub(ref a, ref b) => eval_as_sub_expr(a, b, inp),
 
-        Expr::Mul(ref a, ref b) => eval_as_mul_expr(a, b),
+        Expr::Mul(ref a, ref b) => eval_as_mul_expr(a, b, inp),
 
-        Expr::Div(ref a, ref b) => eval_as_div_expr(a, b),
+        Expr::Div(ref a, ref b) => eval_as_div_expr(a, b, inp),
 
-        Expr::Rem(ref a, ref b) => eval_as_rem_expr(a, b),
+        Expr::Rem(ref a, ref b) => eval_as_rem_expr(a, b, inp),
     }
 }
 
-// XXX: Until we add the variable look-up table, we'll just return 0.0
-// for variable references.
+// Returns the latest value of the variable.
 
-fn eval_as_var(_name: &str) -> Option<Value> {
-    Some(Value::Flt(0.0))
+fn eval_as_var(idx: usize, inp: &[Option<Value>]) -> Option<Value> {
+    inp[idx].clone()
 }
 
 // Evaluates the subexpression of a NOT expression. It only accepts
 // booleans as values and simply complements the value.
 
-fn eval_as_not_expr(e: &Expr) -> Option<Value> {
-    match eval(e) {
+fn eval_as_not_expr(e: &Expr, inp: &[Option<Value>]) -> Option<Value> {
+    match eval(e, inp) {
         Some(Value::Bool(v)) => Some(Value::Bool(!v)),
         Some(v) => {
             error!("NOT expression contains non-boolean value : {}", &v);
@@ -166,10 +180,10 @@ fn eval_as_not_expr(e: &Expr) -> Option<Value> {
 
 // OR expressions. If the first subexpression is `true`, the second
 // subexpression isn't evaluated.
-fn eval_as_or_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match eval(a) {
+fn eval_as_or_expr(a: &Expr, b: &Expr, inp: &[Option<Value>]) -> Option<Value> {
+    match eval(a, inp) {
         v @ Some(Value::Bool(true)) => v,
-        Some(Value::Bool(false)) => match eval(b) {
+        Some(Value::Bool(false)) => match eval(b, inp) {
             v @ Some(Value::Bool(_)) => v,
             Some(v) => {
                 error!("OR expression contains non-boolean argument: {}", &v);
@@ -187,10 +201,12 @@ fn eval_as_or_expr(a: &Expr, b: &Expr) -> Option<Value> {
 
 // AND expressions. If the first subexpression is `false`, the second
 // subexpression isn't evaluated.
-fn eval_as_and_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match eval(a) {
+fn eval_as_and_expr(
+    a: &Expr, b: &Expr, inp: &[Option<Value>],
+) -> Option<Value> {
+    match eval(a, inp) {
         v @ Some(Value::Bool(false)) => v,
-        Some(Value::Bool(true)) => match eval(b) {
+        Some(Value::Bool(true)) => match eval(b, inp) {
             v @ Some(Value::Bool(_)) => v,
             Some(v) => {
                 error!("AND expression contains non-boolean argument: {}", &v);
@@ -207,8 +223,8 @@ fn eval_as_and_expr(a: &Expr, b: &Expr) -> Option<Value> {
 }
 
 // EQ expressions. Both expressions must be of the same type.
-fn eval_as_eq_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match (eval(a), eval(b)) {
+fn eval_as_eq_expr(a: &Expr, b: &Expr, inp: &[Option<Value>]) -> Option<Value> {
+    match (eval(a, inp), eval(b, inp)) {
         (Some(Value::Bool(a)), Some(Value::Bool(b))) => {
             Some(Value::Bool(a == b))
         }
@@ -230,8 +246,8 @@ fn eval_as_eq_expr(a: &Expr, b: &Expr) -> Option<Value> {
 }
 
 // LT expressions. Both expressions must be of the same type.
-fn eval_as_lt_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match (eval(a), eval(b)) {
+fn eval_as_lt_expr(a: &Expr, b: &Expr, inp: &[Option<Value>]) -> Option<Value> {
+    match (eval(a, inp), eval(b, inp)) {
         (Some(Value::Int(a)), Some(Value::Int(b))) => Some(Value::Bool(a < b)),
         (Some(Value::Flt(a)), Some(Value::Flt(b))) => Some(Value::Bool(a < b)),
         (Some(Value::Int(a)), Some(Value::Flt(b))) => {
@@ -250,8 +266,10 @@ fn eval_as_lt_expr(a: &Expr, b: &Expr) -> Option<Value> {
 }
 
 // LT_EQ expressions. Both expressions must be of the same type.
-fn eval_as_lteq_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match (eval(a), eval(b)) {
+fn eval_as_lteq_expr(
+    a: &Expr, b: &Expr, inp: &[Option<Value>],
+) -> Option<Value> {
+    match (eval(a, inp), eval(b, inp)) {
         (Some(Value::Int(a)), Some(Value::Int(b))) => Some(Value::Bool(a <= b)),
         (Some(Value::Flt(a)), Some(Value::Flt(b))) => Some(Value::Bool(a <= b)),
         (Some(Value::Int(a)), Some(Value::Flt(b))) => {
@@ -270,8 +288,10 @@ fn eval_as_lteq_expr(a: &Expr, b: &Expr) -> Option<Value> {
 }
 
 // ADD expressions.
-fn eval_as_add_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match (eval(a), eval(b)) {
+fn eval_as_add_expr(
+    a: &Expr, b: &Expr, inp: &[Option<Value>],
+) -> Option<Value> {
+    match (eval(a, inp), eval(b, inp)) {
         (Some(Value::Int(a)), Some(Value::Int(b))) => Some(Value::Int(a + b)),
         (Some(Value::Bool(a)), Some(Value::Int(b))) => {
             Some(Value::Int(a as i32 + b))
@@ -301,8 +321,10 @@ fn eval_as_add_expr(a: &Expr, b: &Expr) -> Option<Value> {
 }
 
 // SUB expressions.
-fn eval_as_sub_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match (eval(a), eval(b)) {
+fn eval_as_sub_expr(
+    a: &Expr, b: &Expr, inp: &[Option<Value>],
+) -> Option<Value> {
+    match (eval(a, inp), eval(b, inp)) {
         (Some(Value::Int(a)), Some(Value::Int(b))) => Some(Value::Int(a - b)),
         (Some(Value::Bool(a)), Some(Value::Int(b))) => {
             Some(Value::Int(a as i32 - b))
@@ -332,8 +354,10 @@ fn eval_as_sub_expr(a: &Expr, b: &Expr) -> Option<Value> {
 }
 
 // MUL expressions.
-fn eval_as_mul_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match (eval(a), eval(b)) {
+fn eval_as_mul_expr(
+    a: &Expr, b: &Expr, inp: &[Option<Value>],
+) -> Option<Value> {
+    match (eval(a, inp), eval(b, inp)) {
         (Some(Value::Int(a)), Some(Value::Int(b))) => Some(Value::Int(a * b)),
         (Some(Value::Bool(a)), Some(Value::Int(b))) => {
             Some(Value::Int(a as i32 * b))
@@ -363,8 +387,10 @@ fn eval_as_mul_expr(a: &Expr, b: &Expr) -> Option<Value> {
 }
 
 // DIV expressions.
-fn eval_as_div_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match (eval(a), eval(b)) {
+fn eval_as_div_expr(
+    a: &Expr, b: &Expr, inp: &[Option<Value>],
+) -> Option<Value> {
+    match (eval(a, inp), eval(b, inp)) {
         (Some(Value::Int(a)), Some(Value::Int(b))) if b != 0 => {
             Some(Value::Int(a / b))
         }
@@ -386,8 +412,10 @@ fn eval_as_div_expr(a: &Expr, b: &Expr) -> Option<Value> {
 }
 
 // REM expressions.
-fn eval_as_rem_expr(a: &Expr, b: &Expr) -> Option<Value> {
-    match (eval(a), eval(b)) {
+fn eval_as_rem_expr(
+    a: &Expr, b: &Expr, inp: &[Option<Value>],
+) -> Option<Value> {
+    match (eval(a, inp), eval(b, inp)) {
         (Some(Value::Int(a)), Some(Value::Int(b))) if b > 0 => {
             Some(Value::Int(a % b))
         }
@@ -466,76 +494,78 @@ mod tests {
 
     #[test]
     fn test_parser() {
-        assert!(compile("").is_err());
-        assert!(compile("{switch -> {bulb}").is_err());
-        assert!(compile("switch} -> {bulb}").is_err());
-
-        assert_eq!(
-            compile("{switch} -> {bulb}"),
-            Ok(Program(
-                Expr::Var(String::from("switch")),
-                String::from("bulb")
-            ))
+        let env: Env = (
+            &[String::from("switch"), String::from("on_time")],
+            &[String::from("bulb")],
         );
 
+        assert!(Program::compile("", &env).is_err());
+        assert!(Program::compile("{switch -> {bulb}", &env).is_err());
+        assert!(Program::compile("switch} -> {bulb}", &env).is_err());
+
         assert_eq!(
-            compile("true -> {bulb}"),
-            Ok(Program(Expr::Lit(Value::Bool(true)), String::from("bulb")))
-        );
-        assert_eq!(
-            compile("false -> {bulb}"),
-            Ok(Program(Expr::Lit(Value::Bool(false)), String::from("bulb")))
+            Program::compile("{switch} -> {bulb}", &env),
+            Ok(Program(Expr::Var(0), 0))
         );
 
         assert_eq!(
-            compile("1 -> {bulb}"),
-            Ok(Program(Expr::Lit(Value::Int(1)), String::from("bulb")))
+            Program::compile("true -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Bool(true)), 0))
         );
         assert_eq!(
-            compile("1. -> {bulb}"),
-            Ok(Program(Expr::Lit(Value::Flt(1.0)), String::from("bulb")))
-        );
-        assert_eq!(
-            compile("1.0 -> {bulb}"),
-            Ok(Program(Expr::Lit(Value::Flt(1.0)), String::from("bulb")))
-        );
-        assert_eq!(
-            compile("-1.0 -> {bulb}"),
-            Ok(Program(Expr::Lit(Value::Flt(-1.0)), String::from("bulb")))
-        );
-        assert_eq!(
-            compile("1.5 -> {bulb}"),
-            Ok(Program(Expr::Lit(Value::Flt(1.5)), String::from("bulb")))
-        );
-        assert_eq!(
-            compile("1.0e10 -> {bulb}"),
-            Ok(Program(Expr::Lit(Value::Flt(1.0e10)), String::from("bulb")))
-        );
-        assert_eq!(
-            compile("2.75e-10 -> {bulb}"),
-            Ok(Program(
-                Expr::Lit(Value::Flt(2.75e-10)),
-                String::from("bulb")
-            ))
-        );
-        assert_eq!(
-            compile("(((10))) -> {bulb}"),
-            Ok(Program(Expr::Lit(Value::Int(10)), String::from("bulb")))
+            Program::compile("false -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Bool(false)), 0))
         );
 
         assert_eq!(
-            compile("{on_time} > 10.0 -> {bulb}"),
+            Program::compile("1 -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Int(1)), 0))
+        );
+        assert_eq!(
+            Program::compile("1. -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Flt(1.0)), 0))
+        );
+        assert_eq!(
+            Program::compile("1.0 -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Flt(1.0)), 0))
+        );
+        assert_eq!(
+            Program::compile("-1.0 -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Flt(-1.0)), 0))
+        );
+        assert_eq!(
+            Program::compile("1.5 -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Flt(1.5)), 0))
+        );
+        assert_eq!(
+            Program::compile("1.0e10 -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Flt(1.0e10)), 0))
+        );
+        assert_eq!(
+            Program::compile("2.75e-10 -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Flt(2.75e-10)), 0))
+        );
+        assert_eq!(
+            Program::compile("(((10))) -> {bulb}", &env),
+            Ok(Program(Expr::Lit(Value::Int(10)), 0))
+        );
+
+        assert_eq!(
+            Program::compile("{on_time} > 10.0 -> {bulb}", &env),
             Ok(Program(
                 Expr::Lt(
                     Box::new(Expr::Lit(Value::Flt(10.0))),
-                    Box::new(Expr::Var(String::from("on_time")))
+                    Box::new(Expr::Var(1))
                 ),
-                String::from("bulb")
+                0
             ))
         );
 
         assert_eq!(
-            compile("4 + ({on_time} + 5) * 10 > 10.0 % 3 -> {bulb}"),
+            Program::compile(
+                "4 + ({on_time} + 5) * 10 > 10.0 % 3 -> {bulb}",
+                &env
+            ),
             Ok(Program(
                 Expr::Lt(
                     Box::new(Expr::Rem(
@@ -546,19 +576,22 @@ mod tests {
                         Box::new(Expr::Lit(Value::Int(4))),
                         Box::new(Expr::Mul(
                             Box::new(Expr::Add(
-                                Box::new(Expr::Var(String::from("on_time"))),
+                                Box::new(Expr::Var(1)),
                                 Box::new(Expr::Lit(Value::Int(5)))
                             )),
                             Box::new(Expr::Lit(Value::Int(10)))
                         ))
                     ))
                 ),
-                String::from("bulb")
+                0
             ))
         );
 
         assert_eq!(
-            compile("true and false or false and true -> {bulb}"),
+            Program::compile(
+                "true and false or false and true -> {bulb}",
+                &env
+            ),
             Ok(Program(
                 Expr::Or(
                     Box::new(Expr::And(
@@ -570,15 +603,15 @@ mod tests {
                         Box::new(Expr::Lit(Value::Bool(true)))
                     ))
                 ),
-                String::from("bulb")
+                0
             ))
         );
 
         assert_eq!(
-            compile("\"Hello, world!\" -> {bulb}"),
+            Program::compile("\"Hello, world!\" -> {bulb}", &env),
             Ok(Program(
                 Expr::Lit(Value::Str("Hello, world!".to_string())),
-                String::from("bulb")
+                0
             ))
         );
     }
@@ -588,9 +621,18 @@ mod tests {
         const TRUE: Value = Value::Bool(true);
         const FALSE: Value = Value::Bool(false);
 
-        assert_eq!(eval(&Expr::Not(Box::new(Expr::Lit(FALSE)))), Some(TRUE));
-        assert_eq!(eval(&Expr::Not(Box::new(Expr::Lit(TRUE)))), Some(FALSE));
-        assert_eq!(eval(&Expr::Not(Box::new(Expr::Lit(Value::Int(1))))), None);
+        assert_eq!(
+            eval(&Expr::Not(Box::new(Expr::Lit(FALSE))), &[]),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(&Expr::Not(Box::new(Expr::Lit(TRUE))), &[]),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(&Expr::Not(Box::new(Expr::Lit(Value::Int(1)))), &[]),
+            None
+        );
     }
 
     #[test]
@@ -600,45 +642,54 @@ mod tests {
         const ONE: Value = Value::Int(1);
 
         assert_eq!(
-            eval(&Expr::Or(
-                Box::new(Expr::Lit(FALSE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Or(
+                    Box::new(Expr::Lit(FALSE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::Or(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Or(
+                    Box::new(Expr::Lit(TRUE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Or(
-                Box::new(Expr::Lit(FALSE)),
-                Box::new(Expr::Lit(TRUE))
-            )),
+            eval(
+                &Expr::Or(
+                    Box::new(Expr::Lit(FALSE)),
+                    Box::new(Expr::Lit(TRUE))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Or(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(TRUE))
-            )),
+            eval(
+                &Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(TRUE))),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Or(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(TRUE))
-            )),
+            eval(
+                &Expr::Or(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TRUE))),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Or(
-                Box::new(Expr::Lit(FALSE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Or(Box::new(Expr::Lit(FALSE)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             None
         );
         // This is a loophole for expression errors. If the first
@@ -646,10 +697,10 @@ mod tests {
         // we won't catch type errors until the first subexpression is
         // `false`.
         assert_eq!(
-            eval(&Expr::Or(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(TRUE)
         );
     }
@@ -661,38 +712,50 @@ mod tests {
         const ONE: Value = Value::Int(1);
 
         assert_eq!(
-            eval(&Expr::And(
-                Box::new(Expr::Lit(FALSE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::And(
+                    Box::new(Expr::Lit(FALSE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::And(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::And(
+                    Box::new(Expr::Lit(TRUE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::And(
-                Box::new(Expr::Lit(FALSE)),
-                Box::new(Expr::Lit(TRUE))
-            )),
+            eval(
+                &Expr::And(
+                    Box::new(Expr::Lit(FALSE)),
+                    Box::new(Expr::Lit(TRUE))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::And(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(TRUE))
-            )),
+            eval(
+                &Expr::And(
+                    Box::new(Expr::Lit(TRUE)),
+                    Box::new(Expr::Lit(TRUE))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::And(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(TRUE))
-            )),
+            eval(
+                &Expr::And(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TRUE))),
+                &[]
+            ),
             None
         );
         // This is a loophole for expression errors. If the first
@@ -700,17 +763,20 @@ mod tests {
         // we won't catch type errors until the first subexpression is
         // `true`.
         assert_eq!(
-            eval(&Expr::And(
-                Box::new(Expr::Lit(FALSE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::And(
+                    Box::new(Expr::Lit(FALSE)),
+                    Box::new(Expr::Lit(ONE))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::And(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::And(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             None
         );
     }
@@ -724,52 +790,64 @@ mod tests {
         const FP_ONE: Value = Value::Flt(1.0);
 
         assert_eq!(
-            eval(&Expr::Eq(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Eq(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(TWO))
-            )),
+            eval(
+                &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::Eq(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Eq(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Eq(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Eq(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(ONE))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Eq(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Eq(
-                Box::new(Expr::Lit(Value::Str(String::from("same")))),
-                Box::new(Expr::Lit(Value::Str(String::from("same"))))
-            )),
+            eval(
+                &Expr::Eq(
+                    Box::new(Expr::Lit(Value::Str(String::from("same")))),
+                    Box::new(Expr::Lit(Value::Str(String::from("same"))))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Eq(
-                Box::new(Expr::Lit(Value::Str(String::from("same")))),
-                Box::new(Expr::Lit(Value::Str(String::from("not same"))))
-            )),
+            eval(
+                &Expr::Eq(
+                    Box::new(Expr::Lit(Value::Str(String::from("same")))),
+                    Box::new(Expr::Lit(Value::Str(String::from("not same"))))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
     }
@@ -783,66 +861,81 @@ mod tests {
         const FP_ONE: Value = Value::Flt(1.0);
 
         assert_eq!(
-            eval(&Expr::Lt(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::Lt(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(TWO))
-            )),
+            eval(
+                &Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::Lt(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(TWO))
-            )),
+            eval(
+                &Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Lt(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Lt(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Lt(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::Lt(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Lt(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::Lt(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(TWO))
-            )),
+            eval(
+                &Expr::Lt(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(TWO))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Lt(
-                Box::new(Expr::Lit(Value::Str(String::from("abc")))),
-                Box::new(Expr::Lit(Value::Str(String::from("abc"))))
-            )),
+            eval(
+                &Expr::Lt(
+                    Box::new(Expr::Lit(Value::Str(String::from("abc")))),
+                    Box::new(Expr::Lit(Value::Str(String::from("abc"))))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::Lt(
-                Box::new(Expr::Lit(Value::Str(String::from("abc")))),
-                Box::new(Expr::Lit(Value::Str(String::from("abcd"))))
-            )),
+            eval(
+                &Expr::Lt(
+                    Box::new(Expr::Lit(Value::Str(String::from("abc")))),
+                    Box::new(Expr::Lit(Value::Str(String::from("abcd"))))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
     }
@@ -856,73 +949,94 @@ mod tests {
         const FP_ONE: Value = Value::Flt(1.0);
 
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(TWO))
-            )),
+            eval(
+                &Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(TWO))
-            )),
+            eval(
+                &Expr::LtEq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::LtEq(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::LtEq(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::LtEq(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(TWO))
-            )),
+            eval(
+                &Expr::LtEq(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(TWO))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(Value::Str(String::from("abcd")))),
-                Box::new(Expr::Lit(Value::Str(String::from("abc"))))
-            )),
+            eval(
+                &Expr::LtEq(
+                    Box::new(Expr::Lit(Value::Str(String::from("abcd")))),
+                    Box::new(Expr::Lit(Value::Str(String::from("abc"))))
+                ),
+                &[]
+            ),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(Value::Str(String::from("abc")))),
-                Box::new(Expr::Lit(Value::Str(String::from("abc"))))
-            )),
+            eval(
+                &Expr::LtEq(
+                    Box::new(Expr::Lit(Value::Str(String::from("abc")))),
+                    Box::new(Expr::Lit(Value::Str(String::from("abc"))))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::LtEq(
-                Box::new(Expr::Lit(Value::Str(String::from("abc")))),
-                Box::new(Expr::Lit(Value::Str(String::from("abcd"))))
-            )),
+            eval(
+                &Expr::LtEq(
+                    Box::new(Expr::Lit(Value::Str(String::from("abc")))),
+                    Box::new(Expr::Lit(Value::Str(String::from("abcd"))))
+                ),
+                &[]
+            ),
             Some(TRUE)
         );
     }
@@ -937,59 +1051,77 @@ mod tests {
         const FP_TWO: Value = Value::Flt(2.0);
 
         assert_eq!(
-            eval(&Expr::Add(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Add(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(Value::Int(3))
         );
         assert_eq!(
-            eval(&Expr::Add(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Add(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(Value::Int(2))
         );
         assert_eq!(
-            eval(&Expr::Add(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Add(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(Value::Int(1))
         );
         assert_eq!(
-            eval(&Expr::Add(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Add(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(3.0))
         );
         assert_eq!(
-            eval(&Expr::Add(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Add(
+                    Box::new(Expr::Lit(TRUE)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(2.0))
         );
         assert_eq!(
-            eval(&Expr::Add(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Add(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(1.0))
         );
         assert_eq!(
-            eval(&Expr::Add(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Add(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(3.0))
         );
         assert_eq!(
-            eval(&Expr::Add(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Add(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(3.0))
         );
     }
@@ -1004,59 +1136,77 @@ mod tests {
         const FP_TWO: Value = Value::Flt(2.0);
 
         assert_eq!(
-            eval(&Expr::Sub(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Sub(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(Value::Int(1))
         );
         assert_eq!(
-            eval(&Expr::Sub(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Sub(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(Value::Int(0))
         );
         assert_eq!(
-            eval(&Expr::Sub(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Sub(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(Value::Int(1))
         );
         assert_eq!(
-            eval(&Expr::Sub(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Sub(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(1.0))
         );
         assert_eq!(
-            eval(&Expr::Sub(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Sub(
+                    Box::new(Expr::Lit(TRUE)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(0.0))
         );
         assert_eq!(
-            eval(&Expr::Sub(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Sub(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(1.0))
         );
         assert_eq!(
-            eval(&Expr::Sub(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Sub(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(1.0))
         );
         assert_eq!(
-            eval(&Expr::Sub(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Sub(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(1.0))
         );
     }
@@ -1071,59 +1221,77 @@ mod tests {
         const FP_TWO: Value = Value::Flt(2.0);
 
         assert_eq!(
-            eval(&Expr::Mul(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Mul(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(Value::Int(2))
         );
         assert_eq!(
-            eval(&Expr::Mul(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Mul(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(Value::Int(1))
         );
         assert_eq!(
-            eval(&Expr::Mul(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Mul(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(Value::Int(0))
         );
         assert_eq!(
-            eval(&Expr::Mul(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Mul(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(2.0))
         );
         assert_eq!(
-            eval(&Expr::Mul(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Mul(
+                    Box::new(Expr::Lit(TRUE)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(1.0))
         );
         assert_eq!(
-            eval(&Expr::Mul(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Mul(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(0.0))
         );
         assert_eq!(
-            eval(&Expr::Mul(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Mul(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(2.0))
         );
         assert_eq!(
-            eval(&Expr::Mul(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Mul(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(2.0))
         );
     }
@@ -1140,87 +1308,114 @@ mod tests {
         const FP_TWO: Value = Value::Flt(2.0);
 
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Div(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             Some(Value::Int(2))
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Div(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Div(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Div(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(2.0))
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Div(
+                    Box::new(Expr::Lit(TRUE)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Div(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Div(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(2.0))
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Div(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             Some(Value::Flt(2.0))
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(ZERO))
-            )),
+            eval(
+                &Expr::Div(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ZERO))),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(FP_ZERO))
-            )),
+            eval(
+                &Expr::Div(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(FP_ZERO))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(ZERO))
-            )),
+            eval(
+                &Expr::Div(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(ZERO))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Div(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(FP_ZERO))
-            )),
+            eval(
+                &Expr::Div(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(FP_ZERO))
+                ),
+                &[]
+            ),
             None
         );
     }
@@ -1238,94 +1433,124 @@ mod tests {
         const FP_TWO: Value = Value::Flt(2.0);
 
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(TWO))
-            )),
+            eval(
+                &Expr::Rem(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
+                &[]
+            ),
             Some(Value::Int(1))
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(ONE))
-            )),
+            eval(
+                &Expr::Rem(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(FP_TWO))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(FP_TWO))
+                ),
+                &[]
+            ),
             Some(Value::Flt(1.0))
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(TRUE)),
-                Box::new(Expr::Lit(FP_ONE))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(TRUE)),
+                    Box::new(Expr::Lit(FP_ONE))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(FALSE))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(FALSE))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(FP_ONE)),
-                Box::new(Expr::Lit(TWO))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(TWO))
+                ),
+                &[]
+            ),
             Some(Value::Flt(1.0))
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(ONE)),
-                Box::new(Expr::Lit(FP_TWO))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(ONE)),
+                    Box::new(Expr::Lit(FP_TWO))
+                ),
+                &[]
+            ),
             Some(Value::Flt(1.0))
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(ZERO))
-            )),
+            eval(
+                &Expr::Rem(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ZERO))),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(FP_ZERO))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(FP_ZERO))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(ZERO))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(ZERO))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(FP_TWO)),
-                Box::new(Expr::Lit(FP_ZERO))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(FP_TWO)),
+                    Box::new(Expr::Lit(FP_ZERO))
+                ),
+                &[]
+            ),
             None
         );
         assert_eq!(
-            eval(&Expr::Rem(
-                Box::new(Expr::Lit(TWO)),
-                Box::new(Expr::Lit(NEG_ONE))
-            )),
+            eval(
+                &Expr::Rem(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(NEG_ONE))
+                ),
+                &[]
+            ),
             None
         );
     }
@@ -1334,7 +1559,7 @@ mod tests {
     fn test_eval() {
         const FALSE: Value = Value::Bool(false);
 
-        assert_eq!(eval(&Expr::Lit(FALSE)), Some(FALSE));
+        assert_eq!(eval(&Expr::Lit(FALSE), &[]), Some(FALSE));
     }
 
     // This function tests the optimizations that can be done on an
@@ -1558,57 +1783,92 @@ mod tests {
 
     #[test]
     fn test_to_string() {
-        assert_eq!(compile("{a} -> {b}").unwrap().to_string(), "{a} -> {b}");
-
-        assert_eq!(compile("true -> {b}").unwrap().to_string(), "true -> {b}");
-        assert_eq!(
-            compile("not true -> {b}").unwrap().to_string(),
-            "not (true) -> {b}"
-        );
-        assert_eq!(
-            compile("{a} and {b} -> {c}").unwrap().to_string(),
-            "({a}) and ({b}) -> {c}"
-        );
-        assert_eq!(
-            compile("{a} or {b} -> {c}").unwrap().to_string(),
-            "({a}) or ({b}) -> {c}"
-        );
-        assert_eq!(
-            compile("{a} = {b} -> {c}").unwrap().to_string(),
-            "({a}) = ({b}) -> {c}"
-        );
-        assert_eq!(
-            compile("{a} < {b} -> {c}").unwrap().to_string(),
-            "({a}) < ({b}) -> {c}"
-        );
-        assert_eq!(
-            compile("{a} <= {b} -> {c}").unwrap().to_string(),
-            "({a}) <= ({b}) -> {c}"
-        );
-        assert_eq!(
-            compile("{a} + {b} -> {c}").unwrap().to_string(),
-            "({a}) + ({b}) -> {c}"
-        );
-        assert_eq!(
-            compile("{a} - {b} -> {c}").unwrap().to_string(),
-            "({a}) - ({b}) -> {c}"
-        );
-        assert_eq!(
-            compile("{a} * {b} -> {c}").unwrap().to_string(),
-            "({a}) * ({b}) -> {c}"
-        );
-        assert_eq!(
-            compile("{a} / {b} -> {c}").unwrap().to_string(),
-            "({a}) / ({b}) -> {c}"
-        );
-        assert_eq!(
-            compile("{a} % {b} -> {c}").unwrap().to_string(),
-            "({a}) % ({b}) -> {c}"
+        let env: Env = (
+            &[String::from("a"), String::from("b")],
+            &[String::from("b"), String::from("c")],
         );
 
         assert_eq!(
-            compile("{a} * 3 + {b} > 4 -> {c}").unwrap().to_string(),
-            "(4) < ((({a}) * (3)) + ({b})) -> {c}"
+            Program::compile("{a} -> {b}", &env).unwrap().to_string(),
+            "inp[0] -> out[0]"
+        );
+
+        assert_eq!(
+            Program::compile("true -> {b}", &env).unwrap().to_string(),
+            "true -> out[0]"
+        );
+        assert_eq!(
+            Program::compile("not true -> {b}", &env)
+                .unwrap()
+                .to_string(),
+            "not (true) -> out[0]"
+        );
+        assert_eq!(
+            Program::compile("{a} and {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) and (inp[1]) -> out[1]"
+        );
+        assert_eq!(
+            Program::compile("{a} or {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) or (inp[1]) -> out[1]"
+        );
+        assert_eq!(
+            Program::compile("{a} = {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) = (inp[1]) -> out[1]"
+        );
+        assert_eq!(
+            Program::compile("{a} < {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) < (inp[1]) -> out[1]"
+        );
+        assert_eq!(
+            Program::compile("{a} <= {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) <= (inp[1]) -> out[1]"
+        );
+        assert_eq!(
+            Program::compile("{a} + {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) + (inp[1]) -> out[1]"
+        );
+        assert_eq!(
+            Program::compile("{a} - {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) - (inp[1]) -> out[1]"
+        );
+        assert_eq!(
+            Program::compile("{a} * {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) * (inp[1]) -> out[1]"
+        );
+        assert_eq!(
+            Program::compile("{a} / {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) / (inp[1]) -> out[1]"
+        );
+        assert_eq!(
+            Program::compile("{a} % {b} -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(inp[0]) % (inp[1]) -> out[1]"
+        );
+
+        assert_eq!(
+            Program::compile("{a} * 3 + {b} > 4 -> {c}", &env)
+                .unwrap()
+                .to_string(),
+            "(4) < (((inp[0]) * (3)) + (inp[1])) -> out[1]"
         );
     }
 }
