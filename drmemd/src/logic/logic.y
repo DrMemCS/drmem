@@ -28,7 +28,7 @@
 Logic -> Result<Program>:
     OrExpr "CONTROL" "DEVICE"
     {
-	let v = $3.map_err(|_| Error::BadConfig(
+	let v = $3.map_err(|_| Error::ParseError(
 	        String::from("error reading target device")
             ))?;
 	let s = $lexer.span_str(v.span());
@@ -115,7 +115,7 @@ Factor -> Result<Expr>:
     | "FALSE" { Ok(Expr::Lit(Value::Bool(false))) }
     | "INT"
       {
-          let v = $1.map_err(|_| Error::BadConfig(
+          let v = $1.map_err(|_| Error::ParseError(
 	        String::from("error reading literal integer value")
             ))?;
 
@@ -123,7 +123,7 @@ Factor -> Result<Expr>:
       }
     | "FLT"
       {
-          let v = $1.map_err(|_| Error::BadConfig(
+          let v = $1.map_err(|_| Error::ParseError(
 	        String::from("error reading literal floating point")
             ))?;
 
@@ -131,7 +131,7 @@ Factor -> Result<Expr>:
       }
     | "STRING"
     {
-	let v = $1.map_err(|_| Error::BadConfig(
+	let v = $1.map_err(|_| Error::ParseError(
 	        String::from("error reading literal string")
             ))?;
 	let s = $lexer.span_str(v.span());
@@ -144,7 +144,7 @@ Factor -> Result<Expr>:
 Device -> Result<Expr>:
     "DEVICE"
     {
-	let v = $1.map_err(|_| Error::BadConfig(
+	let v = $1.map_err(|_| Error::ParseError(
 	        String::from("error reading device name")
             ))?;
 	let s = $lexer.span_str(v.span());
@@ -167,7 +167,7 @@ use super::{Expr, Program};
 fn parse_int(s: &str) -> Result<Expr> {
     s.parse::<i32>()
 	.map(|v| Expr::Lit(Value::Int(v)))
-	.map_err(|_| Error::BadConfig(
+	.map_err(|_| Error::ParseError(
 	     format!("{} cannot be represented as an i32", s)
 	))
 }
@@ -175,7 +175,7 @@ fn parse_int(s: &str) -> Result<Expr> {
 fn parse_flt(s: &str) -> Result<Expr> {
     s.parse::<f64>()
 	.map(|v| Expr::Lit(Value::Flt(v)))
-	.map_err(|_| Error::BadConfig(
+	.map_err(|_| Error::ParseError(
 	     format!("{} cannot be represented as an f64", s)
 	))
 }

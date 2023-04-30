@@ -50,6 +50,10 @@ pub enum Error {
     /// configuration was missing a required parameter.
     BadConfig(String),
 
+    /// There was a problem parsing a string. The associated string
+    /// will describe how the parsing failed.
+    ParseError(String),
+
     /// A dependent library introduced a new error that hasn't been
     /// properly mapped in DrMem. This needs to be reported as a bug.
     UnknownError,
@@ -78,6 +82,7 @@ impl fmt::Display for Error {
                 write!(f, "couldn't complete operation")
             }
             Error::BadConfig(v) => write!(f, "config error: {}", &v),
+            Error::ParseError(v) => write!(f, "parse error: {}", &v),
             Error::UnknownError => write!(f, "unhandled error"),
         }
     }
