@@ -100,4 +100,10 @@ impl From<oneshot::error::RecvError> for Error {
     }
 }
 
+impl From<reqwest::Error> for Error {
+    fn from(_error: reqwest::Error) -> Self {
+        Error::MissingPeer(String::from("request dropped"))
+    }
+}
+
 pub mod device;

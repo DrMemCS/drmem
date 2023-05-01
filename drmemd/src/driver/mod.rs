@@ -192,6 +192,22 @@ impl DriverDb {
 
         // Load the set-up for the GPIO sump pump monitor.
 
+        #[cfg(feature = "driver-elgato")]
+        {
+            use drmem_drv_elgato::Instance;
+
+            table.insert(
+                Instance::NAME,
+                Driver::create(
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    <Instance as API>::create_instance,
+                ),
+            );
+        }
+
+        // Load the set-up for the GPIO sump pump monitor.
+
         #[cfg(feature = "driver-weather-wu")]
         {
             use drmem_drv_weather_wu::Instance;
