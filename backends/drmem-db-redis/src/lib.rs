@@ -903,7 +903,10 @@ impl Store for RedisStore {
         }
 
         let (tx, rx) = mpsc::channel(20);
-        let _ = self.table.insert(name.clone(), tx);
+
+        if self.table.insert(name.clone(), tx).is_some() {
+	    warn!("{} already had a setting channel", &name);
+	}
 
         Ok((
             self.mk_report_func(&sname, max_history),
