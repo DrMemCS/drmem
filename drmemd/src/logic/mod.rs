@@ -69,7 +69,7 @@ impl Node {
                     inputs.push(vv.clone())
                 }
                 Err(e) => {
-                    error!("error with '{}' input: {}", &vv, &e);
+                    error!("error mapping '{}' to '{}': {}", &vv, &dev, &e);
                     return Err(e);
                 }
             }
@@ -97,7 +97,7 @@ impl Node {
                     outputs.push(vv.clone())
                 }
                 Err(e) => {
-                    error!("error with '{}' input: {}", &vv, &e);
+                    error!("error mapping '{}' to '{}': {}", &vv, &dev, &e);
                     return Err(e);
                 }
             }
