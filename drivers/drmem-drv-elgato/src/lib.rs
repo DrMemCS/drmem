@@ -162,7 +162,8 @@ impl driver::API for Instance {
                         (self.d_on)(match status.lights[0].on {
                             Power::Off => false,
                             Power::On => true,
-                        }).await;
+                        })
+                        .await;
                         (self.d_brightness)(status.lights[0].brightness as u16)
                             .await;
                         (self.d_temperature)(
@@ -184,7 +185,9 @@ impl driver::API for Instance {
                     reply(Ok(v.clone()));
                     let mut status = match self.get_light_status().await {
                         Ok(status) => status,
-                        Err(e) => panic!("couldn't read light state -- {:?}", e),
+                        Err(e) => {
+                            panic!("couldn't read light state -- {:?}", e)
+                        }
                     };
                     match v {
                         false => status.lights[0].on = Power::Off,
@@ -199,7 +202,9 @@ impl driver::API for Instance {
                     reply(Ok(v.clone()));
                     let mut status = match self.get_light_status().await {
                         Ok(status) => status,
-                        Err(e) => panic!("couldn't read light state -- {:?}", e),
+                        Err(e) => {
+                            panic!("couldn't read light state -- {:?}", e)
+                        }
                     };
                     status.lights[0].brightness = v;
                     self.set_light_state(status).await
@@ -211,7 +216,9 @@ impl driver::API for Instance {
                     reply(Ok(v.clone()));
                     let mut status = match self.get_light_status().await {
                         Ok(status) => status,
-                        Err(e) => panic!("couldn't read light state -- {:?}", e),
+                        Err(e) => {
+                            panic!("couldn't read light state -- {:?}", e)
+                        }
                     };
                     status.lights[0].temperature = v;
                     self.set_light_state(status).await
