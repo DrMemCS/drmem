@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -467,7 +467,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-db-redis"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-db-simple"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-ntp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "drmem-api",
  "tokio",
@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-sump"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "drmem-api",
  "tokio",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-weather-wu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "drmem-api",
  "reqwest",
@@ -555,6 +555,7 @@ dependencies = [
  "juniper",
  "juniper_graphql_ws",
  "juniper_warp",
+ "lazy_static",
  "libmdns",
  "lrlex",
  "lrpar",
