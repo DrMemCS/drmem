@@ -565,6 +565,7 @@ dependencies = [
  "serde",
  "serde_repr",
  "tokio",
+ "tokio-stream",
  "toml",
  "tracing",
  "tracing-futures",
