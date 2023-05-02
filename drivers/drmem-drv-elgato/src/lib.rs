@@ -44,13 +44,9 @@ struct LightState {
 pub struct Instance {
     state: DriverState,
     addr: Ipv4Addr,
-    // light_state: LightState,
-    d_on: driver::ReportReading<i16>,
-    // rx_set_on: driver::RxDeviceSetting,
-    // d_brightness: u8,
-    // rx_set_brightness: driver::RxDeviceSetting,
-    // d_temperature: u16,
-    // rx_set_temperature: driver::RxDeviceSetting,
+    d_on: driver::ReportReading<u16>,
+    d_brightness: driver::ReportReading<u16>,
+    d_temperature: driver::ReportReading<u16>,
 }
 
 impl Instance {
@@ -59,20 +55,6 @@ impl Instance {
     pub const SUMMARY: &'static str = "Monitors and controls Elgato key lights";
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
-
-    // Attempts to pull the gal-per-min parameter from the driver's
-    // configuration. The value can be specified as an integer or
-    // floating point. It gets returned only as an `f64`.
-
-    // fn get_cfg_name(cfg: &DriverConfig) -> Result<String> {
-    //     match cfg.get("name") {
-    //         Some(toml::value::Value::String(name)) => return Ok(*name),
-    //         Some(_) => error!("'name' config parameter should be a string"),
-    //         None => error!("missing 'name' parameter in config"),
-    //     }
-
-    //     Err(Error::BadConfig)
-    // }
 
     fn _gen_url(address: Ipv4Addr) -> String {
         format!("http://{}:9123/elgato/lights", address)
@@ -94,18 +76,6 @@ impl Instance {
         }
 
         Err(Error::BadConfig)
-    }
-
-    async fn connect(address: Ipv4Addr) -> Result<LightState> {
-        // Get the current status of the light
-        // this allows us to fill the struct with the current values
-        // The API requires that we send the entire struct back
-        let url = Self::_gen_url(address);
-
-        match reqwest::get(url).await?.json::<LightState>().await {
-            Err(error) => panic!("Problem getting light status: {:?}", error),
-            Ok(status) => Ok(status),
-        }
     }
 
     async fn get_light_status(&mut self) -> Result<LightState> {
@@ -133,32 +103,23 @@ impl driver::API for Instance {
         let fut = async move {
             let addr = addr?;
 
-            let light_state = Instance::connect(addr).await?;
-
             // Define the devices managed by this driver.
-
-            // let (d_on, rx_set_on, _) =
-            //     core.add_rw_device("on".parse::<Base>()?, None, None).await?;
             let (d_on, _) = core
-                .add_ro_device("on".parse::<Base>()?, None, None)
+                .add_ro_device("on".parse::<Base>()?, None, max_history)
                 .await?;
-            // let (d_brightness, rx_set_brightness, _) = core
-            //     .add_rw_device("brightness".parse::<Base>()?, Some("%"), None)
-            //     .await?;
-            // let (d_temperature, rx_set_temperature, _) = core
-            //     .add_rw_device("temperature".parse::<Base>()?, Some("K"), None)
-            //     .await?;
+            let (d_brightness, _) = core
+                .add_ro_device("brightness".parse::<Base>()?, None, max_history)
+                .await?;
+            let (d_temperature, _) = core
+                .add_ro_device("temperature".parse::<Base>()?, None, max_history)
+                .await?;
 
             Ok(Box::new(Instance {
                 state: DriverState::Unknown,
                 addr,
-                // light_state,
                 d_on,
-                // rx_set_on,
-                // d_brightness,
-                // rx_set_brightness,
-                // d_temperature,
-                // rx_set_temperature
+                d_brightness,
+                d_temperature,
             }) as driver::DriverType)
         };
 
@@ -179,7 +140,9 @@ impl driver::API for Instance {
                 match self.get_light_status().await {
                     Ok(status) => {
                         // (self.light_state)(status).await;
-                        (self.d_on)(status.lights[0].on as i16).await;
+                        (self.d_on)(status.lights[0].on as u16).await;
+                        (self.d_brightness)(status.lights[0].brightness as u16).await;
+                        (self.d_temperature)(status.lights[0].temperature as u16).await;
                         self.state = DriverState::Ok;
                     }
 
@@ -195,86 +158,3 @@ impl driver::API for Instance {
         Box::pin(fut)
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-
-//     #[test]
-//     fn test_states() {
-//         let mut state = State::Unknown;
-
-//         assert_eq!(state.on_event(0), false);
-//         assert_eq!(state, State::Unknown);
-
-//         state = State::Off { off_time: 100 };
-
-//         assert_eq!(state.on_event(0), false);
-//         assert_eq!(state, State::Off { off_time: 100 });
-//         assert_eq!(state.on_event(200), true);
-//         assert_eq!(
-//             state,
-//             State::On {
-//                 off_time: 100,
-//                 on_time: 200
-//             }
-//         );
-
-//         assert_eq!(state.on_event(200), false);
-//         assert_eq!(
-//             state,
-//             State::On {
-//                 off_time: 100,
-//                 on_time: 200
-//             }
-//         );
-
-//         state = State::Unknown;
-
-//         assert_eq!(state.off_event(1000, 50.0), None);
-//         assert_eq!(state, State::Off { off_time: 1000 });
-//         assert_eq!(state.off_event(1100, 50.0), None);
-//         assert_eq!(state, State::Off { off_time: 1000 });
-
-//         state = State::On {
-//             off_time: 1000,
-//             on_time: 101000,
-//         };
-
-//         assert_eq!(state.off_event(1000, 50.0), None);
-//         assert_eq!(state, State::Off { off_time: 1000 });
-
-//         state = State::On {
-//             off_time: 1000,
-//             on_time: 101000,
-//         };
-
-//         assert_eq!(state.off_event(101500, 50.0), None);
-//         assert_eq!(
-//             state,
-//             State::On {
-//                 off_time: 1000,
-//                 on_time: 101000
-//             }
-//         );
-
-//         assert!(state.off_event(101501, 50.0).is_some());
-//         assert_eq!(state, State::Off { off_time: 101501 });
-
-//         state = State::On {
-//             off_time: 0,
-//             on_time: 540000,
-//         };
-
-//         assert_eq!(state.off_event(600000, 50.0), Some((600000, 10.0, 5.0)));
-//         assert_eq!(state, State::Off { off_time: 600000 });
-
-//         state = State::On {
-//             off_time: 0,
-//             on_time: 54000,
-//         };
-
-//         assert_eq!(state.off_event(60000, 60.0), Some((60000, 10.0, 6.0)));
-//         assert_eq!(state, State::Off { off_time: 60000 });
-//     }
-// }
