@@ -12,10 +12,9 @@
 use async_trait::async_trait;
 use chrono::*;
 use drmem_api::{
-    client,
+    client, device,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
-    types::{device, Error},
-    Result, Store,
+    Error, Result, Store,
 };
 use std::collections::{hash_map, HashMap};
 use std::{
@@ -454,7 +453,7 @@ impl Store for SimpleStore {
 #[cfg(test)]
 mod tests {
     use crate::{mk_report_func, DeviceInfo, SimpleStore};
-    use drmem_api::{types::device, Store};
+    use drmem_api::{device, Store};
     use std::{collections::HashMap, time};
     use tokio::sync::{mpsc::error::TryRecvError, oneshot};
     use tokio::time::interval;

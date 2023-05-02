@@ -1,8 +1,5 @@
 use chrono::prelude::*;
-use drmem_api::{
-    client,
-    types::{device, Error},
-};
+use drmem_api::{client, device, Error};
 use futures::Future;
 use juniper::{
     self, executor::FieldError, graphql_subscription, graphql_value,

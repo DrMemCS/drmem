@@ -1,7 +1,7 @@
 use drmem_api::{
+    device,
     driver::{self, DriverConfig},
-    types::{device, Error},
-    Result,
+    Error, Result,
 };
 use std::{convert::Infallible, future::Future, pin::Pin};
 use tokio_stream::StreamExt;

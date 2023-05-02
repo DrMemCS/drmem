@@ -112,8 +112,8 @@ Expr -> Result<Expr>:
 Factor -> Result<Expr>:
       "B_NOT" Factor { Ok(Expr::Not(Box::new($2?))) }
     | "(" OrExpr ")" { $2 }
-    | "TRUE" { Ok(Expr::Lit(Value::Bool(true))) }
-    | "FALSE" { Ok(Expr::Lit(Value::Bool(false))) }
+    | "TRUE" { Ok(Expr::Lit(device::Value::Bool(true))) }
+    | "FALSE" { Ok(Expr::Lit(device::Value::Bool(false))) }
     | "INT"
       {
           let v = $1.map_err(|_| Error::ParseError(
@@ -137,7 +137,7 @@ Factor -> Result<Expr>:
             ))?;
 	let s = $lexer.span_str(v.span());
 
-	Ok(Expr::Lit(Value::Str(s[1..s.len() - 1].to_string())))
+	Ok(Expr::Lit(device::Value::Str(s[1..s.len() - 1].to_string())))
     }
     | Device { $1 }
     ;
@@ -160,14 +160,14 @@ Unknown -> ():
 
 %%
 
-use drmem_api::{Result, types::{Error, device::Value}};
+use drmem_api::{Result, Error, device};
 use super::{Expr, Program};
 
 // Any functions here are in scope for all the grammar actions above.
 
 fn parse_int(s: &str) -> Result<Expr> {
     s.parse::<i32>()
-	.map(|v| Expr::Lit(Value::Int(v)))
+	.map(|v| Expr::Lit(device::Value::Int(v)))
 	.map_err(|_| Error::ParseError(
 	     format!("{} cannot be represented as an i32", s)
 	))
@@ -175,7 +175,7 @@ fn parse_int(s: &str) -> Result<Expr> {
 
 fn parse_flt(s: &str) -> Result<Expr> {
     s.parse::<f64>()
-	.map(|v| Expr::Lit(Value::Flt(v)))
+	.map(|v| Expr::Lit(device::Value::Flt(v)))
 	.map_err(|_| Error::ParseError(
 	     format!("{} cannot be represented as an f64", s)
 	))

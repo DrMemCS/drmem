@@ -1,7 +1,7 @@
 use drmem_api::{
+    device,
     driver::{self, DriverConfig},
-    types::{device, Error},
-    Result,
+    Error, Result,
 };
 use std::future::Future;
 use std::{convert::Infallible, pin::Pin};

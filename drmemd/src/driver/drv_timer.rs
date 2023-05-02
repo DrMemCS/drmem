@@ -1,7 +1,7 @@
 use drmem_api::{
+    device,
     driver::{self, DriverConfig},
-    types::{device::Base, Error},
-    Result,
+    Error, Result,
 };
 use std::{convert::Infallible, future::Future, pin::Pin};
 use tokio::time;
@@ -181,8 +181,8 @@ impl driver::API for Instance {
         cfg: &DriverConfig, core: driver::RequestChan,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
-        let output_name = "output".parse::<Base>().unwrap();
-        let enable_name = "enable".parse::<Base>().unwrap();
+        let output_name = "output".parse::<device::Base>().unwrap();
+        let enable_name = "enable".parse::<device::Base>().unwrap();
 
         let millis = Instance::get_cfg_millis(cfg);
         let level = Instance::get_cfg_level(cfg);

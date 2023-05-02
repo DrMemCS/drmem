@@ -1,11 +1,4 @@
-use drmem_api::{
-    client, driver,
-    types::{
-        device::{DataStream, Name, Reading, Value},
-        Error,
-    },
-    Result,
-};
+use drmem_api::{client, device, driver, Error, Result};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -22,7 +15,7 @@ mod compile;
 // The logic node will contain an array of these types. As readings
 // come in, they'll be saved in this array.
 
-type Inputs = Option<Value>;
+type Inputs = Option<device::Value>;
 
 // This is an array of channels in which settings are sent.
 
@@ -30,7 +23,7 @@ type Outputs = driver::TxDeviceSetting;
 
 // This is a set of streams that receives all the readings.
 
-type InputStream = StreamMap<usize, DataStream<Reading>>;
+type InputStream = StreamMap<usize, device::DataStream<device::Reading>>;
 
 pub struct Node {
     inputs: Vec<Inputs>,
@@ -50,7 +43,7 @@ impl Node {
     // 2) A chained set of streams which provide the readings.
 
     async fn setup_inputs(
-        c_req: &client::RequestChan, vars: &HashMap<String, Name>,
+        c_req: &client::RequestChan, vars: &HashMap<String, device::Name>,
     ) -> Result<(Vec<String>, InputStream)> {
         let mut inputs = Vec::with_capacity(vars.len());
         let mut in_stream = StreamMap::with_capacity(vars.len());
@@ -78,7 +71,7 @@ impl Node {
     }
 
     async fn setup_outputs(
-        c_req: &client::RequestChan, vars: &HashMap<String, Name>,
+        c_req: &client::RequestChan, vars: &HashMap<String, device::Name>,
     ) -> Result<(Vec<String>, Vec<driver::TxDeviceSetting>)> {
         let mut outputs = Vec::with_capacity(vars.len());
         let mut out_chans = Vec::with_capacity(vars.len());

@@ -1,5 +1,5 @@
 use super::store;
-use drmem_api::{client, driver, types::Error, Result, Store};
+use drmem_api::{client, driver, Error, Result, Store};
 use std::convert::Infallible;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{info, info_span, warn};
