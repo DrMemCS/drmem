@@ -1,11 +1,11 @@
-use std::time::Duration;
 use std::{convert::Infallible, pin::Pin};
-use std::{future::Future, net::Ipv4Addr, net::SocketAddrV4};
-use tracing::{error, info};
+use std::{future::Future, net::Ipv4Addr};
+use tracing::{error};
 
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use tokio::time::{interval_at, Duration, Instant};
 
 use drmem_api::{
     driver::{self, DriverConfig},
@@ -16,9 +16,8 @@ use drmem_api::{
 #[derive(Debug, PartialEq)]
 enum DriverState {
     Unknown,  // Initialized, but no state reported
-    UpToDate, // Data received
-    Stale,    // Data received, but haven't updated since last cycle
-    TimedOut, // No response in the given time
+    Ok, // Data received
+    Error,    // Data received, but haven't updated since last cycle
 }
 
 #[derive(Debug, Serialize_repr, Deserialize_repr, Clone, Copy)]
@@ -45,7 +44,7 @@ struct LightState {
 pub struct Instance {
     state: DriverState,
     addr: Ipv4Addr,
-    light_state: LightState,
+    // light_state: LightState,
     d_on: driver::ReportReading<i16>,
     // rx_set_on: driver::RxDeviceSetting,
     // d_brightness: u8,
@@ -153,7 +152,7 @@ impl driver::API for Instance {
             Ok(Box::new(Instance {
                 state: DriverState::Unknown,
                 addr,
-                light_state,
+                // light_state,
                 d_on,
                 // rx_set_on,
                 // d_brightness,
@@ -170,14 +169,22 @@ impl driver::API for Instance {
         &'a mut self,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
+            let mut timer = interval_at(Instant::now(), Duration::from_millis(1000));
+
             loop {
+                // Wait for the next sample time.
+
+                timer.tick().await;
+
                 match self.get_light_status().await {
                     Ok(status) => {
                         // (self.light_state)(status).await;
                         (self.d_on)(status.lights[0].on as i16).await;
+                        self.state = DriverState::Ok;
                     }
 
                     Err(e) => {
+                        self.state = DriverState::Error;
                         // (self.d_state)(false.into()).await;
                         panic!("couldn't read light state -- {:?}", e);
                     }
