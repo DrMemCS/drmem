@@ -230,6 +230,11 @@ impl driver::API for Instance {
                         };
                         reply(Ok(v.clone()));
                         self.set_light_state(status).await;
+
+                        if on != Some(v) {
+                            (self.d_on)(v).await;
+                            on = Some(v);
+                        }
                     }
 
                     Some((v, reply)) = self.s_brightness.next() => {
@@ -248,6 +253,11 @@ impl driver::API for Instance {
                         status.lights[0].brightness = clamped_brightness;
                         reply(Ok(clamped_brightness.clone()));
                         self.set_light_state(status).await;
+
+                        if brightness != Some(clamped_brightness) {
+                            (self.d_brightness)(clamped_brightness).await;
+                            brightness = Some(clamped_brightness);
+                        }
                     }
 
                     Some((v, reply)) = self.s_temperature.next() => {
@@ -278,6 +288,11 @@ impl driver::API for Instance {
                         status.lights[0].temperature = v;
                         reply(Ok(v.clone()));
                         self.set_light_state(status).await;
+
+                        if temperature != Some(v) {
+                            (self.d_temperature)(v).await;
+                            temperature = Some(v);
+                        }
                     }
                 }
             }
