@@ -5,8 +5,6 @@ authors = ["Beau Harrison <beauharrison@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-dialoguer = "0.10.4"
-mdns-sd = "0.7.2"
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"]}
 serde_repr = "0.1"
