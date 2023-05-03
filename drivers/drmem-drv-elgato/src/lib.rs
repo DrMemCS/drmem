@@ -43,6 +43,7 @@ struct LightState {
 pub struct Instance {
     state: DriverState,
     addr: Ipv4Addr,
+    poll_interval: Duration,
     d_on: driver::ReportReading<bool>,
     s_on: driver::SettingStream<bool>,
     d_brightness: driver::ReportReading<u16>,
@@ -62,8 +63,7 @@ impl Instance {
         format!("http://{}:9123/elgato/lights", address)
     }
 
-    // Attempts to pull the hostname/port for the remote process.
-
+    // Attempts to pull the hostname for the light.
     fn get_cfg_address(cfg: &DriverConfig) -> Result<Ipv4Addr> {
         match cfg.get("addr") {
             Some(toml::value::Value::String(addr)) => {
@@ -75,6 +75,19 @@ impl Instance {
             }
             Some(_) => error!("'addr' config parameter should be a string"),
             None => error!("missing 'addr' parameter in config"),
+        }
+
+        Err(Error::BadConfig)
+    }
+
+    // Attempts to pull the poll interval for the light.
+    fn get_cfg_poll_interval(cfg: &DriverConfig) -> Result<Duration> {
+        match cfg.get("poll_interval") {
+            Some(toml::value::Value::Integer(interval)) => {
+                return Ok(Duration::from_millis(*interval as u64));
+            }
+            Some(_) => error!("'poll_interval' config parameter should be an integer"),
+            None => return Ok(Duration::from_millis(3000)),
         }
 
         Err(Error::BadConfig)
@@ -111,9 +124,11 @@ impl driver::API for Instance {
         Box<dyn Future<Output = Result<driver::DriverType>> + Send + 'static>,
     > {
         let addr = Instance::get_cfg_address(cfg);
+        let poll_interval = Instance::get_cfg_poll_interval(cfg);
 
         let fut = async move {
             let addr = addr?;
+            let poll_interval = poll_interval?;
 
             // Define the devices managed by this driver.
             let (d_on, s_on, _) = core
@@ -137,6 +152,7 @@ impl driver::API for Instance {
             Ok(Box::new(Instance {
                 state: DriverState::Unknown,
                 addr,
+                poll_interval,
                 d_on,
                 s_on,
                 d_brightness,
@@ -154,6 +170,7 @@ impl driver::API for Instance {
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
             let mut timer =
+                interval_at(Instant::now(), self.poll_interval);
             let mut on: Option<bool> = None;
             let mut brightness: Option<u16> = None;
             let mut temperature: Option<u16> = None;
