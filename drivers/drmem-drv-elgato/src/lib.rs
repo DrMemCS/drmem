@@ -86,7 +86,9 @@ impl Instance {
             Some(toml::value::Value::Integer(interval)) => {
                 return Ok(Duration::from_millis(*interval as u64));
             }
-            Some(_) => error!("'poll_interval' config parameter should be an integer"),
+            Some(_) => {
+                error!("'poll_interval' config parameter should be an integer")
+            }
             None => return Ok(Duration::from_millis(3000)),
         }
 
@@ -169,8 +171,7 @@ impl driver::API for Instance {
         &'a mut self,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
-            let mut timer =
-                interval_at(Instant::now(), self.poll_interval);
+            let mut timer = interval_at(Instant::now(), self.poll_interval);
             let mut on: Option<bool> = None;
             let mut brightness: Option<u16> = None;
             let mut temperature: Option<u16> = None;
