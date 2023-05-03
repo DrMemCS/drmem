@@ -101,20 +101,23 @@ impl Instance {
         // The API requires that we send the entire struct back
         let url = Instance::_gen_url(self.addr);
 
-        match reqwest::get(url).await?.json::<LightState>().await {
-            Err(error) => panic!("Problem getting light status: {:?}", error),
-            Ok(status) => Ok(status),
-        }
+        reqwest::get(url)
+            .await?
+            .json::<LightState>()
+            .await
+            .map_err(|e| e.into())
     }
 
-    async fn set_light_state(&mut self, status: LightState) {
+    async fn set_light_state(
+        &mut self, status: LightState,
+    ) -> Result<reqwest::Response> {
         // Make a PUT request to toggle the light power
         reqwest::Client::new()
             .put(&Instance::_gen_url(self.addr))
             .json(&status)
             .send()
             .await
-            .ok();
+            .map_err(|e| e.into())
     }
 }
 
@@ -207,12 +210,10 @@ impl driver::API for Instance {
                                 }
 
                                 self.state = DriverState::Ok;
-                                status
                             }
 
-                            Err(e) => {
+                            Err(_) => {
                                 self.state = DriverState::Error;
-                                panic!("couldn't read light state -- {:?}", e);
                             }
                         };
                     }
@@ -224,16 +225,25 @@ impl driver::API for Instance {
                                 panic!("couldn't read light state -- {:?}", e)
                             }
                         };
+
                         match v {
                             false => status.lights[0].on = Power::Off,
                             true => status.lights[0].on = Power::On,
                         };
-                        reply(Ok(v.clone()));
-                        self.set_light_state(status).await;
 
-                        if on != Some(v) {
-                            (self.d_on)(v).await;
-                            on = Some(v);
+                        match self.set_light_state(status).await {
+                            Ok(_) => {
+                                reply(Ok(v.clone()));
+
+                                if on != Some(v) {
+                                    (self.d_on)(v).await;
+                                    on = Some(v);
+                                }
+                            },
+                            Err(_) => {
+                                reply(Err(Error::BadConfig));
+                                self.state = DriverState::Error;
+                            }
                         }
                     }
 
@@ -250,14 +260,25 @@ impl driver::API for Instance {
                                 panic!("couldn't read light state -- {:?}", e)
                             }
                         };
-                        status.lights[0].brightness = clamped_brightness;
-                        reply(Ok(clamped_brightness.clone()));
-                        self.set_light_state(status).await;
 
-                        if brightness != Some(clamped_brightness) {
-                            (self.d_brightness)(clamped_brightness).await;
-                            brightness = Some(clamped_brightness);
+                        status.lights[0].brightness = clamped_brightness;
+
+                        match self.set_light_state(status).await {
+                            Ok(_) => {
+                                reply(Ok(clamped_brightness.clone()));
+
+                                if brightness != Some(clamped_brightness) {
+                                    (self.d_brightness)(clamped_brightness).await;
+                                    brightness = Some(clamped_brightness);
+                                }
+                            },
+                            Err(_) => {
+                                reply(Err(Error::BadConfig));
+                                self.state = DriverState::Error;
+                            }
                         }
+
+
                     }
 
                     Some((v, reply)) = self.s_temperature.next() => {
@@ -285,14 +306,24 @@ impl driver::API for Instance {
                                 panic!("couldn't read light state -- {:?}", e)
                             }
                         };
-                        status.lights[0].temperature = v;
-                        reply(Ok(v.clone()));
-                        self.set_light_state(status).await;
 
-                        if temperature != Some(v) {
-                            (self.d_temperature)(v).await;
-                            temperature = Some(v);
+                        status.lights[0].temperature = v;
+
+                        match self.set_light_state(status).await {
+                            Ok(_) => {
+                                reply(Ok(v.clone()));
+
+                                if temperature != Some(v) {
+                                    (self.d_temperature)(v).await;
+                                    temperature = Some(v);
+                                }
+                            },
+                            Err(_) => {
+                                reply(Err(Error::BadConfig));
+                                self.state = DriverState::Error;
+                            }
                         }
+
                     }
                 }
             }
