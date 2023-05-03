@@ -1,0 +1,15 @@
+# Sets the default log level. Can be 'warn', 'info', 'debug', or
+# 'trace'.
+
+log_level = "debug"
+
+# This section starts the driver configuration. Since this section is
+# an array of tables, these drivers will be initialized in order of
+# definition. If there are dependencies between drivers, make sure
+# they're properly ordered.
+
+[[driver]]
+
+name = "Elgato"
+prefix = "Elgato"
+cfg = { addr = "192.168.86.24"}
