@@ -120,12 +120,16 @@ impl driver::API for Instance {
                 .add_rw_device("on".parse::<Base>()?, None, max_history)
                 .await?;
             let (d_brightness, s_brightness, _) = core
-                .add_rw_device("brightness".parse::<Base>()?, None, max_history)
+                .add_rw_device(
+                    "brightness".parse::<Base>()?,
+                    Some("%"),
+                    max_history,
+                )
                 .await?;
             let (d_temperature, s_temperature, _) = core
                 .add_rw_device(
                     "temperature".parse::<Base>()?,
-                    None,
+                    Some("K"),
                     max_history,
                 )
                 .await?;
