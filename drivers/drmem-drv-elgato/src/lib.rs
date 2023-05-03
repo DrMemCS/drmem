@@ -154,80 +154,113 @@ impl driver::API for Instance {
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async {
             let mut timer =
-                interval_at(Instant::now(), Duration::from_millis(1000));
+            let mut on: Option<bool> = None;
+            let mut brightness: Option<u16> = None;
+            let mut temperature: Option<u16> = None;
 
+            // https://github.com/adamesch/elgato-key-light-api/tree/master/resources/lights
+            // This doc was useful for figuring out the API
             loop {
-                // Wait for the next sample time.
-                timer.tick().await;
+                tokio::select! {
+                    // Wait for the next sample time.
+                    _ = timer.tick() => {
+                        match self.get_light_status().await {
+                            Ok(status) => {
+                                let new_on = Some(match status.lights[0].on {
+                                    Power::Off => false,
+                                    Power::On => true,
+                                });
+                                let new_brightness = Some(status.lights[0].brightness as u16);
+                                let new_temperature = Some(status.lights[0].temperature as u16);
 
-                match self.get_light_status().await {
-                    Ok(status) => {
-                        // (self.light_state)(status).await;
-                        (self.d_on)(match status.lights[0].on {
-                            Power::Off => false,
-                            Power::On => true,
-                        })
-                        .await;
-                        (self.d_brightness)(status.lights[0].brightness as u16)
-                            .await;
-                        (self.d_temperature)(
-                            status.lights[0].temperature as u16,
-                        )
-                        .await;
-                        self.state = DriverState::Ok;
-                        status
+                                if on != new_on {
+                                    (self.d_on)(new_on.unwrap()).await;
+                                    on = new_on;
+                                }
+
+                                if brightness != new_brightness {
+                                    (self.d_brightness)(new_brightness.unwrap()).await;
+                                    brightness = new_brightness;
+                                }
+
+                                if temperature != new_temperature {
+                                    (self.d_temperature)(new_temperature.unwrap()).await;
+                                    temperature = new_temperature;
+                                }
+
+                                self.state = DriverState::Ok;
+                                status
+                            }
+
+                            Err(e) => {
+                                self.state = DriverState::Error;
+                                panic!("couldn't read light state -- {:?}", e);
+                            }
+                        };
                     }
 
-                    Err(e) => {
-                        self.state = DriverState::Error;
-                        // (self.d_state)(false.into()).await;
-                        panic!("couldn't read light state -- {:?}", e);
+                    Some((v, reply)) = self.s_on.next() => {
+                        let mut status = match self.get_light_status().await {
+                            Ok(status) => status,
+                            Err(e) => {
+                                panic!("couldn't read light state -- {:?}", e)
+                            }
+                        };
+                        match v {
+                            false => status.lights[0].on = Power::Off,
+                            true => status.lights[0].on = Power::On,
+                        };
+                        reply(Ok(v.clone()));
+                        self.set_light_state(status).await;
                     }
-                };
 
-                if let Some((v, reply)) = self.s_on.next().await {
-                    reply(Ok(v.clone()));
-                    let mut status = match self.get_light_status().await {
-                        Ok(status) => status,
-                        Err(e) => {
-                            panic!("couldn't read light state -- {:?}", e)
-                        }
-                    };
-                    match v {
-                        false => status.lights[0].on = Power::Off,
-                        true => status.lights[0].on = Power::On,
-                    };
-                    self.set_light_state(status).await
-                } else {
-                    panic!("can no longer receive settings");
-                }
+                    Some((v, reply)) = self.s_brightness.next() => {
+                        // Clamp the brightness to the range 3-100
+                        let clamped_brightness = match v {
+                            v if v < 3 => 3,
+                            v if v > 100 => 100,
+                            v => v,
+                        };
+                        let mut status = match self.get_light_status().await {
+                            Ok(status) => status,
+                            Err(e) => {
+                                panic!("couldn't read light state -- {:?}", e)
+                            }
+                        };
+                        status.lights[0].brightness = clamped_brightness;
+                        reply(Ok(clamped_brightness.clone()));
+                        self.set_light_state(status).await;
+                    }
 
-                if let Some((v, reply)) = self.s_brightness.next().await {
-                    reply(Ok(v.clone()));
-                    let mut status = match self.get_light_status().await {
-                        Ok(status) => status,
-                        Err(e) => {
-                            panic!("couldn't read light state -- {:?}", e)
-                        }
-                    };
-                    status.lights[0].brightness = v;
-                    self.set_light_state(status).await
-                } else {
-                    panic!("can no longer receive settings");
-                }
+                    Some((v, reply)) = self.s_temperature.next() => {
+                        // Clamp the temperature to the range 2900-7000
+                        // This can only be adjusted in 50K increments
+                        // The light API uses scaled values, so we need to
+                        // divide 1_000_000 by the temperature
+                        // and then round to the nearest natural number
+                        let clamped_temperature = match v {
+                            v if v < 2900 => 2900,
+                            v if v > 7000 => 7000,
+                            v => v,
+                        };
+                        // This is wrong because 2900K results in 345
+                        // which is out of the bounds of the scaled values
+                        // 143-344, but it will work for all other clamped
+                        // Kelvin values
+                        // The light clamps this value as well, so we don't
+                        // need to worry about it
+                        let v = (1_000_000.0 / clamped_temperature as f32).round() as u16;
 
-                if let Some((v, reply)) = self.s_temperature.next().await {
-                    reply(Ok(v.clone()));
-                    let mut status = match self.get_light_status().await {
-                        Ok(status) => status,
-                        Err(e) => {
-                            panic!("couldn't read light state -- {:?}", e)
-                        }
-                    };
-                    status.lights[0].temperature = v;
-                    self.set_light_state(status).await
-                } else {
-                    panic!("can no longer receive settings");
+                        let mut status = match self.get_light_status().await {
+                            Ok(status) => status,
+                            Err(e) => {
+                                panic!("couldn't read light state -- {:?}", e)
+                            }
+                        };
+                        status.lights[0].temperature = v;
+                        reply(Ok(v.clone()));
+                        self.set_light_state(status).await;
+                    }
                 }
             }
         };
