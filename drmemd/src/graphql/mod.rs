@@ -355,7 +355,7 @@ impl Control {
 			     or more than one field non-`null`.")]
     async fn set_device(
         #[graphql(context)] db: &ConfigDb, name: String, value: SettingData,
-    ) -> FieldResult<Option<bool>> {
+    ) -> FieldResult<Reading> {
         match value {
             SettingData {
                 f_int: None,
@@ -369,28 +369,72 @@ impl Control {
                 f_float: None,
                 f_bool: None,
                 f_string: None,
-            } => Control::perform_setting(db, &name, v).await.map(|_| None),
+            } => {
+                Control::perform_setting(db, &name, v)
+                    .await
+                    .map(|v| Reading {
+                        device: name,
+                        stamp: Utc::now(),
+                        int_value: Some(v),
+                        float_value: None,
+                        bool_value: None,
+                        string_value: None,
+                    })
+            }
 
             SettingData {
                 f_int: None,
                 f_float: Some(v),
                 f_bool: None,
                 f_string: None,
-            } => Control::perform_setting(db, &name, v).await.map(|_| None),
+            } => {
+                Control::perform_setting(db, &name, v)
+                    .await
+                    .map(|v| Reading {
+                        device: name,
+                        stamp: Utc::now(),
+                        int_value: None,
+                        float_value: Some(v),
+                        bool_value: None,
+                        string_value: None,
+                    })
+            }
 
             SettingData {
                 f_int: None,
                 f_float: None,
                 f_bool: Some(v),
                 f_string: None,
-            } => Control::perform_setting(db, &name, v).await.map(|_| None),
+            } => {
+                Control::perform_setting(db, &name, v)
+                    .await
+                    .map(|v| Reading {
+                        device: name,
+                        stamp: Utc::now(),
+                        int_value: None,
+                        float_value: None,
+                        bool_value: Some(v),
+                        string_value: None,
+                    })
+            }
 
             SettingData {
                 f_int: None,
                 f_float: None,
                 f_bool: None,
                 f_string: Some(v),
-            } => Control::perform_setting(db, &name, v).await.map(|_| None),
+            } => {
+                Control::perform_setting(db, &name, v)
+                    .await
+                    .map(|v| Reading {
+                        device: name,
+                        stamp: Utc::now(),
+                        int_value: None,
+                        float_value: None,
+                        bool_value: None,
+                        string_value: Some(v),
+                    })
+            }
 
             SettingData { .. } => Err(FieldError::new(
                 "must only specify one item of data",
