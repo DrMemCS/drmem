@@ -406,8 +406,16 @@ impl Store for SimpleStore {
                         }
                     }
                     (Some(start_tmp), Some(end_tmp)) => {
-                        let start = std::cmp::min(start_tmp, end_tmp);
-                        let end = std::cmp::max(start_tmp, end_tmp);
+                        // Make sure the `start` time is before the
+                        // `end` time.
+
+                        let start: time::SystemTime =
+                            std::cmp::min(start_tmp, end_tmp);
+                        let end: time::SystemTime =
+                            std::cmp::max(start_tmp, end_tmp);
+
+                        // Define predicates for filters.
+
                         let valid = move |v: &device::Reading| v.ts >= start;
                         let not_end = move |v: &device::Reading| v.ts <= end;
 
