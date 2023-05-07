@@ -4,7 +4,8 @@ use drmem_api::{
     Error, Result,
 };
 use std::convert::{Infallible, TryFrom};
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, sync::Arc};
+use tokio::sync::Mutex;
 use tokio::time::{interval_at, Duration, Instant};
 use tracing::{debug, error, warn, Span};
 use weather_underground as wu;
@@ -14,13 +15,13 @@ const MIN_PUBLIC_INTERVAL: u64 = 10;
 
 pub struct Instance {
     con: reqwest::Client,
-    station: String,
     api_key: String,
     interval: Duration,
-    units: wu::Unit,
+}
 
-    precip_int: f64,
-    prev_precip_total: Option<f64>,
+pub struct Devices {
+    station: String,
+    units: wu::Unit,
 
     d_dewpt: driver::ReportReading<f64>,
     d_htidx: driver::ReportReading<f64>,
@@ -123,12 +124,15 @@ impl Instance {
     // correct device channel. It also does some sanity checks on the
     // values.
 
-    async fn handle(&mut self, obs: &wu::Observation) {
+    async fn handle(
+        &mut self, obs: &wu::Observation,
+        devices: &<Instance as driver::API>::DeviceSet,
+    ) {
         // Retreive all the parameters whose units can change between
         // English and Metric.
 
         let (dewpt, htidx, prate, ptotal, press, temp, wndchl, wndgst, wndspd) =
-            if let wu::Unit::Metric = self.units {
+            if let wu::Unit::Metric = devices.units {
                 if let Some(params) = &obs.metric {
                     (
                         params.dewpt,
@@ -162,7 +166,7 @@ impl Instance {
 
         if let Some(dewpt) = dewpt {
             if (0.0..=200.0).contains(&dewpt) {
-                (self.d_dewpt)(dewpt).await
+                (devices.d_dewpt)(dewpt).await
             } else {
                 warn!("ignoring bad dew point value: {:.1}", dewpt)
             }
@@ -170,7 +174,7 @@ impl Instance {
 
         if let Some(htidx) = htidx {
             if (0.0..=200.0).contains(&htidx) {
-                (self.d_htidx)(htidx).await
+                (devices.d_htidx)(htidx).await
             } else {
                 warn!("ignoring bad heat index value: {:.1}", htidx)
             }
@@ -178,57 +182,34 @@ impl Instance {
 
         if let (Some(prate), Some(ptotal)) = (prate, ptotal) {
             if (0.0..=24.0).contains(&prate) {
-                (self.d_prate)(prate).await
+                (devices.d_prate)(prate).await
             } else {
                 warn!("ignoring bad precip rate: {:.2}", prate)
             }
 
-            if ptotal >= 0.0 {
-                if let Some(prev_total) = self.prev_precip_total {
-                    if ptotal > prev_total {
-                        debug!(
-                            "precip calc: {} > {} ... adding {}",
-                            ptotal,
-                            prev_total,
-                            ptotal - prev_total
-                        );
-                        self.precip_int += ptotal - prev_total
-                    } else if ptotal < prev_total {
-                        debug!("precip calc: {} < {} (sum was reset?) ... adding {}",
-			       ptotal, prev_total, ptotal);
-                        self.precip_int += ptotal
-                    } else if prate == 0.0 {
-                        debug!("precip calc: stable sum, no rain ... resetting sum");
-                        self.precip_int = 0.0
-                    }
-                    (self.d_ptotal)(self.precip_int).await
-                }
-                self.prev_precip_total = Some(ptotal);
-            } else {
-                warn!("ignoring bad precip total: {:.2}", ptotal)
-            }
+            (devices.d_ptotal)(ptotal).await
         } else {
             warn!("need both precip fields to update precip calculations")
         }
 
         if let Some(press) = press {
-            (self.d_pressure)(press).await
+            (devices.d_pressure)(press).await
         }
 
         if let Some(temp) = temp {
-            (self.d_temp)(temp).await
+            (devices.d_temp)(temp).await
         }
 
         if let Some(wndchl) = wndchl {
-            (self.d_wndchl)(wndchl).await
+            (devices.d_wndchl)(wndchl).await
         }
 
         if let Some(wndgst) = wndgst {
-            (self.d_wndgst)(wndgst).await
+            (devices.d_wndgst)(wndgst).await
         }
 
         if let Some(wndspd) = wndspd {
-            (self.d_wndspd)(wndspd).await
+            (devices.d_wndspd)(wndspd).await
         }
 
         // If solar radiation readings are provided, report them.
@@ -240,7 +221,7 @@ impl Instance {
             // slightly inaccurate sensors won't be ignored.
 
             if (0.0..=1400.0).contains(&sol_rad) {
-                (self.d_solrad)(sol_rad).await
+                (devices.d_solrad)(sol_rad).await
             } else {
                 warn!("ignoring bad solar radiation value: {:.1}", sol_rad)
             }
@@ -253,7 +234,7 @@ impl Instance {
             // doubtful there's a place on earth that gets that low.
 
             if (0.0..=100.0).contains(&humidity) {
-                (self.d_humidity)(humidity).await
+                (devices.d_humidity)(humidity).await
             } else {
                 warn!("ignoring bad humidity value: {:.1}", humidity)
             }
@@ -262,7 +243,7 @@ impl Instance {
         // If UV readings are provided, report them.
 
         if let Some(uv) = obs.uv {
-            (self.d_uv)(uv).await
+            (devices.d_uv)(uv).await
         }
 
         // If wind direction readings are provided, report them.
@@ -271,7 +252,7 @@ impl Instance {
             // Make sure the reading is in range.
 
             if (0.0..=360.0).contains(&winddir) {
-                (self.d_wnddir)(winddir).await
+                (devices.d_wnddir)(winddir).await
             } else {
                 warn!("ignoring bad wind direction value: {:.1}", winddir)
             }
@@ -280,10 +261,12 @@ impl Instance {
 }
 
 impl driver::API for Instance {
-    fn create_instance(
-        cfg: &DriverConfig, core: driver::RequestChan,
+    type DeviceSet = Devices;
+
+    fn register_devices(
+        core: driver::RequestChan, cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();
         let heat_index_name = "heat-index".parse::<device::Base>().unwrap();
         let humidity_name = "humidity".parse::<device::Base>().unwrap();
@@ -298,10 +281,119 @@ impl driver::API for Instance {
         let wind_dir_name = "wind-dir".parse::<device::Base>().unwrap();
         let wind_gust_name = "wind-gust".parse::<device::Base>().unwrap();
         let wind_speed_name = "wind-speed".parse::<device::Base>().unwrap();
-        debug!("reading config parameters");
 
         let station = Instance::get_cfg_station(cfg);
         let units = Instance::get_cfg_units(cfg);
+
+        Box::pin(async move {
+            let station = station?;
+            let units = units?;
+
+            let temp_unit = Some(if let wu::Unit::English = units {
+                "°F"
+            } else {
+                "°C"
+            });
+            let speed_unit = Some(if let wu::Unit::English = units {
+                "mph"
+            } else {
+                "km/h"
+            });
+
+            let (d_dewpt, _) = core
+                .add_ro_device(dewpoint_name, temp_unit, max_history)
+                .await?;
+            let (d_htidx, _) = core
+                .add_ro_device(heat_index_name, temp_unit, max_history)
+                .await?;
+            let (d_humidity, _) = core
+                .add_ro_device(humidity_name, Some("%"), max_history)
+                .await?;
+            let (d_prate, _) = core
+                .add_ro_device(
+                    precip_rate_name,
+                    Some(if let wu::Unit::English = units {
+                        "in/hr"
+                    } else {
+                        "mm/hr"
+                    }),
+                    max_history,
+                )
+                .await?;
+
+            let (d_ptotal, _) = core
+                .add_ro_device(
+                    precip_total_name,
+                    Some(if let wu::Unit::English = units {
+                        "in"
+                    } else {
+                        "mm"
+                    }),
+                    max_history,
+                )
+                .await?;
+
+            let (d_pressure, _) = core
+                .add_ro_device(
+                    pressure_name,
+                    Some(if let wu::Unit::English = units {
+                        "inHg"
+                    } else {
+                        "hPa"
+                    }),
+                    max_history,
+                )
+                .await?;
+
+            let (d_solrad, _) = core
+                .add_ro_device(solar_rad_name, Some("W/m²"), max_history)
+                .await?;
+            let (d_state, _) =
+                core.add_ro_device(state_name, None, max_history).await?;
+            let (d_temp, _) = core
+                .add_ro_device(temperature_name, temp_unit, max_history)
+                .await?;
+            let (d_uv, _) =
+                core.add_ro_device(uv_name, None, max_history).await?;
+            let (d_wndchl, _) = core
+                .add_ro_device(wind_chill_name, temp_unit, max_history)
+                .await?;
+            let (d_wnddir, _) = core
+                .add_ro_device(wind_dir_name, Some("°"), max_history)
+                .await?;
+            let (d_wndgst, _) = core
+                .add_ro_device(wind_gust_name, speed_unit, max_history)
+                .await?;
+            let (d_wndspd, _) = core
+                .add_ro_device(wind_speed_name, speed_unit, max_history)
+                .await?;
+
+            Ok(Devices {
+                station,
+                units,
+                d_dewpt,
+                d_htidx,
+                d_humidity,
+                d_prate,
+                d_ptotal,
+                d_pressure,
+                d_solrad,
+                d_state,
+                d_temp,
+                d_uv,
+                d_wndchl,
+                d_wnddir,
+                d_wndgst,
+                d_wndspd,
+            })
+        })
+    }
+
+    fn create_instance(
+        cfg: &DriverConfig,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+        debug!("reading config parameters");
+
         let interval = Instance::get_cfg_interval(cfg);
         let key = Instance::get_cfg_key(cfg);
 
@@ -310,106 +402,11 @@ impl driver::API for Instance {
                 Ok(mut con) => {
                     // Validate the driver parameters.
 
-                    let station = station?;
-                    let units = units?;
-
                     let (api_key, interval) =
                         Instance::get_cfg_key_and_interval(
                             &mut con, key?, interval?,
                         )
                         .await?;
-
-                    let temp_unit = Some(if let wu::Unit::English = units {
-                        "°F"
-                    } else {
-                        "°C"
-                    });
-                    let speed_unit = Some(if let wu::Unit::English = units {
-                        "mph"
-                    } else {
-                        "km/h"
-                    });
-
-                    debug!("registering devices");
-
-                    let (d_dewpt, _) = core
-                        .add_ro_device(dewpoint_name, temp_unit, max_history)
-                        .await?;
-                    let (d_htidx, _) = core
-                        .add_ro_device(heat_index_name, temp_unit, max_history)
-                        .await?;
-                    let (d_humidity, _) = core
-                        .add_ro_device(humidity_name, Some("%"), max_history)
-                        .await?;
-                    let (d_prate, _) = core
-                        .add_ro_device(
-                            precip_rate_name,
-                            Some(if let wu::Unit::English = units {
-                                "in/hr"
-                            } else {
-                                "mm/hr"
-                            }),
-                            max_history,
-                        )
-                        .await?;
-
-                    let (d_ptotal, precip_int) = core
-                        .add_ro_device(
-                            precip_total_name,
-                            Some(if let wu::Unit::English = units {
-                                "in"
-                            } else {
-                                "mm"
-                            }),
-                            max_history,
-                        )
-                        .await?;
-
-                    let (d_pressure, _) = core
-                        .add_ro_device(
-                            pressure_name,
-                            Some(if let wu::Unit::English = units {
-                                "inHg"
-                            } else {
-                                "hPa"
-                            }),
-                            max_history,
-                        )
-                        .await?;
-
-                    let (d_solrad, _) = core
-                        .add_ro_device(
-                            solar_rad_name,
-                            Some("W/m²"),
-                            max_history,
-                        )
-                        .await?;
-                    let (d_state, _) = core
-                        .add_ro_device(state_name, None, max_history)
-                        .await?;
-                    let (d_temp, _) = core
-                        .add_ro_device(temperature_name, temp_unit, max_history)
-                        .await?;
-                    let (d_uv, _) =
-                        core.add_ro_device(uv_name, None, max_history).await?;
-                    let (d_wndchl, _) = core
-                        .add_ro_device(wind_chill_name, temp_unit, max_history)
-                        .await?;
-                    let (d_wnddir, _) = core
-                        .add_ro_device(wind_dir_name, Some("°"), max_history)
-                        .await?;
-                    let (d_wndgst, _) = core
-                        .add_ro_device(wind_gust_name, speed_unit, max_history)
-                        .await?;
-                    let (d_wndspd, _) = core
-                        .add_ro_device(wind_speed_name, speed_unit, max_history)
-                        .await?;
-
-                    // If a previous value of the integration is
-                    // provided, initialize the state to
-                    // it. Otherwise, set it to 0.0.
-
-                    let precip_int = precip_int.unwrap_or(0.0);
 
                     // Assemble and return the state of the driver.
 
@@ -417,27 +414,9 @@ impl driver::API for Instance {
 
                     Ok(Box::new(Instance {
                         con,
-                        station,
                         api_key,
                         interval,
-                        units,
-                        precip_int,
-                        prev_precip_total: None,
-                        d_dewpt,
-                        d_htidx,
-                        d_humidity,
-                        d_prate,
-                        d_ptotal,
-                        d_pressure,
-                        d_solrad,
-                        d_state,
-                        d_temp,
-                        d_uv,
-                        d_wndchl,
-                        d_wnddir,
-                        d_wndgst,
-                        d_wndspd,
-                    }) as driver::DriverType)
+                    }))
                 }
                 Err(e) => Err(Error::BadConfig(format!(
                     "couldn't build client connection -- {}",
@@ -450,10 +429,12 @@ impl driver::API for Instance {
     }
 
     fn run<'a>(
-        &'a mut self,
+        &'a mut self, devices: Arc<Mutex<Self::DeviceSet>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async {
-            Span::current().record("cfg", &self.station.as_str());
+        let fut = async move {
+            let devices = devices.lock().await;
+
+            Span::current().record("cfg", &devices.station.as_str());
 
             let mut timer = interval_at(Instant::now(), self.interval);
 
@@ -471,8 +452,8 @@ impl driver::API for Instance {
                 let result = wu::fetch_observation(
                     &self.con,
                     &self.api_key,
-                    &self.station,
-                    &self.units,
+                    &devices.station,
+                    &devices.units,
                 )
                 .await;
 
@@ -491,8 +472,8 @@ impl driver::API for Instance {
                                         if obs.len() > 1 {
                                             warn!("ignoring {} extra weather observations", obs.len() - 1);
                                         }
-                                        (self.d_state)(true).await;
-                                        self.handle(&obs[0]).await;
+                                        (devices.d_state)(true).await;
+                                        self.handle(&obs[0], &devices).await;
                                         continue;
                                     }
                                 }
@@ -500,19 +481,19 @@ impl driver::API for Instance {
                             }
 
                             Err(e) => {
-                                (self.d_state)(false).await;
+                                (devices.d_state)(false).await;
                                 panic!("error response from Weather Underground -- {:?}", &e)
                             }
                         }
                     }
 
                     Ok(None) => {
-                        (self.d_state)(false).await;
+                        (devices.d_state)(false).await;
                         panic!("no response from Weather Underground")
                     }
 
                     Err(e) => {
-                        (self.d_state)(false).await;
+                        (devices.d_state)(false).await;
                         panic!(
                             "error accessing Weather Underground -- {:?}",
                             &e

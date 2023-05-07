@@ -5,6 +5,7 @@ use drmem_api::{
 };
 use std::future::Future;
 use std::net::SocketAddrV4;
+use std::sync::Arc;
 use std::{convert::Infallible, pin::Pin};
 use tokio::{
     io::{self, AsyncReadExt},
@@ -12,6 +13,7 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
+    sync::Mutex,
     time,
 };
 use tracing::{debug, info, warn, Span};
@@ -144,6 +146,9 @@ pub struct Instance {
     gpm: f64,
     rx: OwnedReadHalf,
     _tx: OwnedWriteHalf,
+}
+
+pub struct Devices {
     d_service: driver::ReportReading<bool>,
     d_state: driver::ReportReading<bool>,
     d_duty: driver::ReportReading<f64>,
@@ -248,30 +253,18 @@ impl Instance {
 }
 
 impl driver::API for Instance {
-    fn create_instance(
-        cfg: &DriverConfig, core: driver::RequestChan,
-        max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
+    type DeviceSet = Devices;
+
+    fn register_devices(
+        core: driver::RequestChan, _: &DriverConfig, max_history: Option<usize>,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let service_name = "service".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
         let duty_name = "duty".parse::<device::Base>().unwrap();
         let in_flow_name = "in-flow".parse::<device::Base>().unwrap();
         let dur_name = "duration".parse::<device::Base>().unwrap();
 
-        let addr = Instance::get_cfg_address(cfg);
-        let gpm = Instance::get_cfg_gpm(cfg);
-
-        let fut = async move {
-            // Validate the configuration.
-
-            let addr = addr?;
-            let gpm = gpm?;
-
-            // Connect with the remote process that is connected to
-            // the sump pump.
-
-            let (rx, _tx) = Instance::connect(&addr).await?.into_split();
-
+        Box::pin(async move {
             // Define the devices managed by this driver.
 
             let (d_service, _) =
@@ -288,26 +281,48 @@ impl driver::API for Instance {
                 .add_ro_device(dur_name, Some("min"), max_history)
                 .await?;
 
-            Ok(Box::new(Instance {
-                state: State::Unknown,
-                gpm,
-                rx,
-                _tx,
+            Ok(Devices {
                 d_service,
                 d_state,
                 d_duty,
                 d_inflow,
                 d_duration,
-            }) as driver::DriverType)
+            })
+        })
+    }
+
+    fn create_instance(
+        cfg: &DriverConfig,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+        let addr = Instance::get_cfg_address(cfg);
+        let gpm = Instance::get_cfg_gpm(cfg);
+
+        let fut = async move {
+            // Validate the configuration.
+
+            let addr = addr?;
+            let gpm = gpm?;
+
+            // Connect with the remote process that is connected to
+            // the sump pump.
+
+            let (rx, _tx) = Instance::connect(&addr).await?.into_split();
+
+            Ok(Box::new(Instance {
+                state: State::Unknown,
+                gpm,
+                rx,
+                _tx,
+            }))
         };
 
         Box::pin(fut)
     }
 
     fn run<'a>(
-        &'a mut self,
+        &'a mut self, devices: Arc<Mutex<Devices>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async {
+        let fut = async move {
             // Record the peer's address in the "cfg" field of the
             // span.
 
@@ -321,13 +336,15 @@ impl driver::API for Instance {
                 Span::current().record("cfg", &addr.as_str());
             }
 
-            (self.d_service)(true).await;
+            let devices = devices.lock().await;
+
+            (*devices.d_service)(true).await;
 
             loop {
                 match self.get_reading().await {
                     Ok((stamp, true)) => {
                         if self.state.on_event(stamp) {
-                            (self.d_state)(true).await;
+                            (devices.d_state)(true).await;
                         }
                     }
 
@@ -344,10 +361,10 @@ impl driver::API for Instance {
                                 in_flow
                             );
 
-                            (self.d_state)(false).await;
-                            (self.d_duty)(duty).await;
-                            (self.d_inflow)(in_flow).await;
-                            (self.d_duration)(
+                            (devices.d_state)(false).await;
+                            (devices.d_duty)(duty).await;
+                            (devices.d_inflow)(in_flow).await;
+                            (devices.d_duration)(
                                 ((cycle as f64) / 600.0).round() / 100.0,
                             )
                             .await;
@@ -355,8 +372,8 @@ impl driver::API for Instance {
                     }
 
                     Err(e) => {
-                        (self.d_state)(false).await;
-                        (self.d_service)(false).await;
+                        (devices.d_state)(false).await;
+                        (devices.d_service)(false).await;
                         panic!("couldn't read sump state -- {:?}", e);
                     }
                 }

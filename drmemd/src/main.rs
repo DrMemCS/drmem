@@ -124,14 +124,14 @@ async fn run() -> Result<()> {
             if let Some(driver_info) = drv_tbl.get_driver(&driver_name) {
                 let chan =
                     RequestChan::new(&driver_name, &driver.prefix, &tx_drv_req);
-                let instance = driver_info.run_instance(
+                let instance = (driver_info.2)(
                     driver_name,
-                    driver.max_history,
                     driver.cfg.unwrap_or_default().clone(),
                     chan,
+                    driver.max_history,
                 );
 
-                tasks.push(wrap_task(instance))
+                tasks.push(wrap_task(tokio::spawn(instance)))
             } else {
                 error!("no driver named {}", driver.name);
                 return Err(Error::NotFound);

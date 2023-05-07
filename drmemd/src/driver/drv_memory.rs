@@ -3,10 +3,13 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, pin::Pin};
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 
-pub struct Instance {
+pub struct Instance;
+
+pub struct Devices {
     d_memory: driver::ReportReading<device::Value>,
     s_memory: driver::SettingStream<device::Value>,
 }
@@ -20,11 +23,8 @@ impl Instance {
 
     /// Creates a new `Instance` instance.
 
-    pub fn new(
-        d_memory: driver::ReportReading<device::Value>,
-        s_memory: driver::SettingStream<device::Value>,
-    ) -> Instance {
-        Instance { d_memory, s_memory }
+    pub fn new() -> Instance {
+        Instance {}
     }
 
     // Gets the name of the device from the configuration.
@@ -51,13 +51,15 @@ impl Instance {
 }
 
 impl driver::API for Instance {
-    fn create_instance(
-        cfg: &DriverConfig, core: driver::RequestChan,
+    type DeviceSet = Devices;
+
+    fn register_devices(
+        core: driver::RequestChan, cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let name = Instance::get_cfg_name(cfg);
 
-        let fut = async move {
+        Box::pin(async move {
             let name = name?;
 
             // This device is settable. Any setting is forwarded to
@@ -66,27 +68,33 @@ impl driver::API for Instance {
             let (d_memory, s_memory, _) =
                 core.add_rw_device(name, None, max_history).await?;
 
+            Ok(Devices { d_memory, s_memory })
+        })
+    }
+
+    fn create_instance(
+        _cfg: &DriverConfig,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+        let fut = async move {
             // Build and return the future.
 
-            Ok(Box::new(Instance::new(d_memory, s_memory))
-                as driver::DriverType)
+            Ok(Box::new(Instance::new()))
         };
 
         Box::pin(fut)
     }
 
     fn run<'a>(
-        &'a mut self,
+        &'a mut self, devices: Arc<Mutex<Self::DeviceSet>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async {
-            loop {
-                if let Some((v, reply)) = self.s_memory.next().await {
-                    reply(Ok(v.clone()));
-                    (self.d_memory)(v).await
-                } else {
-                    panic!("can no longer receive settings");
-                }
+        let fut = async move {
+            let mut devices = devices.lock().await;
+
+            while let Some((v, reply)) = devices.s_memory.next().await {
+                reply(Ok(v.clone()));
+                (devices.d_memory)(v).await
             }
+            panic!("can no longer receive settings");
         };
 
         Box::pin(fut)

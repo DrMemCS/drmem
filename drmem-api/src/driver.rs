@@ -6,8 +6,8 @@ use crate::types::{
     Error,
 };
 use std::future::Future;
-use std::{convert::Infallible, pin::Pin};
-use tokio::sync::{mpsc, oneshot};
+use std::{convert::Infallible, pin::Pin, sync::Arc};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use toml::value;
 
@@ -40,7 +40,7 @@ pub type SettingReply<T> = Box<dyn FnOnce(Result<T>) + Send>;
 /// `device::Value`, this stream will automatically reject settings
 /// that aren't of the correct type and pass on converted values.
 pub type SettingStream<T> =
-    Pin<Box<dyn Stream<Item = (T, SettingReply<T>)> + Send>>;
+    Pin<Box<dyn Stream<Item = (T, SettingReply<T>)> + Send + Sync>>;
 
 /// A function that drivers use to report updated values of a device.
 pub type ReportReading<T> =
@@ -237,7 +237,9 @@ impl RequestChan {
     }
 }
 
-pub type DriverType = Box<dyn API>;
+/// Defines a boxed type that supports the `driver::API` trait.
+
+pub type DriverType<T> = Box<dyn API<DeviceSet = <T as API>::DeviceSet>>;
 
 /// All drivers implement the `driver::API` trait.
 ///
@@ -246,6 +248,12 @@ pub type DriverType = Box<dyn API>;
 /// create driver instances and monitor them as they run.
 
 pub trait API: Send {
+    type DeviceSet: Send + Sync;
+
+    fn register_devices(
+        drc: RequestChan, cfg: &DriverConfig, max_history: Option<usize>,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>>;
+
     /// Creates an instance of the driver.
     ///
     /// `cfg` contains the driver parameters, as specified in the
@@ -274,8 +282,8 @@ pub trait API: Send {
     /// bound.
 
     fn create_instance(
-        cfg: &DriverConfig, drc: RequestChan, max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send>>
+        cfg: &DriverConfig,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>>
     where
         Self: Sized;
 
@@ -289,7 +297,7 @@ pub trait API: Send {
     /// driver is restarted.
 
     fn run<'a>(
-        &'a mut self,
+        &'a mut self, devices: Arc<Mutex<Self::DeviceSet>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>>;
 }
 

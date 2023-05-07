@@ -135,8 +135,8 @@ impl DeviceInfo {
             .get_driver(&self.driver_name)
             .map(|di| DriverInfo {
                 name: self.driver_name.clone(),
-                summary: di.summary,
-                description: di.description,
+                summary: di.0,
+                description: di.1,
             })
             .unwrap()
     }

@@ -4,12 +4,14 @@ use drmem_api::{
     Error, Result,
 };
 use std::future::Future;
+use std::sync::Arc;
 use std::{convert::Infallible, pin::Pin};
 use std::{
     net::{SocketAddr, SocketAddrV4},
     str,
 };
 use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 use tokio::time::{self, Duration};
 use tracing::{debug, error, info, warn, Span};
 
@@ -105,6 +107,9 @@ mod server {
 pub struct Instance {
     sock: UdpSocket,
     seq: u16,
+}
+
+pub struct Devices {
     d_state: driver::ReportReading<bool>,
     d_source: driver::ReportReading<String>,
     d_offset: driver::ReportReading<f64>,
@@ -359,10 +364,11 @@ impl Instance {
 }
 
 impl driver::API for Instance {
-    fn create_instance(
-        cfg: &DriverConfig, core: driver::RequestChan,
-        max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
+    type DeviceSet = Devices;
+
+    fn register_devices(
+        core: driver::RequestChan, _: &DriverConfig, max_history: Option<usize>,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         // It's safe to use `.unwrap()` for these names because, in a
         // fully-tested, released version of this driver, we would
         // have seen and fixed any panics.
@@ -372,6 +378,32 @@ impl driver::API for Instance {
         let offset_name = "offset".parse::<device::Base>().unwrap();
         let delay_name = "delay".parse::<device::Base>().unwrap();
 
+        Box::pin(async move {
+            // Define the devices managed by this driver.
+
+            let (d_state, _) =
+                core.add_ro_device(state_name, None, max_history).await?;
+            let (d_source, _) =
+                core.add_ro_device(source_name, None, max_history).await?;
+            let (d_offset, _) = core
+                .add_ro_device(offset_name, Some("ms"), max_history)
+                .await?;
+            let (d_delay, _) = core
+                .add_ro_device(delay_name, Some("ms"), max_history)
+                .await?;
+
+            Ok(Devices {
+                d_state,
+                d_source,
+                d_offset,
+                d_delay,
+            })
+        })
+    }
+
+    fn create_instance(
+        cfg: &DriverConfig,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
         let addr = Instance::get_cfg_address(cfg);
 
         let fut = async move {
@@ -382,29 +414,7 @@ impl driver::API for Instance {
 
             if let Ok(sock) = UdpSocket::bind(loc_if).await {
                 if sock.connect(addr).await.is_ok() {
-                    // Define the devices managed by this driver.
-
-                    let (d_state, _) = core
-                        .add_ro_device(state_name, None, max_history)
-                        .await?;
-                    let (d_source, _) = core
-                        .add_ro_device(source_name, None, max_history)
-                        .await?;
-                    let (d_offset, _) = core
-                        .add_ro_device(offset_name, Some("ms"), max_history)
-                        .await?;
-                    let (d_delay, _) = core
-                        .add_ro_device(delay_name, Some("ms"), max_history)
-                        .await?;
-
-                    return Ok(Box::new(Instance {
-                        sock,
-                        seq: 1,
-                        d_state,
-                        d_source,
-                        d_offset,
-                        d_delay,
-                    }) as driver::DriverType);
+                    return Ok(Box::new(Instance { sock, seq: 1 }));
                 }
             }
             Err(Error::OperationError)
@@ -414,9 +424,9 @@ impl driver::API for Instance {
     }
 
     fn run<'a>(
-        &'a mut self,
+        &'a mut self, devices: Arc<Mutex<Devices>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async {
+        let fut = async move {
             // Record the peer's address in the "cfg" field of the
             // span.
 
@@ -438,6 +448,8 @@ impl driver::API for Instance {
             let mut info = Some(server::Info::bad_value());
             let mut interval = time::interval(Duration::from_millis(20_000));
 
+            let devices = devices.lock().await;
+
             loop {
                 interval.tick().await;
 
@@ -455,10 +467,11 @@ impl driver::API for Instance {
                                     tmp.get_offset(),
                                     tmp.get_delay()
                                 );
-                                (self.d_source)(tmp.get_host().clone()).await;
-                                (self.d_offset)(tmp.get_offset()).await;
-                                (self.d_delay)(tmp.get_delay()).await;
-                                (self.d_state)(true).await;
+                                (devices.d_source)(tmp.get_host().clone())
+                                    .await;
+                                (devices.d_offset)(tmp.get_offset()).await;
+                                (devices.d_delay)(tmp.get_delay()).await;
+                                (devices.d_state)(true).await;
                                 info = host_info;
                             }
                             continue;
@@ -467,14 +480,14 @@ impl driver::API for Instance {
                             if info.is_some() {
                                 warn!("no synced host information found");
                                 info = None;
-                                (self.d_state)(false).await;
+                                (devices.d_state)(false).await;
                             }
                         }
                     }
                 } else if info.is_some() {
                     warn!("we're not synced to any host");
                     info = None;
-                    (self.d_state)(false).await;
+                    (devices.d_state)(false).await;
                 }
             }
         };

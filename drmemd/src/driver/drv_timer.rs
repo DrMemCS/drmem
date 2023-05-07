@@ -3,8 +3,8 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, pin::Pin};
-use tokio::time;
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use tokio::{sync::Mutex, time};
 use tokio_stream::StreamExt;
 use tracing::{debug, info};
 
@@ -24,6 +24,9 @@ pub struct Instance {
     state: TimerState,
     active_level: bool,
     millis: time::Duration,
+}
+
+pub struct Devices {
     d_output: driver::ReportReading<bool>,
     d_enable: driver::ReportReading<bool>,
     s_enable: driver::SettingStream<bool>,
@@ -40,19 +43,11 @@ impl Instance {
     /// Creates a new `Instance` instance. It is assumed the external
     /// input is `false` so the initial timer state is `Armed`.
 
-    pub fn new(
-        active_level: bool, millis: time::Duration,
-        d_output: driver::ReportReading<bool>,
-        d_enable: driver::ReportReading<bool>,
-        s_enable: driver::SettingStream<bool>,
-    ) -> Instance {
+    pub fn new(active_level: bool, millis: time::Duration) -> Instance {
         Instance {
             state: TimerState::Armed,
             active_level,
             millis,
-            d_output,
-            d_enable,
-            s_enable,
         }
     }
 
@@ -177,13 +172,43 @@ impl Instance {
 }
 
 impl driver::API for Instance {
-    fn create_instance(
-        cfg: &DriverConfig, core: driver::RequestChan,
+    type DeviceSet = Devices;
+
+    fn register_devices(
+        core: driver::RequestChan, _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let output_name = "output".parse::<device::Base>().unwrap();
         let enable_name = "enable".parse::<device::Base>().unwrap();
 
+        Box::pin(async move {
+            // Define the devices managed by this driver.
+            //
+            // This first device is the output of the timer. When
+            // it's not timing, this device's value with be
+            // `!level`. While it's timing, `level`.
+
+            let (d_output, _) =
+                core.add_ro_device(output_name, None, max_history).await?;
+
+            // This device is settable. Any time it transitions
+            // from `false` to `true`, the timer begins a timing
+            // cycle.
+
+            let (d_enable, rx_set, _) =
+                core.add_rw_device(enable_name, None, max_history).await?;
+
+            Ok(Devices {
+                d_output,
+                d_enable,
+                s_enable: rx_set,
+            })
+        })
+    }
+
+    fn create_instance(
+        cfg: &DriverConfig,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
         let millis = Instance::get_cfg_millis(cfg);
         let level = Instance::get_cfg_level(cfg);
 
@@ -193,39 +218,23 @@ impl driver::API for Instance {
             let millis = millis?;
             let level = level?;
 
-            // Define the devices managed by this driver.
-            //
-            // This first device is the output of the timer. When it's
-            // not timing, this device's value with be `!level`. While
-            // it's timing, `level`.
-
-            let (d_output, _) =
-                core.add_ro_device(output_name, None, max_history).await?;
-
-            // This device is settable. Any time it transitions from
-            // `false` to `true`, the timer begins a timing cycle.
-
-            let (d_enable, rx_set, _) =
-                core.add_rw_device(enable_name, None, max_history).await?;
-
             // Build and return the future.
 
-            Ok(Box::new(Instance::new(
-                level, millis, d_output, d_enable, rx_set,
-            )) as driver::DriverType)
+            Ok(Box::new(Instance::new(level, millis)))
         };
 
         Box::pin(fut)
     }
 
     fn run<'a>(
-        &'a mut self,
+        &'a mut self, devices: Arc<Mutex<Self::DeviceSet>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async {
+        let fut = async move {
             let mut timeout = time::Instant::now();
+            let mut devices = devices.lock().await;
 
-            (self.d_enable)(false).await;
-            (self.d_output)(!self.active_level).await;
+            (devices.d_enable)(false).await;
+            (devices.d_output)(!self.active_level).await;
 
             loop {
                 info!("state {:?} : waiting for event", &self.state);
@@ -242,7 +251,7 @@ impl driver::API for Instance {
 			// set the output to the inactive value.
 
 			self.time_expired();
-			(self.d_output)(!self.active_level).await;
+			(devices.d_output)(!self.active_level).await;
                     }
 
                     // Always look for settings. We're pattern
@@ -252,7 +261,7 @@ impl driver::API for Instance {
                     // handle is saved in the device look-up
                     // table. All other handles are cloned from it.
 
-                    Some((b, reply)) = self.s_enable.next() => {
+                    Some((b, reply)) = devices.s_enable.next() => {
                         let (out, tmo) = self.update_state(b);
 
                         reply(Ok(b));
@@ -263,10 +272,10 @@ impl driver::API for Instance {
 			    timeout = tmo
                         }
 
-                        (self.d_enable)(b).await;
+                        (devices.d_enable)(b).await;
 
                         if let Some(out) = out {
-			    (self.d_output)(out).await;
+			    (devices.d_output)(out).await;
                         }
                     }
                 }
@@ -282,20 +291,9 @@ mod tests {
     use super::*;
     use tokio::time;
 
-    fn fake_report(_v: bool) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        Box::pin(async {})
-    }
-
     #[test]
     fn test_state_changes() {
-        let rx: driver::SettingStream<bool> = Box::pin(tokio_stream::empty());
-        let mut timer = Instance::new(
-            true,
-            time::Duration::from_millis(1000),
-            Box::new(fake_report),
-            Box::new(fake_report),
-            rx,
-        );
+        let mut timer = Instance::new(true, time::Duration::from_millis(1000));
 
         assert_eq!(timer.state, TimerState::Armed);
         assert_eq!((None, None), timer.update_state(false));
