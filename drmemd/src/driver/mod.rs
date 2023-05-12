@@ -74,13 +74,17 @@ fn manage_instance<T: driver::API + Send + 'static>(
                             .await
                     });
 
-                    match task.await {
-                        Ok(_) => unreachable!(),
+                    // Drivers are never supposed to exit so the
+                    // JoinHandle will never return an `Ok()` value.
+                    // We can't stop drivers from panicking, however,
+                    // so we have to look for an `Err()` value.
+                    //
+                    // (When Rust officially supports the `!` type, we
+                    // will be able to convert this from an
+                    // `if-statement` to a simple assignment.)
 
-                        // If `spawn()` returns this value, the driver
-                        // exited abnormally. Report it and restart the
-                        // driver.
-                        Err(e) => error!("{}", e),
+                    if let Err(e) = task.await {
+                        error!("driver exited unexpectedly -- {}", e)
                     }
                 }
 
