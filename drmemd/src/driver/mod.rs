@@ -41,15 +41,18 @@ fn manage_instance<T: driver::API + Send + 'static>(
             // once.
 
             let devices = Arc::new(Mutex::new(
-                T::register_devices(req_chan, &cfg, max_history).await?,
+                T::register_devices(req_chan, &cfg, max_history)
+                    .instrument(info_span!("one-time-init", name = &name))
+                    .await?,
             ));
 
+            info!("starting instance of driver");
             loop {
                 // Create a Future that creates an instance of the driver
                 // using the provided configuration parameters.
 
                 let result = T::create_instance(&cfg)
-                    .instrument(info_span!("driver-init", name = &name));
+                    .instrument(info_span!("init", name = &name));
 
                 if let Ok(mut instance) = result.await {
                     let name = name.clone();
