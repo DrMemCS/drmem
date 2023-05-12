@@ -1,0 +1,25 @@
+[package]
+name = "drmem-drv-tplink"
+version = "0.2.0"
+authors = ["Rich Neswold <rich.neswold@gmail.com>"]
+edition = "2021"
+homepage = "https://github.com/DrMemCS/drmem"
+description = "DrMem driver for TP-Link devices"
+repository = "https://github.com/DrMemCS/drmem"
+license = "MIT"
+categories = ["embedded"]
+keywords = ["control-system", "automation"]
+
+[lib]
+doctest = false
+
+[dependencies]
+toml.workspace = true
+
+futures.workspace = true
+tokio = { workspace = true, features = ["net"] }
+tracing.workspace = true
+tracing-futures.workspace = true
+tracing-subscriber.workspace = true
+
+drmem-api = { path = "../../drmem-api", version = "0.2" }

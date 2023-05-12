@@ -48,13 +48,18 @@ lrpar = "0.13"
 # optional, but a few drivers define common devices for a `drmem`
 # installation.
 
+[dependencies.drmem-drv-ntp]
+path = "../drivers/drmem-drv-ntp"
+version = "0.2"
+optional = true
+
 [dependencies.drmem-drv-sump]
 path = "../drivers/drmem-drv-sump"
 version = "0.2"
 optional = true
 
-[dependencies.drmem-drv-ntp]
-path = "../drivers/drmem-drv-ntp"
+[dependencies.drmem-drv-tplink]
+path = "../drivers/drmem-drv-tplink"
 version = "0.2"
 optional = true
 
@@ -119,6 +124,7 @@ graphiql = ["graphql"]
 
 driver-ntp = ["drmem-drv-ntp"]
 driver-sump = ["drmem-drv-sump"]
+driver-tplink = ["drmem-drv-tplink"]
 driver-weather-wu = ["drmem-drv-weather-wu"]
 
-all-drivers = ["driver-ntp", "driver-sump", "driver-weather-wu"]
+all-drivers = ["driver-ntp", "driver-sump", "driver-tplink", "driver-weather-wu"]
