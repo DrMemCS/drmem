@@ -3,7 +3,7 @@ use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
-use tracing::{error, field, info, info_span};
+use tracing::{error, field, info, info_span, warn};
 use tracing_futures::Instrument;
 
 mod drv_cycle;
@@ -28,10 +28,15 @@ fn manage_instance<T: driver::API + Send + 'static>(
     name: String, cfg: driver::DriverConfig, req_chan: driver::RequestChan,
     max_history: Option<usize>,
 ) -> AsyncRet<DriverRet> {
+    const START_DELAY: u64 = 5;
+    const MAX_DELAY: u64 = 600;
+
     let drv_name = name.clone();
 
     Box::pin(
         async move {
+            let mut restart_delay = START_DELAY;
+
             // Let the driver register its devices. This step is only done
             // once.
 
@@ -49,6 +54,8 @@ fn manage_instance<T: driver::API + Send + 'static>(
                 if let Ok(mut instance) = result.await {
                     let name = name.clone();
                     let devices = devices.clone();
+
+                    restart_delay = START_DELAY;
 
                     // Start the driver instance as a background task and
                     // monitor the return value.
@@ -78,8 +85,17 @@ fn manage_instance<T: driver::API + Send + 'static>(
                 // system from being compute-bound if the driver panics
                 // right away.
 
-                info!("restarting driver after a short delay");
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                warn!("delay before restarting driver ...");
+                tokio::time::sleep(tokio::time::Duration::from_secs(
+                    restart_delay,
+                ))
+                .await;
+
+                // Stretch the timeout each time we have to
+                // restart. Set the max timeout to 10 minutes.
+
+                restart_delay = std::cmp::min(restart_delay * 2, MAX_DELAY);
+                info!("restarting instance of driver");
             }
         }
         .instrument(info_span!("mngr", drvr = drv_name)),
