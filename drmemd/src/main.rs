@@ -3,7 +3,7 @@
 extern crate lazy_static;
 
 use drmem_api::{driver::RequestChan, Error, Result};
-use futures::{future, FutureExt};
+use futures::future;
 use std::convert::Infallible;
 use tokio::task::JoinHandle;
 use tracing::{error, trace, warn};
@@ -97,8 +97,16 @@ async fn run() -> Result<()> {
 
         let mut tasks = vec![wrap_task(core_task)];
 
+        // If the "graphql" feature is specified, start up the web
+        // server which accepts GraphQL queries.
+
         #[cfg(feature = "graphql")]
         {
+            use futures::FutureExt;
+
+            // This server should never exit. If it does, report an
+            // `OperationError`,
+
             let f = graphql::server(
                 &cfg.graphql,
                 drv_tbl.clone(),
