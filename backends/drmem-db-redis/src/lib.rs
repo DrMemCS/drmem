@@ -138,7 +138,7 @@ fn decode_string(buf: &[u8]) -> Result<device::Value> {
         let len_buf = buf[..4].try_into().unwrap();
         let len = u32::from_be_bytes(len_buf) as usize;
 
-        if buf.len() >= (4 + len) as usize {
+        if buf.len() >= (4 + len) {
             let str_vec = buf[4..4 + len].to_vec();
 
             return match String::from_utf8(str_vec) {
@@ -572,7 +572,7 @@ impl RedisStore {
     fn device_info_cmd(name: &str) -> redis::Cmd {
         let info_key = Self::info_key(name);
 
-        redis::Cmd::hgetall(&info_key)
+        redis::Cmd::hgetall(info_key)
     }
 
     // Creates the redis command to pull stream information associated
@@ -581,7 +581,7 @@ impl RedisStore {
     fn xinfo_cmd(name: &str) -> redis::Cmd {
         let hist_key = Self::hist_key(name);
 
-        redis::Cmd::xinfo_stream(&hist_key)
+        redis::Cmd::xinfo_stream(hist_key)
     }
 
     // Generates a redis command pipeline that adds a value to a

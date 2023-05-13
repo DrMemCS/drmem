@@ -333,7 +333,7 @@ impl driver::API for Instance {
                     .map(|v| format!("{}", v))
                     .unwrap_or_else(|_| String::from("**unknown**"));
 
-                Span::current().record("cfg", &addr.as_str());
+                Span::current().record("cfg", addr.as_str());
             }
 
             let devices = devices.lock().await;

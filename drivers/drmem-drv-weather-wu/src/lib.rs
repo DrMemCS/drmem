@@ -434,7 +434,7 @@ impl driver::API for Instance {
         let fut = async move {
             let devices = devices.lock().await;
 
-            Span::current().record("cfg", &devices.station.as_str());
+            Span::current().record("cfg", devices.station.as_str());
 
             let mut timer = interval_at(Instant::now(), self.interval);
 
