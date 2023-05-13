@@ -137,7 +137,8 @@ async fn run() -> Result<()> {
                     driver.cfg.unwrap_or_default().clone(),
                     chan,
                     driver.max_history,
-                );
+                )
+                .await?;
 
                 tasks.push(wrap_task(tokio::spawn(instance)))
             } else {
