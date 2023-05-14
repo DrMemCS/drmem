@@ -7,12 +7,17 @@
 use async_trait::async_trait;
 use chrono::*;
 
-pub mod types;
+mod types;
+
+// Pull types down to the `drmem-api` namespace.
+
+pub use types::device;
+pub use types::Error;
 
 /// A specialization of `std::result::Result<>` where the error value
 /// is `types::Error`.
 
-pub type Result<T> = std::result::Result<T, types::Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Defines the trait that a back-end needs to implement to provide
 /// storage for -- and access to -- the state of each driver's
@@ -100,6 +105,18 @@ pub trait Store {
     async fn set_device(
         &self, name: types::device::Name, value: types::device::Value,
     ) -> Result<types::device::Value>;
+
+    /// Obtains the `mpsc::Sender<>` handle associated with the
+    /// specified device. This handle can be used to send settings to
+    /// the device. If 'own` is set to `true`, the requester will be
+    /// the only one that can send settings to the device. NOTE: `own`
+    /// is currently unsupported and should always be set to
+    /// 'false'. When it gets supported, requesters can decide whether
+    /// they should set it to true.
+
+    async fn get_setting_chan(
+        &self, name: types::device::Name, own: bool,
+    ) -> Result<driver::TxDeviceSetting>;
 
     /// Creates a stream that yields values of a device as it updates.
 

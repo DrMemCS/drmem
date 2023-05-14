@@ -1,5 +1,5 @@
 use super::store;
-use drmem_api::{client, driver, types::Error, Result, Store};
+use drmem_api::{client, driver, Error, Result, Store};
 use std::convert::Infallible;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{info, info_span, warn};
@@ -96,6 +96,18 @@ impl State {
                 rpy_chan,
             } => {
                 let fut = self.backend.set_device(name, value);
+
+                if rpy_chan.send(fut.await).is_err() {
+                    warn!("client exited before a reply could be sent")
+                }
+            }
+
+            client::Request::GetSettingChan {
+                name,
+                _own,
+                rpy_chan,
+            } => {
+                let fut = self.backend.get_setting_chan(name, _own);
 
                 if rpy_chan.send(fut.await).is_err() {
                     warn!("client exited before a reply could be sent")

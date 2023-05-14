@@ -1,13 +1,9 @@
 use async_trait::async_trait;
 use chrono::*;
 use drmem_api::{
-    client,
+    client, device,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
-    types::{
-        device::{self, Value},
-        Error,
-    },
-    Result, Store,
+    Error, Result, Store,
 };
 use futures::task::{Context, Poll};
 use futures::Future;
@@ -71,17 +67,17 @@ fn xlat_err(e: redis::RedisError) -> Error {
     }
 }
 
-// Encodes a `Value` into a binary which gets stored in redis. This
-// encoding lets us store type information in redis so there's no
-// rounding errors or misinterpretation of the data.
+// Encodes a `device::Value` into a binary which gets stored in
+// redis. This encoding lets us store type information in redis so
+// there's no rounding errors or misinterpretation of the data.
 
-fn to_redis(val: &Value) -> Vec<u8> {
+fn to_redis(val: &device::Value) -> Vec<u8> {
     match val {
-        Value::Bool(false) => vec![b'B', b'F'],
-        Value::Bool(true) => vec![b'B', b'T'],
+        device::Value::Bool(false) => vec![b'B', b'F'],
+        device::Value::Bool(true) => vec![b'B', b'T'],
 
         // Integers start with an 'I' followed by 4 bytes.
-        Value::Int(v) => {
+        device::Value::Int(v) => {
             let mut buf: Vec<u8> = Vec::with_capacity(9);
 
             buf.push(b'I');
@@ -91,7 +87,7 @@ fn to_redis(val: &Value) -> Vec<u8> {
 
         // Floating point values start with a 'D' and are followed by
         // 8 bytes.
-        Value::Flt(v) => {
+        device::Value::Flt(v) => {
             let mut buf: Vec<u8> = Vec::with_capacity(9);
 
             buf.push(b'D');
@@ -101,7 +97,7 @@ fn to_redis(val: &Value) -> Vec<u8> {
 
         // Strings start with an 'S', followed by a 4-byte length
         // field, and then followed by the string content.
-        Value::Str(s) => {
+        device::Value::Str(s) => {
             let s = s.as_bytes();
             let mut buf: Vec<u8> = Vec::with_capacity(5 + s.len());
 
@@ -115,38 +111,38 @@ fn to_redis(val: &Value) -> Vec<u8> {
 
 // Decodes an `i32` from an 4-byte buffer.
 
-fn decode_integer(buf: &[u8]) -> Result<Value> {
+fn decode_integer(buf: &[u8]) -> Result<device::Value> {
     if buf.len() >= 4 {
         let buf = buf[..4].try_into().unwrap();
 
-        return Ok(Value::Int(i32::from_be_bytes(buf)));
+        return Ok(device::Value::Int(i32::from_be_bytes(buf)));
     }
     Err(Error::TypeError)
 }
 
 // Decodes an `f64` from an 8-byte buffer.
 
-fn decode_float(buf: &[u8]) -> Result<Value> {
+fn decode_float(buf: &[u8]) -> Result<device::Value> {
     if buf.len() >= 8 {
         let buf = buf[..8].try_into().unwrap();
 
-        return Ok(Value::Flt(f64::from_be_bytes(buf)));
+        return Ok(device::Value::Flt(f64::from_be_bytes(buf)));
     }
     Err(Error::TypeError)
 }
 
 // Decodes a UTF-8 encoded string from a raw, u8 buffer.
 
-fn decode_string(buf: &[u8]) -> Result<Value> {
+fn decode_string(buf: &[u8]) -> Result<device::Value> {
     if buf.len() >= 4 {
         let len_buf = buf[..4].try_into().unwrap();
         let len = u32::from_be_bytes(len_buf) as usize;
 
-        if buf.len() >= (4 + len) as usize {
+        if buf.len() >= (4 + len) {
             let str_vec = buf[4..4 + len].to_vec();
 
             return match String::from_utf8(str_vec) {
-                Ok(s) => Ok(Value::Str(s)),
+                Ok(s) => Ok(device::Value::Str(s)),
                 Err(_) => Err(Error::TypeError),
             };
         }
@@ -154,11 +150,11 @@ fn decode_string(buf: &[u8]) -> Result<Value> {
     Err(Error::TypeError)
 }
 
-// Returns a `Value` from a `redis::Value`. The only enumeration we
-// support is the `Value::Data` form since that's the one used to
-// return redis data.
+// Returns a `device::Value` from a `redis::Value`. The only
+// enumeration we support is the `redis::Value::Data` form since
+// that's the one used to return redis data.
 
-fn from_value(v: &redis::Value) -> Result<Value> {
+fn from_value(v: &redis::Value) -> Result<device::Value> {
     if let redis::Value::Data(buf) = v {
         // The buffer has to have at least one character in order to
         // be decoded.
@@ -166,8 +162,8 @@ fn from_value(v: &redis::Value) -> Result<Value> {
         if !buf.is_empty() {
             match buf[0] as char {
                 'B' if buf.len() > 1 => match buf[1] {
-                    b'F' => Ok(Value::Bool(false)),
-                    b'T' => Ok(Value::Bool(true)),
+                    b'F' => Ok(device::Value::Bool(false)),
+                    b'T' => Ok(device::Value::Bool(true)),
                     _ => Err(Error::TypeError),
                 },
                 'I' => decode_integer(&buf[1..]),
@@ -175,7 +171,7 @@ fn from_value(v: &redis::Value) -> Result<Value> {
                 'S' => decode_string(&buf[1..]),
 
                 // Any other character in the tag field is unknown and
-                // can't be decoded as a `Value`.
+                // can't be decoded as a `device::Value`.
                 _ => Err(Error::TypeError),
             }
         } else {
@@ -576,7 +572,7 @@ impl RedisStore {
     fn device_info_cmd(name: &str) -> redis::Cmd {
         let info_key = Self::info_key(name);
 
-        redis::Cmd::hgetall(&info_key)
+        redis::Cmd::hgetall(info_key)
     }
 
     // Creates the redis command to pull stream information associated
@@ -585,7 +581,7 @@ impl RedisStore {
     fn xinfo_cmd(name: &str) -> redis::Cmd {
         let hist_key = Self::hist_key(name);
 
-        redis::Cmd::xinfo_stream(&hist_key)
+        redis::Cmd::xinfo_stream(hist_key)
     }
 
     // Generates a redis command pipeline that adds a value to a
@@ -826,7 +822,7 @@ impl RedisStore {
 
     fn mk_report_func(
         &self, name: &str, max_history: &Option<usize>,
-    ) -> ReportReading<Value> {
+    ) -> ReportReading<device::Value> {
         let db_con = self.db_con.clone();
         let name = String::from(name);
 
@@ -872,7 +868,7 @@ impl Store for RedisStore {
     async fn register_read_only_device(
         &mut self, driver_name: &str, name: &device::Name,
         units: &Option<String>, max_history: &Option<usize>,
-    ) -> Result<(ReportReading<Value>, Option<Value>)> {
+    ) -> Result<(ReportReading<device::Value>, Option<device::Value>)> {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
@@ -891,7 +887,11 @@ impl Store for RedisStore {
     async fn register_read_write_device(
         &mut self, driver_name: &str, name: &device::Name,
         units: &Option<String>, max_history: &Option<usize>,
-    ) -> Result<(ReportReading<Value>, RxDeviceSetting, Option<Value>)> {
+    ) -> Result<(
+        ReportReading<device::Value>,
+        RxDeviceSetting,
+        Option<device::Value>,
+    )> {
         let sname = name.to_string();
 
         debug!("registering '{}' as read-write", &sname);
@@ -903,7 +903,10 @@ impl Store for RedisStore {
         }
 
         let (tx, rx) = mpsc::channel(20);
-        let _ = self.table.insert(name.clone(), tx);
+
+        if self.table.insert(name.clone(), tx).is_some() {
+            warn!("{} already had a setting channel", &name);
+        }
 
         Ok((
             self.mk_report_func(&sname, max_history),
@@ -953,8 +956,8 @@ impl Store for RedisStore {
     // API.
 
     async fn set_device(
-        &self, name: device::Name, value: Value,
-    ) -> Result<Value> {
+        &self, name: device::Name, value: device::Value,
+    ) -> Result<device::Value> {
         if let Some(tx) = self.table.get(&name) {
             let (tx_rpy, rx_rpy) = oneshot::channel();
 
@@ -973,6 +976,16 @@ impl Store for RedisStore {
             Err(Error::MissingPeer(
                 "cannot communicate with driver".to_string(),
             ))
+        } else {
+            Err(Error::NotFound)
+        }
+    }
+
+    async fn get_setting_chan(
+        &self, name: device::Name, _own: bool,
+    ) -> Result<TxDeviceSetting> {
+        if let Some(tx) = self.table.get(&name) {
+            Ok(tx.clone())
         } else {
             Err(Error::NotFound)
         }
@@ -1081,43 +1094,42 @@ pub async fn open(cfg: &config::Config) -> Result<impl Store> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use drmem_api::types::device;
-    use redis::Value;
+    use drmem_api::device;
 
     // We only want to convert Value::Data() forms. These tests make
     // sure the other variants don't translate.
 
     #[test]
     fn test_reject_invalid_forms() {
-        if let Ok(v) = from_value(&Value::Int(0)) {
+        if let Ok(v) = from_value(&redis::Value::Int(0)) {
             panic!("Value::Int incorrectly translated to {:?}", v);
         }
-        if let Ok(v) = from_value(&Value::Bulk(vec![])) {
+        if let Ok(v) = from_value(&redis::Value::Bulk(vec![])) {
             panic!("Value::Bulk incorrectly translated to {:?}", v);
         }
-        if let Ok(v) = from_value(&Value::Status(String::from(""))) {
+        if let Ok(v) = from_value(&redis::Value::Status(String::from(""))) {
             panic!("Value::Status incorrectly translated to {:?}", v);
         }
-        if let Ok(v) = from_value(&Value::Okay) {
+        if let Ok(v) = from_value(&redis::Value::Okay) {
             panic!("Value::Okay incorrectly translated to {:?}", v);
         }
     }
 
-    // Test correct decoding of Value::Bool values.
+    // Test correct decoding of device::Value::Bool values.
 
     #[test]
     fn test_bool_decoder() {
         assert_eq!(
             Ok(device::Value::Bool(false)),
-            from_value(&Value::Data(vec![b'B', b'F']))
+            from_value(&redis::Value::Data(vec![b'B', b'F']))
         );
         assert_eq!(
             Ok(device::Value::Bool(true)),
-            from_value(&Value::Data(vec![b'B', b'T']))
+            from_value(&redis::Value::Data(vec![b'B', b'T']))
         );
     }
 
-    // Test correct encoding of Value::Bool values.
+    // Test correct encoding of device::Value::Bool values.
 
     #[test]
     fn test_bool_encoder() {
@@ -1134,7 +1146,7 @@ mod tests {
         (0x01234567, &[b'I', 0x01, 0x23, 0x45, 0x67]),
     ];
 
-    // Test correct encoding of Value::Int values.
+    // Test correct encoding of device::Value::Int values.
 
     #[test]
     fn test_int_encoder() {
@@ -1143,18 +1155,20 @@ mod tests {
         }
     }
 
-    // Test correct decoding of Value::Int values.
+    // Test correct decoding of device::Value::Int values.
 
     #[test]
     fn test_int_decoder() {
-        assert!(from_value(&Value::Data(vec![])).is_err());
-        assert!(from_value(&Value::Data(vec![b'I'])).is_err());
-        assert!(from_value(&Value::Data(vec![b'I', 0u8])).is_err());
-        assert!(from_value(&Value::Data(vec![b'I', 0u8, 0u8])).is_err());
-        assert!(from_value(&Value::Data(vec![b'I', 0u8, 0u8, 0u8])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![b'I'])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![b'I', 0u8])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![b'I', 0u8, 0u8])).is_err());
+        assert!(
+            from_value(&redis::Value::Data(vec![b'I', 0u8, 0u8, 0u8])).is_err()
+        );
 
         for (v, rv) in INT_TEST_CASES {
-            let data = Value::Data(rv.to_vec());
+            let data = redis::Value::Data(rv.to_vec());
 
             assert_eq!(Ok(device::Value::Int(*v)), from_value(&data));
         }
@@ -1178,7 +1192,7 @@ mod tests {
         (9007199254740992.0, &[b'D', 67, 64, 0, 0, 0, 0, 0, 0]),
     ];
 
-    // Test correct encoding of Value::Flt values.
+    // Test correct encoding of device::Value::Flt values.
 
     #[test]
     fn test_float_encoder() {
@@ -1187,33 +1201,36 @@ mod tests {
         }
     }
 
-    // Test correct decoding of Value::Int values.
+    // Test correct decoding of device::Value::Flt values.
 
     #[test]
     fn test_float_decoder() {
-        assert!(from_value(&Value::Data(vec![])).is_err());
-        assert!(from_value(&Value::Data(vec![b'D'])).is_err());
-        assert!(from_value(&Value::Data(vec![b'D', 0u8])).is_err());
-        assert!(from_value(&Value::Data(vec![b'D', 0u8, 0u8])).is_err());
-        assert!(from_value(&Value::Data(vec![b'D', 0u8, 0u8, 0u8])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![b'D'])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![b'D', 0u8])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![b'D', 0u8, 0u8])).is_err());
         assert!(
-            from_value(&Value::Data(vec![b'D', 0u8, 0u8, 0u8, 0u8])).is_err()
+            from_value(&redis::Value::Data(vec![b'D', 0u8, 0u8, 0u8])).is_err()
         );
-        assert!(
-            from_value(&Value::Data(vec![b'D', 0u8, 0u8, 0u8, 0u8, 0u8]))
-                .is_err()
-        );
-        assert!(from_value(&Value::Data(vec![
+        assert!(from_value(&redis::Value::Data(vec![
+            b'D', 0u8, 0u8, 0u8, 0u8
+        ]))
+        .is_err());
+        assert!(from_value(&redis::Value::Data(vec![
+            b'D', 0u8, 0u8, 0u8, 0u8, 0u8
+        ]))
+        .is_err());
+        assert!(from_value(&redis::Value::Data(vec![
             b'D', 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
         ]))
         .is_err());
-        assert!(from_value(&Value::Data(vec![
+        assert!(from_value(&redis::Value::Data(vec![
             b'D', 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
         ]))
         .is_err());
 
         for (v, rv) in FLT_TEST_CASES {
-            let data = Value::Data(rv.to_vec());
+            let data = redis::Value::Data(rv.to_vec());
 
             assert_eq!(Ok(device::Value::Flt(*v)), from_value(&data));
         }
@@ -1224,7 +1241,7 @@ mod tests {
         ("ABC", &[b'S', 0u8, 0u8, 0u8, 3u8, b'A', b'B', b'C']),
     ];
 
-    // Test correct encoding of Value::Str values.
+    // Test correct encoding of device::Value::Str values.
 
     #[test]
     fn test_string_encoder() {
@@ -1233,22 +1250,24 @@ mod tests {
         }
     }
 
-    // Test correct decoding of Value::Str values.
+    // Test correct decoding of device::Value::Str values.
 
     #[test]
     fn test_string_decoder() {
         // Buffers smaller than 5 bytes are an error.
 
-        assert!(from_value(&Value::Data(vec![])).is_err());
-        assert!(from_value(&Value::Data(vec![b'S'])).is_err());
-        assert!(from_value(&Value::Data(vec![b'S', 0u8])).is_err());
-        assert!(from_value(&Value::Data(vec![b'S', 0u8, 0u8])).is_err());
-        assert!(from_value(&Value::Data(vec![b'S', 0u8, 0u8, 0u8])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![b'S'])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![b'S', 0u8])).is_err());
+        assert!(from_value(&redis::Value::Data(vec![b'S', 0u8, 0u8])).is_err());
+        assert!(
+            from_value(&redis::Value::Data(vec![b'S', 0u8, 0u8, 0u8])).is_err()
+        );
 
         // Loop through the test cases.
 
         for (v, rv) in STR_TEST_CASES {
-            let data = Value::Data(rv.to_vec());
+            let data = redis::Value::Data(rv.to_vec());
 
             assert_eq!(
                 Ok(device::Value::Str(String::from(*v))),
@@ -1259,16 +1278,17 @@ mod tests {
         // Verify proper response (both good and bad) when the buffer
         // doesn't match the size of the string.
 
-        assert!(
-            from_value(&Value::Data(vec![b'S', 0u8, 0u8, 0u8, 1u8])).is_err()
-        );
-        assert!(
-            from_value(&Value::Data(vec![b'S', 0u8, 0u8, 0u8, 2u8, b'A']))
-                .is_err()
-        );
+        assert!(from_value(&redis::Value::Data(vec![
+            b'S', 0u8, 0u8, 0u8, 1u8
+        ]))
+        .is_err());
+        assert!(from_value(&redis::Value::Data(vec![
+            b'S', 0u8, 0u8, 0u8, 2u8, b'A'
+        ]))
+        .is_err());
         assert_eq!(
             Ok(device::Value::Str(String::from("AB"))),
-            from_value(&Value::Data(vec![
+            from_value(&redis::Value::Data(vec![
                 b'S', 0u8, 0u8, 0u8, 2u8, b'A', b'B', 0, 0
             ]))
         );

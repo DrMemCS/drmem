@@ -1,133 +1,154 @@
-use drmem_api::{
-    driver::{DriverConfig, DriverType, RequestChan, API},
-    Result,
-};
+use drmem_api::{driver, Result};
 use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
-use tokio::task::JoinHandle;
-use tracing::{error, field, info, info_span};
+use tokio::sync::Mutex;
+use tracing::{error, field, info, info_span, warn};
 use tracing_futures::Instrument;
 
 mod drv_cycle;
 mod drv_memory;
 mod drv_timer;
 
-type Factory = fn(
-    &DriverConfig,
-    RequestChan,
+pub type Fut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
+pub type MgrTask = Fut<Infallible>;
+pub type MgrFuncRet = Fut<Result<MgrTask>>;
+
+pub type Launcher = fn(
+    String,
+    driver::DriverConfig,
+    driver::RequestChan,
     Option<usize>,
-) -> Pin<Box<dyn Future<Output = Result<DriverType>> + Send>>;
+) -> MgrFuncRet;
 
-pub struct Driver {
-    pub summary: &'static str,
-    pub description: &'static str,
-    factory: Factory,
-}
+pub type DriverInfo = (&'static str, &'static str, Launcher);
 
-impl Driver {
-    pub fn create(
-        summary: &'static str, description: &'static str, factory: Factory,
-    ) -> Driver {
-        Driver {
-            summary,
-            description,
-            factory,
-        }
-    }
+// This is the main loop of the driver manager. It only returns if the
+// driver panics.
 
-    async fn manage_instance(
-        name: String, factory: Factory, cfg: DriverConfig,
-        req_chan: RequestChan, max_history: Option<usize>,
-    ) -> Result<Infallible> {
+fn mgr_body<T>(
+    name: String, devices: T::DeviceSet, cfg: driver::DriverConfig,
+) -> MgrTask
+where
+    T: driver::API + Send + 'static,
+{
+    Box::pin(async move {
+        const START_DELAY: u64 = 5;
+        const MAX_DELAY: u64 = 600;
+
+        let mut restart_delay = START_DELAY;
+        let devices = Arc::new(Mutex::new(devices));
+
+        info!("starting instance of driver");
+
         loop {
             // Create a Future that creates an instance of the driver
             // using the provided configuration parameters.
 
-            let result = factory(&cfg, req_chan.clone(), max_history)
-                .instrument(info_span!("init"));
+            let result = T::create_instance(&cfg)
+                .instrument(info_span!("init", name = &name));
 
-            match result.await {
-                Ok(mut instance) => {
-                    let name = name.clone();
+            if let Ok(mut instance) = result.await {
+                let name = name.clone();
+                let devices = devices.clone();
 
-                    // Start the driver instance as a background task
-                    // and monitor the return value.
+                restart_delay = START_DELAY;
 
-                    match tokio::spawn(async move {
-                        instance
-                            .run()
-                            .instrument(info_span!(
-                                "drvr",
-                                name = name.as_str(),
-                                cfg = field::Empty
-                            ))
-                            .await
-                    })
-                    .await
-                    {
-                        Ok(_) => unreachable!(),
+                // Start the driver instance as a background task and
+                // monitor the return value.
 
-                        // If `spawn()` returns this value, the driver
-                        // exited abnormally. Report it and restart
-                        // the driver.
-                        Err(e) => error!("{}", e),
-                    }
-                }
-                Err(e) => {
-                    error!("init error -- {}", e)
+                let task = tokio::spawn(async move {
+                    instance
+                        .run(devices)
+                        .instrument(info_span!(
+                            "driver",
+                            name = name.as_str(),
+                            cfg = field::Empty
+                        ))
+                        .await
+                });
+
+                // Drivers are never supposed to exit so the JoinHandle
+                // will never return an `Ok()` value. We can't stop
+                // drivers from panicking, however, so we have to look for
+                // an `Err()` value.
+                //
+                // (When Rust officially supports the `!` type, we will be
+                // able to convert this from an `if-statement` to a simple
+                // assignment.)
+
+                if let Err(e) = task.await {
+                    error!("driver exited unexpectedly -- {}", e)
                 }
             }
 
             // Delay before restarting the driver. This prevents the
-            // system from being compute-bound if the driver panics
-            // right away.
+            // system from being compute-bound if the driver panics right
+            // away.
 
-            info!("restarting driver after a short delay");
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            warn!("delay before restarting driver ...");
+            tokio::time::sleep(tokio::time::Duration::from_secs(restart_delay))
+                .await;
+
+            // Stretch the timeout each time we have to restart. Set the
+            // max timeout to 10 minutes.
+
+            restart_delay = std::cmp::min(restart_delay * 2, MAX_DELAY);
+            info!("restarting instance of driver");
         }
-    }
+    })
+}
 
-    // Runs an instance of the driver using the provided configuration
-    // parameters.
+// This generic function manages an instance of a specific driver. We
+// use generics because each driver has a different set of devices
+// (T::DeviceSet), so one function wouldn't be able to handle every
+// type.
 
-    pub fn run_instance(
-        &self, name: String, max_history: Option<usize>, cfg: DriverConfig,
-        req_chan: RequestChan,
-    ) -> JoinHandle<Result<Infallible>> {
-        // Spawn a task that supervises the driver task. If the driver
-        // panics, this supervisor "catches" it and reports a problem.
-        // It then restarts the driver.
+fn manage_instance<T>(
+    name: String, cfg: driver::DriverConfig, req_chan: driver::RequestChan,
+    max_history: Option<usize>,
+) -> MgrFuncRet
+where
+    T: driver::API + Send + 'static,
+{
+    // Return a future that returns an error if the devices couldn't
+    // be registered, or returns a future that manages the running
+    // instance.
 
-        tokio::spawn(
-            Driver::manage_instance(
-                name.clone(),
-                self.factory,
-                cfg,
-                req_chan,
-                max_history,
-            )
-            .instrument(info_span!("mngr", drvr = name.as_str())),
-        )
-    }
+    Box::pin(async move {
+        // Let the driver API register the necessary devices.
+
+        let devices = T::register_devices(req_chan, &cfg, max_history)
+            .instrument(info_span!("one-time-init", name = &name))
+            .await?;
+        let drv_name = name.clone();
+
+        // Create a future that manages the instance.
+
+        Ok(Box::pin(async move {
+            mgr_body::<T>(name, devices, cfg)
+                .instrument(info_span!("mngr", drvr = drv_name))
+                .await
+        }) as MgrTask)
+    }) as MgrFuncRet
 }
 
 #[derive(Clone)]
-pub struct DriverDb(Arc<HashMap<&'static str, Driver>>);
+pub struct DriverDb(Arc<HashMap<&'static str, DriverInfo>>);
 
 impl DriverDb {
     pub fn create() -> DriverDb {
-        let mut table = HashMap::new();
+        let mut table: HashMap<&'static str, DriverInfo> = HashMap::new();
 
         {
             use drv_memory::Instance;
 
             table.insert(
                 Instance::NAME,
-                Driver::create(
+                (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    <Instance as API>::create_instance,
+                    manage_instance::<Instance>,
                 ),
             );
         }
@@ -137,10 +158,10 @@ impl DriverDb {
 
             table.insert(
                 Instance::NAME,
-                Driver::create(
+                (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    <Instance as API>::create_instance,
+                    manage_instance::<Instance>,
                 ),
             );
         }
@@ -150,10 +171,10 @@ impl DriverDb {
 
             table.insert(
                 Instance::NAME,
-                Driver::create(
+                (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    <Instance as API>::create_instance,
+                    manage_instance::<Instance>,
                 ),
             );
         }
@@ -166,10 +187,10 @@ impl DriverDb {
 
             table.insert(
                 Instance::NAME,
-                Driver::create(
+                (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    <Instance as API>::create_instance,
+                    manage_instance::<Instance>,
                 ),
             );
         }
@@ -182,10 +203,10 @@ impl DriverDb {
 
             table.insert(
                 Instance::NAME,
-                Driver::create(
+                (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    <Instance as API>::create_instance,
+                    manage_instance::<Instance>,
                 ),
             );
         }
@@ -198,10 +219,10 @@ impl DriverDb {
 
             table.insert(
                 Instance::NAME,
-                Driver::create(
+                (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    <Instance as API>::create_instance,
+                    manage_instance::<Instance>,
                 ),
             );
         }
@@ -209,30 +230,32 @@ impl DriverDb {
         DriverDb(Arc::new(table))
     }
 
-    pub fn get_driver(&self, key: &str) -> Option<&Driver> {
+    /// Searches the map for a driver with the specified name. If
+    /// present, the driver's information is returned.
+
+    pub fn get_driver(&self, key: &str) -> Option<&DriverInfo> {
         self.0.get(key)
     }
+
+    /// Searches the map for a driver with the specified name. If
+    /// found, it extracts the information needed for the GraphQL
+    /// query and returns it.
 
     pub fn find(
         &self, key: &str,
     ) -> Option<(String, &'static str, &'static str)> {
-        self.0
-            .get(key)
-            .map(|info| (key.to_string(), info.summary, info.description))
+        self.get_driver(key)
+            .map(|info| (key.to_string(), info.0, info.1))
     }
+
+    /// Similar to `.find()`, but returns all the drivers'
+    /// information.
 
     pub fn get_all(
         &self,
     ) -> impl Iterator<Item = (String, &'static str, &'static str)> + '_ {
-        self.0.iter().map(
-            |(
-                k,
-                Driver {
-                    summary,
-                    description,
-                    ..
-                },
-            )| { (k.to_string(), *summary, *description) },
-        )
+        self.0.iter().map(|(k, (summary, description, _))| {
+            (k.to_string(), *summary, *description)
+        })
     }
 }

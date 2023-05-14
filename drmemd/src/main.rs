@@ -2,7 +2,7 @@
 #[macro_use]
 extern crate lazy_static;
 
-use drmem_api::{driver::RequestChan, types::Error, Result};
+use drmem_api::{driver::RequestChan, Error, Result};
 use futures::{future, FutureExt};
 use std::convert::Infallible;
 use tokio::task::JoinHandle;
@@ -78,7 +78,8 @@ async fn wrap_task(
 }
 
 // Runs the main body of the application. This top-level task reads
-// the config, starts the drivers, and monitors their health.
+// the config, starts the drivers and logic node, and monitors their
+// health.
 
 async fn run() -> Result<()> {
     if let Some(cfg) = init_app().await {
@@ -96,8 +97,14 @@ async fn run() -> Result<()> {
 
         let mut tasks = vec![wrap_task(core_task)];
 
+        // If the "graphql" feature is specified, start up the web
+        // server which accepts GraphQL queries.
+
         #[cfg(feature = "graphql")]
         {
+            // This server should never exit. If it does, report an
+            // `OperationError`,
+
             let f = graphql::server(
                 &cfg.graphql,
                 drv_tbl.clone(),
@@ -123,19 +130,40 @@ async fn run() -> Result<()> {
             if let Some(driver_info) = drv_tbl.get_driver(&driver_name) {
                 let chan =
                     RequestChan::new(&driver_name, &driver.prefix, &tx_drv_req);
-                let instance = driver_info.run_instance(
+
+                // Call the function that manages instances of this
+                // driver. If it returns `Ok()`, the value is a Future
+                // that implements the driver. If `Err()` is returned,
+                // then the devices couldn't be registered or some
+                // other serious error occurred.
+
+                let instance = (driver_info.2)(
                     driver_name,
-                    driver.max_history,
                     driver.cfg.unwrap_or_default().clone(),
                     chan,
-                );
+                    driver.max_history,
+                )
+                .await?;
 
-                tasks.push(wrap_task(instance))
+                // Push the driver instance at the end of the vector.
+
+                tasks.push(wrap_task(tokio::spawn(instance.map(|v| Ok(v)))))
             } else {
                 error!("no driver named {}", driver.name);
                 return Err(Error::NotFound);
             }
         }
+
+        // Iterate through the [[logic]] sections of the config.
+
+        for logic in cfg.logic {
+            match logic::Node::start(tx_clnt_req.clone(), &logic).await {
+                Ok(instance) => tasks.push(wrap_task(instance)),
+                Err(_) => error!("logic node '{}' is not running", &logic.name),
+            }
+        }
+
+        // Now run all the tasks.
 
         let _ = future::join_all(tasks).await;
 

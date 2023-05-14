@@ -1,10 +1,11 @@
 use drmem_api::{
+    device,
     driver::{self, DriverConfig},
-    types::{device, Error},
-    Result,
+    Error, Result,
 };
 use std::future::Future;
 use std::net::SocketAddrV4;
+use std::sync::Arc;
 use std::{convert::Infallible, pin::Pin};
 use tokio::{
     io::{self, AsyncReadExt},
@@ -12,9 +13,10 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
+    sync::Mutex,
     time,
 };
-use tracing::{debug, error, info, warn, Span};
+use tracing::{debug, info, warn, Span};
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -144,6 +146,9 @@ pub struct Instance {
     gpm: f64,
     rx: OwnedReadHalf,
     _tx: OwnedWriteHalf,
+}
+
+pub struct Devices {
     d_service: driver::ReportReading<bool>,
     d_state: driver::ReportReading<bool>,
     d_duty: driver::ReportReading<f64>,
@@ -188,16 +193,20 @@ impl Instance {
         match cfg.get("addr") {
             Some(toml::value::Value::String(addr)) => {
                 if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                    return Ok(addr);
+                    Ok(addr)
                 } else {
-                    error!("'addr' not in hostname:port format")
+                    Err(Error::BadConfig(String::from(
+                        "'addr' not in hostname:port format",
+                    )))
                 }
             }
-            Some(_) => error!("'addr' config parameter should be a string"),
-            None => error!("missing 'addr' parameter in config"),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'addr' config parameter should be a string",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'addr' parameter in config",
+            ))),
         }
-
-        Err(Error::BadConfig)
     }
 
     // Attempts to pull the gal-per-min parameter from the driver's
@@ -206,13 +215,15 @@ impl Instance {
 
     fn get_cfg_gpm(cfg: &DriverConfig) -> Result<f64> {
         match cfg.get("gpm") {
-            Some(toml::value::Value::Integer(gpm)) => return Ok(*gpm as f64),
-            Some(toml::value::Value::Float(gpm)) => return Ok(*gpm),
-            Some(_) => error!("'gpm' config parameter should be a number"),
-            None => error!("missing 'gpm' parameter in config"),
+            Some(toml::value::Value::Integer(gpm)) => Ok(*gpm as f64),
+            Some(toml::value::Value::Float(gpm)) => Ok(*gpm),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'gpm' config parameter should be a number",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'gpm' parameter in config",
+            ))),
         }
-
-        Err(Error::BadConfig)
     }
 
     async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
@@ -242,30 +253,18 @@ impl Instance {
 }
 
 impl driver::API for Instance {
-    fn create_instance(
-        cfg: &DriverConfig, core: driver::RequestChan,
-        max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<driver::DriverType>> + Send>> {
+    type DeviceSet = Devices;
+
+    fn register_devices(
+        core: driver::RequestChan, _: &DriverConfig, max_history: Option<usize>,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let service_name = "service".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
         let duty_name = "duty".parse::<device::Base>().unwrap();
         let in_flow_name = "in-flow".parse::<device::Base>().unwrap();
         let dur_name = "duration".parse::<device::Base>().unwrap();
 
-        let addr = Instance::get_cfg_address(cfg);
-        let gpm = Instance::get_cfg_gpm(cfg);
-
-        let fut = async move {
-            // Validate the configuration.
-
-            let addr = addr?;
-            let gpm = gpm?;
-
-            // Connect with the remote process that is connected to
-            // the sump pump.
-
-            let (rx, _tx) = Instance::connect(&addr).await?.into_split();
-
+        Box::pin(async move {
             // Define the devices managed by this driver.
 
             let (d_service, _) =
@@ -282,26 +281,48 @@ impl driver::API for Instance {
                 .add_ro_device(dur_name, Some("min"), max_history)
                 .await?;
 
-            Ok(Box::new(Instance {
-                state: State::Unknown,
-                gpm,
-                rx,
-                _tx,
+            Ok(Devices {
                 d_service,
                 d_state,
                 d_duty,
                 d_inflow,
                 d_duration,
-            }) as driver::DriverType)
+            })
+        })
+    }
+
+    fn create_instance(
+        cfg: &DriverConfig,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+        let addr = Instance::get_cfg_address(cfg);
+        let gpm = Instance::get_cfg_gpm(cfg);
+
+        let fut = async move {
+            // Validate the configuration.
+
+            let addr = addr?;
+            let gpm = gpm?;
+
+            // Connect with the remote process that is connected to
+            // the sump pump.
+
+            let (rx, _tx) = Instance::connect(&addr).await?.into_split();
+
+            Ok(Box::new(Instance {
+                state: State::Unknown,
+                gpm,
+                rx,
+                _tx,
+            }))
         };
 
         Box::pin(fut)
     }
 
     fn run<'a>(
-        &'a mut self,
+        &'a mut self, devices: Arc<Mutex<Devices>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async {
+        let fut = async move {
             // Record the peer's address in the "cfg" field of the
             // span.
 
@@ -312,16 +333,18 @@ impl driver::API for Instance {
                     .map(|v| format!("{}", v))
                     .unwrap_or_else(|_| String::from("**unknown**"));
 
-                Span::current().record("cfg", &addr.as_str());
+                Span::current().record("cfg", addr.as_str());
             }
 
-            (self.d_service)(true).await;
+            let devices = devices.lock().await;
+
+            (*devices.d_service)(true).await;
 
             loop {
                 match self.get_reading().await {
                     Ok((stamp, true)) => {
                         if self.state.on_event(stamp) {
-                            (self.d_state)(true).await;
+                            (devices.d_state)(true).await;
                         }
                     }
 
@@ -338,10 +361,10 @@ impl driver::API for Instance {
                                 in_flow
                             );
 
-                            (self.d_state)(false).await;
-                            (self.d_duty)(duty).await;
-                            (self.d_inflow)(in_flow).await;
-                            (self.d_duration)(
+                            (devices.d_state)(false).await;
+                            (devices.d_duty)(duty).await;
+                            (devices.d_inflow)(in_flow).await;
+                            (devices.d_duration)(
                                 ((cycle as f64) / 600.0).round() / 100.0,
                             )
                             .await;
@@ -349,8 +372,8 @@ impl driver::API for Instance {
                     }
 
                     Err(e) => {
-                        (self.d_state)(false).await;
-                        (self.d_service)(false).await;
+                        (devices.d_state)(false).await;
+                        (devices.d_service)(false).await;
                         panic!("couldn't read sump state -- {:?}", e);
                     }
                 }

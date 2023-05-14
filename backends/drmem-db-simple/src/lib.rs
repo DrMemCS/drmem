@@ -12,10 +12,9 @@
 use async_trait::async_trait;
 use chrono::*;
 use drmem_api::{
-    client,
+    client, device,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
-    types::{device, Error},
-    Result, Store,
+    Error, Result, Store,
 };
 use std::collections::{hash_map, HashMap};
 use std::{
@@ -332,6 +331,17 @@ impl Store for SimpleStore {
         }
     }
 
+    async fn get_setting_chan(
+        &self, name: device::Name, _own: bool,
+    ) -> Result<TxDeviceSetting> {
+        if let Some(di) = self.0.get(&name) {
+            if let Some(tx) = &di.tx_setting {
+                return Ok(tx.clone());
+            }
+        }
+        Err(Error::NotFound)
+    }
+
     // Handles a request to monitor a device's changing value. The
     // caller must pass in the name of the device. Returns a stream
     // which returns the last value reported for the device followed
@@ -443,7 +453,7 @@ impl Store for SimpleStore {
 #[cfg(test)]
 mod tests {
     use crate::{mk_report_func, DeviceInfo, SimpleStore};
-    use drmem_api::{types::device, Store};
+    use drmem_api::{device, Store};
     use std::{collections::HashMap, time};
     use tokio::sync::{mpsc::error::TryRecvError, oneshot};
     use tokio::time::interval;

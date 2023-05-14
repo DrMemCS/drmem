@@ -5,10 +5,7 @@ use std::env;
 use toml::{self, value};
 use tracing::Level;
 
-use drmem_api::{
-    driver::DriverConfig,
-    types::device::{Name, Path},
-};
+use drmem_api::{device, driver::DriverConfig};
 
 fn def_log_level() -> String {
     String::from("warn")
@@ -69,7 +66,7 @@ impl Default for Config {
 #[derive(Deserialize)]
 pub struct Driver {
     pub name: String,
-    pub prefix: Path,
+    pub prefix: device::Path,
     pub max_history: Option<usize>,
     pub cfg: Option<DriverConfig>,
 }
@@ -77,12 +74,13 @@ pub struct Driver {
 #[derive(Deserialize)]
 pub struct Logic {
     pub name: String,
+    pub summary: Option<String>,
     #[serde(default)]
     pub defs: HashMap<String, String>,
     pub exprs: Vec<String>,
     #[serde(default)]
-    pub inputs: HashMap<String, Name>,
-    pub outputs: HashMap<String, Name>,
+    pub inputs: HashMap<String, device::Name>,
+    pub outputs: HashMap<String, device::Name>,
 }
 
 fn from_cmdline(mut cfg: Config) -> (bool, Config) {
@@ -468,7 +466,7 @@ prefix = "null"
                 assert_eq!(cfg.driver[0].name, "none");
                 assert_eq!(
                     cfg.driver[0].prefix,
-                    "null".parse::<Path>().unwrap()
+                    "null".parse::<device::Path>().unwrap()
                 );
                 assert_eq!(cfg.driver[0].max_history, None);
             }
@@ -489,7 +487,7 @@ max_history = 10000
                 assert_eq!(cfg.driver[0].name, "none");
                 assert_eq!(
                     cfg.driver[0].prefix,
-                    "null".parse::<Path>().unwrap()
+                    "null".parse::<device::Path>().unwrap()
                 );
                 assert_eq!(cfg.driver[0].max_history, Some(10000));
             }
@@ -636,7 +634,7 @@ outputs = { bulb = "room:bulb:enable" }
                 assert!(cfg.logic[0].inputs.is_empty());
                 assert_eq!(
                     cfg.logic[0].outputs.get("bulb"),
-                    Some(&"room:bulb:enable".parse::<Name>().unwrap())
+                    Some(&"room:bulb:enable".parse::<device::Name>().unwrap())
                 );
             }
             Err(e) => panic!("TOML parse error: {}", e),
@@ -659,7 +657,7 @@ outputs = {}
                 assert!(cfg.logic[0].outputs.is_empty());
                 assert_eq!(
                     cfg.logic[0].inputs.get("bulb"),
-                    Some(&"room:bulb:enable".parse::<Name>().unwrap())
+                    Some(&"room:bulb:enable".parse::<device::Name>().unwrap())
                 );
             }
             Err(e) => panic!("TOML parse error: {}", e),
