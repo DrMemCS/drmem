@@ -11,7 +11,7 @@ mod drv_memory;
 mod drv_timer;
 
 pub type Fut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
-pub type MgrTask = Fut<Result<Infallible>>;
+pub type MgrTask = Fut<Infallible>;
 pub type MgrFuncRet = Fut<Result<MgrTask>>;
 
 pub type Launcher = fn(

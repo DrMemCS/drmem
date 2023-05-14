@@ -3,7 +3,7 @@
 extern crate lazy_static;
 
 use drmem_api::{driver::RequestChan, Error, Result};
-use futures::future;
+use futures::{future, FutureExt};
 use std::convert::Infallible;
 use tokio::task::JoinHandle;
 use tracing::{error, trace, warn};
@@ -102,8 +102,6 @@ async fn run() -> Result<()> {
 
         #[cfg(feature = "graphql")]
         {
-            use futures::FutureExt;
-
             // This server should never exit. If it does, report an
             // `OperationError`,
 
@@ -147,7 +145,9 @@ async fn run() -> Result<()> {
                 )
                 .await?;
 
-                tasks.push(wrap_task(tokio::spawn(instance)))
+                // Push the driver instance at the end of the vector.
+
+                tasks.push(wrap_task(tokio::spawn(instance.map(|v| Ok(v)))))
             } else {
                 error!("no driver named {}", driver.name);
                 return Err(Error::NotFound);
