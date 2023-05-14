@@ -132,6 +132,13 @@ async fn run() -> Result<()> {
             if let Some(driver_info) = drv_tbl.get_driver(&driver_name) {
                 let chan =
                     RequestChan::new(&driver_name, &driver.prefix, &tx_drv_req);
+
+                // Call the function that manages instances of this
+                // driver. If it returns `Ok()`, the value is a Future
+                // that implements the driver. If `Err()` is returned,
+                // then the devices couldn't be registered or some
+                // other serious error occurred.
+
                 let instance = (driver_info.2)(
                     driver_name,
                     driver.cfg.unwrap_or_default().clone(),

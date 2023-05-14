@@ -23,8 +23,8 @@ pub type Launcher = fn(
 
 pub type DriverInfo = (&'static str, &'static str, Launcher);
 
-// This is the main loop of the drvier manager. It only returns when
-// the driver returns an error or panics.
+// This is the main loop of the driver manager. It only returns if the
+// driver panics.
 
 fn mgr_body<T>(
     name: String, devices: T::DeviceSet, cfg: driver::DriverConfig,
@@ -99,6 +99,11 @@ where
     })
 }
 
+// This generic function manages an instance of a specific driver. We
+// use generics because each driver has a different set of devices
+// (T::DeviceSet), so one function wouldn't be able to handle every
+// type.
+
 fn manage_instance<T>(
     name: String, cfg: driver::DriverConfig, req_chan: driver::RequestChan,
     max_history: Option<usize>,
@@ -106,11 +111,19 @@ fn manage_instance<T>(
 where
     T: driver::API + Send + 'static,
 {
+    // Return a future that returns an error if the devices couldn't
+    // be registered, or returns a future that manages the running
+    // instance.
+
     Box::pin(async move {
+        // Let the driver API register the necessary devices.
+
         let devices = T::register_devices(req_chan, &cfg, max_history)
             .instrument(info_span!("one-time-init", name = &name))
             .await?;
         let drv_name = name.clone();
+
+        // Create a future that manages the instance.
 
         Ok(Box::pin(async move {
             mgr_body::<T>(name, devices, cfg)
