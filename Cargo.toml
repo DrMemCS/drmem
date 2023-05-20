@@ -12,7 +12,7 @@ async-trait = "0.1"
 
 futures = { version = "0.3", features = ["std"] }
 
-toml = "0.5"
+toml = "0.7"
 chrono = "0.4"
 
 tokio = { version = "1", features = ["macros", "time", "sync"] }
