@@ -1,4 +1,5 @@
 use super::store;
+use drmem_api::{Error, Result};
 use serde_derive::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -15,6 +16,8 @@ fn def_log_level() -> String {
 pub struct Config {
     #[serde(default = "def_log_level")]
     log_level: String,
+    latitude: f64,
+    longitude: f64,
     #[cfg(feature = "graphql")]
     #[serde(default)]
     pub graphql: super::graphql::config::Config,
@@ -54,6 +57,8 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             log_level: String::from("warn"),
+            latitude: 0.0,
+            longitude: 0.0,
             #[cfg(feature = "graphql")]
             graphql: super::graphql::config::Config::default(),
             backend: Some(store::config::Config::new()),
@@ -129,29 +134,42 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
     (matches.get_flag("print_cfg"), cfg)
 }
 
-fn parse_config(path: &str, contents: &str) -> Option<Config> {
-    match toml::from_str(contents) {
-        Ok(cfg) => Some(cfg),
-        Err(e) => {
-            print!("ERROR: {},\n       ignoring {}\n", e, path);
-            None
-        }
-    }
+fn parse_config(contents: &str) -> Result<Config> {
+    toml::from_str(contents)
+        .map_err(|e| Error::BadConfig(format!("{}", e)))
+        .and_then(|cfg: Config| {
+            // Make sure latitude is between -90 and 90 degrees.
+
+            if !(-90.0..=90.0).contains(&cfg.latitude) {
+                return Err(Error::BadConfig(
+                    "'latitude' is out of range".into(),
+                ));
+            }
+
+            // Make sure longitude is between -180 and 180 degrees.
+
+            if !(-180.0..=180.0).contains(&cfg.longitude) {
+                return Err(Error::BadConfig(
+                    "'longitude' is out of range".into(),
+                ));
+            }
+            Ok(cfg)
+        })
 }
 
-async fn from_file(path: &str) -> Option<Config> {
+async fn from_file(path: &str) -> Option<Result<Config>> {
     use tokio::fs;
 
     if let Ok(contents) = fs::read(path).await {
         let contents = String::from_utf8_lossy(&contents);
 
-        parse_config(path, &contents)
+        Some(parse_config(&contents))
     } else {
         None
     }
 }
 
-async fn find_cfg() -> Config {
+async fn find_cfg() -> Result<Config> {
     const CFG_FILE: &str = "drmem.toml";
 
     // Create a vector of directories that could contain a
@@ -185,7 +203,7 @@ async fn find_cfg() -> Config {
             return cfg;
         }
     }
-    Config::default()
+    Ok(Config::default())
 }
 
 fn dump_config(cfg: &Config) {
@@ -228,14 +246,21 @@ fn dump_config(cfg: &Config) {
 
 #[tracing::instrument(name = "loading config")]
 pub async fn get() -> Option<Config> {
-    let cfg = find_cfg().await;
-    let (print_cfg, cfg) = from_cmdline(cfg);
+    match find_cfg().await {
+        Ok(cfg) => {
+            let (print_cfg, cfg) = from_cmdline(cfg);
 
-    if print_cfg {
-        dump_config(&cfg);
-        None
-    } else {
-        Some(cfg)
+            if print_cfg {
+                dump_config(&cfg);
+                None
+            } else {
+                Some(cfg)
+            }
+        }
+        Err(e) => {
+            println!("{}", e);
+            None
+        }
     }
 }
 
@@ -248,29 +273,58 @@ mod tests {
     fn test_config() {
         // Verify the defaults.
 
-        match toml::from_str::<Config>("") {
+        match toml::from_str::<Config>(
+            r#"
+latitude = -45.0
+longitude = 45.0
+"#,
+        ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
             Err(e) => panic!("TOML parse error: {}", e),
         }
 
         // Verify the log_level can be set.
 
-        match toml::from_str::<Config>("log_level = \"trace\"") {
+        match toml::from_str::<Config>(
+            r#"
+latitude = -45.0
+longitude = 45.0
+log_level = "trace"
+"#,
+        ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::TRACE),
             Err(e) => panic!("TOML parse error: {}", e),
         }
 
-        match toml::from_str::<Config>("log_level = \"debug\"") {
+        match toml::from_str::<Config>(
+            r#"
+latitude = -45.0
+longitude = 45.0
+log_level = "debug"
+"#,
+        ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::DEBUG),
             Err(e) => panic!("TOML parse error: {}", e),
         }
 
-        match toml::from_str::<Config>("log_level = \"info\"") {
+        match toml::from_str::<Config>(
+            r#"
+latitude = -45.0
+longitude = 45.0
+log_level = "info"
+"#,
+        ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::INFO),
             Err(e) => panic!("TOML parse error: {}", e),
         }
 
-        match toml::from_str::<Config>("log_level = \"warn\"") {
+        match toml::from_str::<Config>(
+            r#"
+latitude = -45.0
+longitude = 45.0
+log_level = "warn"
+"#,
+        ) {
             Ok(cfg) => assert_eq!(cfg.get_log_level(), Level::WARN),
             Err(e) => panic!("TOML parse error: {}", e),
         }
@@ -279,21 +333,12 @@ mod tests {
     #[cfg(feature = "graphql")]
     #[test]
     fn test_graphql_config() {
-        match toml::from_str::<Config>("") {
-            Ok(cfg) => {
-                assert_eq!(cfg.graphql.name, "unknown name");
-                assert_eq!(cfg.graphql.location, "unknown location");
-                assert_eq!(
-                    cfg.graphql.addr,
-                    (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
-                );
-                assert_eq!(cfg.graphql.pref_host, None);
-                assert_eq!(cfg.graphql.pref_port, 3000)
-            }
-            Err(e) => panic!("TOML parse error: {}", e),
-        }
-
-        match toml::from_str::<Config>("[graphql]") {
+        match toml::from_str::<Config>(
+            r#"
+latitude = -45.0
+longitude = 45.0
+"#,
+        ) {
             Ok(cfg) => {
                 assert_eq!(cfg.graphql.name, "unknown name");
                 assert_eq!(cfg.graphql.location, "unknown location");
@@ -309,6 +354,29 @@ mod tests {
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
+[graphql]"#,
+        ) {
+            Ok(cfg) => {
+                assert_eq!(cfg.graphql.name, "unknown name");
+                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(
+                    cfg.graphql.addr,
+                    (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
+                );
+                assert_eq!(cfg.graphql.pref_host, None);
+                assert_eq!(cfg.graphql.pref_port, 3000)
+            }
+            Err(e) => panic!("TOML parse error: {}", e),
+        }
+
+        match toml::from_str::<Config>(
+            r#"
+latitude = -45.0
+longitude = 45.0
+
 [graphql]
 name = "primary-node"
 "#,
@@ -328,6 +396,9 @@ name = "primary-node"
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [graphql]
 location = "basement"
 "#,
@@ -345,6 +416,9 @@ location = "basement"
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [graphql]
 addr = "10.1.1.0:1234"
 "#,
@@ -364,6 +438,9 @@ addr = "10.1.1.0:1234"
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [graphql]
 pref_host = "www.google.com"
 pref_port = 4000
@@ -387,6 +464,9 @@ pref_port = 4000
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [graphql]
 pref_host = "www.google.com"
 "#,
@@ -414,13 +494,24 @@ pref_host = "www.google.com"
         // defined..
 
         assert!(
-            toml::from_str::<Config>("[[driver]]").is_err(),
+            toml::from_str::<Config>(
+                r#"
+latitude = -45.0
+longitude = 45.0
+
+[[driver]]
+"#,
+            )
+            .is_err(),
             "TOML parser accepted empty [[driver]] section"
         );
 
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[driver]]
 name = "none"
 "#,
@@ -432,6 +523,9 @@ name = "none"
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[driver]]
 prefix = "null"
 "#,
@@ -443,6 +537,9 @@ prefix = "null"
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[driver]]
 name = "none"
 prefix = "null"
@@ -455,6 +552,9 @@ max_history = false
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [[driver]]
 name = "none"
 prefix = "null"
@@ -475,6 +575,9 @@ prefix = "null"
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [[driver]]
 name = "none"
 prefix = "null"
@@ -501,13 +604,23 @@ max_history = 10000
         // defined..
 
         assert!(
-            toml::from_str::<Config>("[[logic]]").is_err(),
+            toml::from_str::<Config>(
+                r#"
+latitude = -45.0
+longitude = 45.0
+
+[[logic]]"#
+            )
+            .is_err(),
             "TOML parser accepted empty [[logic]] section"
         );
 
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 name = "none"
 "#,
@@ -519,6 +632,9 @@ name = "none"
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 exprs = []
 "#,
@@ -530,6 +646,9 @@ exprs = []
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 outputs = {}
 "#,
@@ -541,6 +660,9 @@ outputs = {}
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 name = "none"
 exprs = []
@@ -553,6 +675,9 @@ exprs = []
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 name = "none"
 outputs = {}
@@ -565,6 +690,9 @@ outputs = {}
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 exprs = []
 outputs = {}
@@ -577,6 +705,9 @@ outputs = {}
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 exprs = []
 inputs = { bulb = "junk+name" }
@@ -590,6 +721,9 @@ outputs = {}
         assert!(
             toml::from_str::<Config>(
                 r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 exprs = []
 outputs = { bulb = "junk+name" }
@@ -601,6 +735,9 @@ outputs = { bulb = "junk+name" }
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 name = "none"
 exprs = []
@@ -620,6 +757,9 @@ outputs = {}
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 name = "none"
 exprs = []
@@ -642,6 +782,9 @@ outputs = { bulb = "room:bulb:enable" }
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [[logic]]
 name = "none"
 exprs = []
@@ -674,7 +817,12 @@ outputs = {}
         // Verify a missing [backend] results in a properly defined
         // default.
 
-        match toml::from_str::<Config>("") {
+        match toml::from_str::<Config>(
+            r#"
+latitude = -45.0
+longitude = 45.0
+"#,
+        ) {
             Ok(cfg) => {
                 let def_cfg = Config::default();
 
@@ -695,6 +843,9 @@ outputs = {}
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [backend]
 addr = "192.168.1.1:6000"
 "#,
@@ -716,6 +867,9 @@ addr = "192.168.1.1:6000"
 
         match toml::from_str::<Config>(
             r#"
+latitude = -45.0
+longitude = 45.0
+
 [backend]
 dbn = 3
 "#,
