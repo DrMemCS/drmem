@@ -38,5 +38,5 @@ always be available in DrMem.
 
 - [X] One-shot, retriggerable timer
 - [X] Cycling boolean output
-- [ ] Memory device (RW: `value`) Each time `value` is set, it gets
-      logged. Its config parameter must specify its value's type.
+- [X] Memory device (RW: `value`) Each time `value` is set, it gets
+      logged.
