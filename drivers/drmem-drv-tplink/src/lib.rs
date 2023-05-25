@@ -18,7 +18,12 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn, Span};
 
-pub struct Instance;
+type Cmd = Vec<u8>;
+type Cmds = Vec<Cmd>;
+
+pub struct Instance {
+    reported_error: Option<bool>,
+}
 
 pub struct Devices {
     addr: SocketAddrV4,
@@ -35,7 +40,8 @@ impl Instance {
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
 
-    // Attempts to pull the hostname/port for the remote process.
+    // Pull the hostname/port for the remote process from the
+    // configuration.
 
     fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
         match cfg.get("addr") {
@@ -74,7 +80,11 @@ impl Instance {
     // brightness. NOTE: This function assumes `v` is in the range
     // 0.0 ..= 100.0.
 
-    fn set_brightness_cmd(v: f64) -> Vec<Vec<u8>> {
+    fn set_brightness_cmd(v: f64) -> Cmds {
+        // If the brightness is zero, we trun off the dimmer instead
+        // of setting the brightness to 0.0. If it's greater than 0.0,
+        // set the brightness and then turn on the dimmer.
+
         let mut cmds = if v > 0.0 {
             vec! [
 		format!("{{\"smartlife.iot.dimmer\":{{\"set_brightness\":{{\"brightness\":{}}}}}}}", v as u8),
@@ -86,6 +96,10 @@ impl Instance {
             )]
         };
 
+        // Pull each string from the vector, turn it into an array of
+        // bytes and then "encrypt" the contents. Form a new vector of
+        // encrypted commands.
+
         cmds.drain(..)
             .map(|s| {
                 let mut tmp = s.into_bytes();
@@ -96,7 +110,8 @@ impl Instance {
             .collect()
     }
 
-    // Connects to the address. Sets a timeout of 1 second.
+    // Connects to the address. Sets a timeout of 1 second for the
+    // connection.
 
     async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
         let fut = time::timeout(
@@ -108,6 +123,48 @@ impl Instance {
             Ok(s)
         } else {
             Err(Error::MissingPeer("tplink device".into()))
+        }
+    }
+
+    // Handles incoming settings for brightness.
+
+    async fn handle_brightness_setting(
+        v: f64, reply: driver::SettingReply<f64>,
+        report: &driver::ReportReading<f64>,
+    ) {
+        if !v.is_nan() {
+            // Clip incoming settings to the range 0.0..=100.0. Handle
+            // infinities, too.
+
+            let v = match v {
+                v if v == f64::INFINITY => 100.0,
+                v if v == f64::NEG_INFINITY => 0.0,
+                v if v < 0.0 => 0.0,
+                v if v > 100.0 => 100.0,
+                v => v,
+            };
+
+            // Always log incoming settings. Let the client know there
+            // was a successful setting, and include the value that
+            // was used.
+
+            report(v).await;
+            reply(Ok(v))
+        } else {
+            reply(Err(Error::InvArgument("device doesn't accept NaN".into())))
+        }
+    }
+
+    // Checks to see if the current error state ('value') matches the
+    // previosuly reported error state. If not, it saves the current
+    // state and sends the updated value to the backend.
+
+    async fn sync_error_state(
+        &mut self, report: &driver::ReportReading<bool>, value: bool,
+    ) {
+        if self.reported_error != Some(value) {
+            self.reported_error = Some(value);
+            report(value).await;
         }
     }
 }
@@ -157,7 +214,11 @@ impl driver::API for Instance {
     fn create_instance(
         _cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
-        Box::pin(async { Ok(Box::new(Instance)) })
+        Box::pin(async {
+            Ok(Box::new(Instance {
+                reported_error: None,
+            }))
+        })
     }
 
     // Main run loop for the driver.
@@ -166,18 +227,26 @@ impl driver::API for Instance {
         &'a mut self, devices: Arc<Mutex<Devices>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async move {
-            let mut err_state = None;
+            // Lock the mutex for the life of the driver. There is no
+            // other task that wants access to these device handles.
+            // An Arc<Mutex<>> is the other way I know of passing a
+            // mutable value to async tasks.
+
             let mut devices = devices.lock().await;
-            let mut timer =
-                tokio::time::interval(tokio::time::Duration::from_secs(5));
 
             // Record the devices's address in the "cfg" field of the
             // span.
 
             Span::current().record("cfg", devices.addr.to_string());
 
-            // Main loop of the driver. This loop can only ever exit
-            // via an Err() type.
+            // Create a 5-second interval timer which will be used to
+            // poll the device to see if its state was changed by some
+            // outside mechanism.
+
+            let mut timer =
+                tokio::time::interval(tokio::time::Duration::from_secs(5));
+
+            // Main loop of the driver. This loop never ends.
 
             loop {
                 // First, connect to the device. We'll leave the TCP
@@ -189,13 +258,7 @@ impl driver::API for Instance {
 
                 match Instance::connect(&devices.addr).await {
                     Ok(s) => {
-                        // Update the state of the error device. Make
-                        // sure we only report state changes.
-
-                        if err_state != Some(false) {
-                            err_state = Some(false);
-                            (devices.d_error)(false).await;
-                        }
+                        self.sync_error_state(&devices.d_error, false).await;
 
                         // Now wait for one of two events to occur.
 
@@ -211,43 +274,15 @@ impl driver::API for Instance {
                             _ = timer.tick() => {
                             }
 
-                            // Look for incoming settings. We don't
-                            // accept NaN and we clip other values
-                            // into 0.0 ..= 100.0 range.
-
                             Some((v, reply)) = devices.s_brightness.next() => {
-				if !v.is_nan() {
-                                    let v = match v {
-					v if v == f64::INFINITY => 100.0,
-					v if v == f64::NEG_INFINITY => 0.0,
-					v if v < 0.0 => 0.0,
-					v if v > 100.0 => 100.0,
-					v => v
-                                    };
-
-				    // Always log incoming settings.
-				    // Let the client know there was a
-				    // successful setting, and include
-				    // the value that was used.
-
-                                    (devices.d_brightness)(v).await;
-                                    reply(Ok(v))
-				} else {
-                                    reply(Err(Error::InvArgument(
-					"device doesn't accept NaN".into()
-				    )))
-				}
+				Instance::handle_brightness_setting(
+				    v, reply, &devices.d_brightness
+				).await
                             }
                         }
                     }
                     Err(e) => {
-                        // Update the state of the error device. Make
-                        // sure we only report state changes.
-
-                        if err_state != Some(true) {
-                            err_state = Some(true);
-                            (devices.d_error)(true).await;
-                        }
+                        self.sync_error_state(&devices.d_error, true).await;
 
                         // Log the error and then sleep for 10
                         // seconds. Hopefully the device will be
