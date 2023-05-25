@@ -2,13 +2,15 @@
 
 This driver supports WiFi devices that use the TP-Link protocol.
 
-This driver doesn't access a user's tplink account to find the
+This driver doesn't access a user's TP-Link account to find the
 hardware; DrMem wants to control things locally -- even when the
 Internet isn't available. To make this work reliably, you should
 assign a fixed address for the device using its MAC address and the
 configuration in your DHCP service (typically in your router.)
 
 ## Tested Devices
+
+This table contains products that are known to work with this driver.
 
 | Device Model | Vendor | Description   |
 |--------------|--------|---------------|
@@ -33,4 +35,4 @@ The driver creates these devices:
 
 ## History
 
-Added in v0.2.0.
+Added in v0.3.0.
