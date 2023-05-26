@@ -188,7 +188,8 @@ impl Config {
         ),)
     )]
     fn driver_info(
-        #[graphql(context)] db: &ConfigDb, name: Option<String>,
+        #[graphql(context)] db: &ConfigDb,
+        name: Option<String>,
     ) -> result::Result<Vec<DriverInfo>, FieldError> {
         if let Some(name) = name {
             if let Some((n, s, d)) = db.0.find(&name) {
@@ -314,7 +315,9 @@ impl Control {
     async fn perform_setting<
         T: Into<device::Value> + TryFrom<device::Value, Error = Error>,
     >(
-        db: &ConfigDb, device: &str, value: T,
+        db: &ConfigDb,
+        device: &str,
+        value: T,
     ) -> result::Result<T, FieldError> {
         // Make sure the device name is properly formed.
 
@@ -351,7 +354,9 @@ impl Control {
 			     set. It is an error to have all fields `null` \
 			     or more than one field non-`null`.")]
     async fn set_device(
-        #[graphql(context)] db: &ConfigDb, name: String, value: SettingData,
+        #[graphql(context)] db: &ConfigDb,
+        name: String,
+        value: SettingData,
     ) -> FieldResult<Reading> {
         match value {
             SettingData {
@@ -554,7 +559,8 @@ impl Subscription {
 			     method returns a stream which generates a \
 			     reply each time a device's value changes.")]
     async fn monitor_device(
-        #[graphql(context)] db: &ConfigDb, device: String,
+        #[graphql(context)] db: &ConfigDb,
+        device: String,
         range: Option<DateRange>,
     ) -> device::DataStream<FieldResult<Reading>> {
         use tokio_stream::StreamExt;
@@ -613,7 +619,8 @@ mod paths {
 }
 
 pub fn server(
-    cfg: &config::Config, db: crate::driver::DriverDb,
+    cfg: &config::Config,
+    db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
     #[cfg(feature = "graphiql")]

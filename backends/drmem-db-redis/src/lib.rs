@@ -297,7 +297,9 @@ impl ReadingStream {
     }
 
     pub fn new(
-        con: AioConnection, key: &str, id: Option<time::SystemTime>,
+        con: AioConnection,
+        key: &str,
+        id: Option<time::SystemTime>,
     ) -> Self {
         let key = key.to_string();
         let id = id.map(Self::ts_to_id).unwrap_or_else(|| String::from("$"));
@@ -344,7 +346,8 @@ impl Stream for ReadingStream {
     // timeout parameter to periodically wake up and retry the read.
 
     fn poll_next(
-        mut self: Pin<&mut Self>, cx: &mut Context<'_>,
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         loop {
             // If there is a `Poll::Ready` return value, then redis
@@ -409,7 +412,9 @@ pub struct RedisStore {
 
 impl RedisStore {
     fn make_client(
-        cfg: &config::Config, name: &Option<String>, pword: &Option<String>,
+        cfg: &config::Config,
+        name: &Option<String>,
+        pword: &Option<String>,
     ) -> Result<redis::Client> {
         use redis::{ConnectionAddr, ConnectionInfo, RedisConnectionInfo};
 
@@ -430,7 +435,9 @@ impl RedisStore {
     // Creates a single-user connection to redis.
 
     async fn make_connection(
-        cfg: &config::Config, name: Option<String>, pword: Option<String>,
+        cfg: &config::Config,
+        name: Option<String>,
+        pword: Option<String>,
     ) -> Result<AioConnection> {
         let client = Self::make_client(cfg, &name, &pword)?;
 
@@ -445,7 +452,9 @@ impl RedisStore {
     // Creates a mulitplexed connection to redis.
 
     async fn make_mplex_connection(
-        cfg: &config::Config, name: Option<String>, pword: Option<String>,
+        cfg: &config::Config,
+        name: Option<String>,
+        pword: Option<String>,
     ) -> Result<AioMplexConnection> {
         let client = Self::make_client(cfg, &name, &pword)?;
 
@@ -466,7 +475,9 @@ impl RedisStore {
     /// used for credentials when connecting to `redis`.
 
     pub async fn new(
-        cfg: &config::Config, name: Option<String>, pword: Option<String>,
+        cfg: &config::Config,
+        name: Option<String>,
+        pword: Option<String>,
     ) -> Result<Self> {
         let db_con = Self::make_mplex_connection(cfg, name, pword).await?;
 
@@ -491,7 +502,9 @@ impl RedisStore {
     }
 
     fn init_device_cmd(
-        name: &str, driver: &str, units: &Option<String>,
+        name: &str,
+        driver: &str,
+        units: &Option<String>,
     ) -> redis::Pipeline {
         let hist_key = Self::hist_key(name);
         let info_key = Self::info_key(name);
@@ -594,7 +607,9 @@ impl RedisStore {
     }
 
     fn report_bounded_new_value_cmd(
-        key: &str, val: &device::Value, mh: usize,
+        key: &str,
+        val: &device::Value,
+        mh: usize,
     ) -> redis::Cmd {
         let opts = redis::streams::StreamMaxlen::Approx(mh);
         let data = [("value", to_redis(val))];
@@ -603,7 +618,9 @@ impl RedisStore {
     }
 
     fn hash_to_info(
-        st: &SettingTable, name: &device::Name, hmap: &HashMap<String, String>,
+        st: &SettingTable,
+        name: &device::Name,
+        hmap: &HashMap<String, String>,
     ) -> Result<client::DevInfoReply> {
         // Redis doesn't return an error if the key doesn't exist; it
         // returns an empty array. So if our HashMap is empty, the key
@@ -655,7 +672,8 @@ impl RedisStore {
     // `client::DevInfoReply` containing the information.
 
     async fn lookup_device(
-        &mut self, name: device::Name,
+        &mut self,
+        name: device::Name,
     ) -> Result<client::DevInfoReply> {
         let info = Self::device_info_cmd(name.to_string().as_str())
             .query_async::<AioMplexConnection, HashMap<String, String>>(
@@ -688,7 +706,8 @@ impl RedisStore {
     }
 
     fn parse_last_value(
-        name: &str, reply: &redis::Value,
+        name: &str,
+        reply: &redis::Value,
     ) -> Option<device::Reading> {
         if redis::Value::Bulk(vec![]) == *reply {
             warn!("no previous value for {}", name);
@@ -808,7 +827,10 @@ impl RedisStore {
     // values.
 
     async fn init_device(
-        &mut self, name: &str, driver: &str, units: &Option<String>,
+        &mut self,
+        name: &str,
+        driver: &str,
+        units: &Option<String>,
     ) -> Result<()> {
         debug!("initializing {}", name);
         Self::init_device_cmd(name, driver, units)
@@ -821,7 +843,9 @@ impl RedisStore {
     // values.
 
     fn mk_report_func(
-        &self, name: &str, max_history: &Option<usize>,
+        &self,
+        name: &str,
+        max_history: &Option<usize>,
     ) -> ReportReading<device::Value> {
         let db_con = self.db_con.clone();
         let name = String::from(name);
@@ -866,8 +890,11 @@ impl Store for RedisStore {
     /// Registers a device in the redis backend.
 
     async fn register_read_only_device(
-        &mut self, driver_name: &str, name: &device::Name,
-        units: &Option<String>, max_history: &Option<usize>,
+        &mut self,
+        driver_name: &str,
+        name: &device::Name,
+        units: &Option<String>,
+        max_history: &Option<usize>,
     ) -> Result<(ReportReading<device::Value>, Option<device::Value>)> {
         let name = name.to_string();
 
@@ -885,8 +912,11 @@ impl Store for RedisStore {
     }
 
     async fn register_read_write_device(
-        &mut self, driver_name: &str, name: &device::Name,
-        units: &Option<String>, max_history: &Option<usize>,
+        &mut self,
+        driver_name: &str,
+        name: &device::Name,
+        units: &Option<String>,
+        max_history: &Option<usize>,
     ) -> Result<(
         ReportReading<device::Value>,
         RxDeviceSetting,
@@ -920,7 +950,8 @@ impl Store for RedisStore {
     // client will be from GraphQL requests.
 
     async fn get_device_info(
-        &mut self, pattern: &Option<String>,
+        &mut self,
+        pattern: &Option<String>,
     ) -> Result<Vec<client::DevInfoReply>> {
         // Get a list of all the keys that match the pattern. For
         // Redis, these keys will have "#info" appended at the end.
@@ -956,7 +987,9 @@ impl Store for RedisStore {
     // API.
 
     async fn set_device(
-        &self, name: device::Name, value: device::Value,
+        &self,
+        name: device::Name,
+        value: device::Value,
     ) -> Result<device::Value> {
         if let Some(tx) = self.table.get(&name) {
             let (tx_rpy, rx_rpy) = oneshot::channel();
@@ -982,7 +1015,9 @@ impl Store for RedisStore {
     }
 
     async fn get_setting_chan(
-        &self, name: device::Name, _own: bool,
+        &self,
+        name: device::Name,
+        _own: bool,
     ) -> Result<TxDeviceSetting> {
         if let Some(tx) = self.table.get(&name) {
             Ok(tx.clone())
@@ -992,7 +1027,9 @@ impl Store for RedisStore {
     }
 
     async fn monitor_device(
-        &mut self, name: device::Name, start: Option<DateTime<Utc>>,
+        &mut self,
+        name: device::Name,
+        start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
     ) -> Result<device::DataStream<device::Reading>> {
         match Self::make_connection(&self.cfg, None, None).await {

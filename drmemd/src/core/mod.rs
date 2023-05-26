@@ -133,7 +133,8 @@ impl State {
     /// mutable state. Normally it is run as a background task using
     /// `task::spawn`.
     async fn run(
-        mut self, mut rx_drv_req: mpsc::Receiver<driver::Request>,
+        mut self,
+        mut rx_drv_req: mpsc::Receiver<driver::Request>,
         mut rx_clnt_req: mpsc::Receiver<client::Request>,
     ) -> Result<Infallible> {
         info!("starting");

@@ -110,7 +110,9 @@ impl RequestChan {
     /// readings as the device is updated.
 
     pub async fn monitor_device(
-        &self, name: device::Name, start: Option<DateTime<Utc>>,
+        &self,
+        name: device::Name,
+        start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
     ) -> Result<device::DataStream<device::Reading>> {
         // Create our reply channel and build the request message.
@@ -148,7 +150,9 @@ impl RequestChan {
     pub async fn set_device<
         T: Into<device::Value> + TryFrom<device::Value, Error = Error>,
     >(
-        &self, name: device::Name, value: T,
+        &self,
+        name: device::Name,
+        value: T,
     ) -> Result<T> {
         // Create the reply channel and the request message that will
         // be sent.
@@ -171,7 +175,9 @@ impl RequestChan {
     }
 
     pub async fn get_setting_chan(
-        &self, name: device::Name, own: bool,
+        &self,
+        name: device::Name,
+        own: bool,
     ) -> Result<driver::TxDeviceSetting> {
         // Create the reply channel and the request message that will
         // be sent.
@@ -197,7 +203,8 @@ impl RequestChan {
     /// provided pattern.
 
     pub async fn get_device_info(
-        &self, pattern: Option<String>,
+        &self,
+        pattern: Option<String>,
     ) -> Result<Vec<DevInfoReply>> {
         let (rpy_chan, rx) = oneshot::channel();
 

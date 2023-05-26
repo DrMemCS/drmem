@@ -176,7 +176,8 @@ impl Instance {
     // Handles incoming settings for brightness.
 
     async fn handle_brightness_setting(
-        v: f64, reply: driver::SettingReply<f64>,
+        v: f64,
+        reply: driver::SettingReply<f64>,
         report: &driver::ReportReading<f64>,
     ) {
         if !v.is_nan() {
@@ -207,7 +208,9 @@ impl Instance {
     // state and sends the updated value to the backend.
 
     async fn sync_error_state(
-        &mut self, report: &driver::ReportReading<bool>, value: bool,
+        &mut self,
+        report: &driver::ReportReading<bool>,
+        value: bool,
     ) {
         if self.reported_error != Some(value) {
             self.reported_error = Some(value);
@@ -222,7 +225,8 @@ impl driver::API for Instance {
     // Registers two devices, `error` and `brightness`.
 
     fn register_devices(
-        core: driver::RequestChan, cfg: &DriverConfig,
+        core: driver::RequestChan,
+        cfg: &DriverConfig,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let error_name = "error"
@@ -271,7 +275,8 @@ impl driver::API for Instance {
     // Main run loop for the driver.
 
     fn run<'a>(
-        &'a mut self, devices: Arc<Mutex<Devices>>,
+        &'a mut self,
+        devices: Arc<Mutex<Devices>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async move {
             // Lock the mutex for the life of the driver. There is no
@@ -349,7 +354,10 @@ impl driver::API for Instance {
 
 #[cfg(test)]
 mod tests {
-    use super::{ Instance, tplink_api::{ActiveValue, BrightnessValue, Cmd} };
+    use super::{
+        tplink_api::{ActiveValue, BrightnessValue, Cmd},
+        Instance,
+    };
     use serde_json;
 
     #[test]
@@ -387,23 +395,43 @@ mod tests {
     #[test]
     fn test_brightness_commands() {
         assert_eq!(
-	    Instance::set_brightness_cmd(0.0),
-	    vec![Cmd::Active { value: ActiveValue { value: 0 } }]
-	);
+            Instance::set_brightness_cmd(0.0),
+            vec![Cmd::Active {
+                value: ActiveValue { value: 0 }
+            }]
+        );
         assert_eq!(
-	    Instance::set_brightness_cmd(1.0),
-	    vec![Cmd::Brightness { value: BrightnessValue { value: 1 } },
-		 Cmd::Active { value: ActiveValue { value: 1 } }]
-	);
+            Instance::set_brightness_cmd(1.0),
+            vec![
+                Cmd::Brightness {
+                    value: BrightnessValue { value: 1 }
+                },
+                Cmd::Active {
+                    value: ActiveValue { value: 1 }
+                }
+            ]
+        );
         assert_eq!(
-	    Instance::set_brightness_cmd(50.0),
-	    vec![Cmd::Brightness { value: BrightnessValue { value: 50 } },
-		 Cmd::Active { value: ActiveValue { value: 1 } }]
-	);
+            Instance::set_brightness_cmd(50.0),
+            vec![
+                Cmd::Brightness {
+                    value: BrightnessValue { value: 50 }
+                },
+                Cmd::Active {
+                    value: ActiveValue { value: 1 }
+                }
+            ]
+        );
         assert_eq!(
-	    Instance::set_brightness_cmd(100.0),
-	    vec![Cmd::Brightness { value: BrightnessValue { value: 100 } },
-		 Cmd::Active { value: ActiveValue { value: 1 } }]
-	);
+            Instance::set_brightness_cmd(100.0),
+            vec![
+                Cmd::Brightness {
+                    value: BrightnessValue { value: 100 }
+                },
+                Cmd::Active {
+                    value: ActiveValue { value: 1 }
+                }
+            ]
+        );
     }
 }

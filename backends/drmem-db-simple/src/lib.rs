@@ -48,7 +48,8 @@ struct DeviceInfo {
 
 impl DeviceInfo {
     pub fn create(
-        owner: String, units: Option<String>,
+        owner: String,
+        units: Option<String>,
         tx_setting: Option<TxDeviceSetting>,
     ) -> DeviceInfo {
         let (tx, _) = broadcast::channel(CHAN_SIZE);
@@ -74,7 +75,8 @@ pub async fn open(_cfg: &config::Config) -> Result<impl Store> {
 // instances of this function to record the latest value of a device.
 
 fn mk_report_func(
-    di: &DeviceInfo, name: &device::Name,
+    di: &DeviceInfo,
+    name: &device::Name,
 ) -> ReportReading<device::Value> {
     let reading = di.reading.clone();
     let name = name.to_string();
@@ -140,7 +142,10 @@ impl Store for SimpleStore {
     /// this function doesn't allocate a channel to provide settings.
 
     async fn register_read_only_device(
-        &mut self, driver: &str, name: &device::Name, units: &Option<String>,
+        &mut self,
+        driver: &str,
+        name: &device::Name,
+        units: &Option<String>,
         _max_history: &Option<usize>,
     ) -> Result<(ReportReading<device::Value>, Option<device::Value>)> {
         // Check to see if the device name already exists.
@@ -195,7 +200,10 @@ impl Store for SimpleStore {
     /// resources.
 
     async fn register_read_write_device(
-        &mut self, driver: &str, name: &device::Name, units: &Option<String>,
+        &mut self,
+        driver: &str,
+        name: &device::Name,
+        units: &Option<String>,
         _max_history: &Option<usize>,
     ) -> Result<(
         ReportReading<device::Value>,
@@ -261,7 +269,8 @@ impl Store for SimpleStore {
     }
 
     async fn get_device_info(
-        &mut self, pattern: &Option<String>,
+        &mut self,
+        pattern: &Option<String>,
     ) -> Result<Vec<client::DevInfoReply>> {
         let pred: Box<dyn FnMut(&(&device::Name, &DeviceInfo)) -> bool> =
             if let Some(pattern) = pattern {
@@ -306,7 +315,9 @@ impl Store for SimpleStore {
     }
 
     async fn set_device(
-        &self, name: device::Name, value: device::Value,
+        &self,
+        name: device::Name,
+        value: device::Value,
     ) -> Result<device::Value> {
         if let Some(di) = self.0.get(&name) {
             if let Some(tx) = &di.tx_setting {
@@ -332,7 +343,9 @@ impl Store for SimpleStore {
     }
 
     async fn get_setting_chan(
-        &self, name: device::Name, _own: bool,
+        &self,
+        name: device::Name,
+        _own: bool,
     ) -> Result<TxDeviceSetting> {
         if let Some(di) = self.0.get(&name) {
             if let Some(tx) = &di.tx_setting {
@@ -348,7 +361,9 @@ impl Store for SimpleStore {
     // by all new updates.
 
     async fn monitor_device(
-        &mut self, name: device::Name, start: Option<DateTime<Utc>>,
+        &mut self,
+        name: device::Name,
+        start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
     ) -> Result<device::DataStream<device::Reading>> {
         // Look-up the name of the device. If it doesn't exist, return
