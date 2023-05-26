@@ -1,3 +1,27 @@
+// A driver to manage devices that use the TP-Link protocol. This
+// protocol sends and receives JSON data over a TCP connection. Some
+// sample exchanges for the HS220 dimmer:
+//
+//  Turning it on:
+//
+//   Sent:      {"system":{"set_relay_state":{"state":1}}}
+//   Received:  {"system":{"set_relay_state":{"err_code":0}}}
+//
+//  Setting the brightness to 75%:
+//
+//   Sent:      {"smartlife.iot.dimmer":{"set_brightness":{"brightness":75}}}
+//   Received:  {"smartlife.iot.dimmer":{"set_brightness":{"err_code":0}}}
+//
+//  Turning it off:
+//
+//   Sent:      {"system":{"set_relay_state":{"state":0}}}
+//   Received:  {"system":{"set_relay_state":{"err_code":0}}}
+//
+//  Error reply:
+//
+//   Sent:      {"system":{"set_bright":{"bright":75}}}
+//   Received:  {"system":{"set_bright":{"err_code":-2,"err_msg":"member not support"}}}
+
 use drmem_api::{
     device,
     driver::{self, DriverConfig},
@@ -18,8 +42,38 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn, Span};
 
-type Cmd = Vec<u8>;
-type Cmds = Vec<Cmd>;
+mod tplink_api {
+    use serde::{Deserialize, Serialize, Serializer};
+
+    #[derive(Serialize)]
+    pub struct ActiveValue {
+        #[serde(rename = "state")]
+        pub value: u8,
+    }
+
+    #[derive(Serialize)]
+    pub struct BrightnessValue {
+        #[serde(rename = "brightness")]
+        pub value: u8,
+    }
+
+    #[derive(Serialize)]
+    pub enum Cmd {
+        #[serde(rename = "system")]
+        Active {
+            #[serde(rename = "set_relay_state")]
+            value: ActiveValue,
+        },
+
+        #[serde(rename = "smartlife.iot.dimmer")]
+        Brightness {
+            #[serde(rename = "set_brightness")]
+            value: BrightnessValue,
+        },
+    }
+}
+
+type Cmds = Vec<tplink_api::Cmd>;
 
 pub struct Instance {
     reported_error: Option<bool>,
@@ -81,33 +135,26 @@ impl Instance {
     // 0.0 ..= 100.0.
 
     fn set_brightness_cmd(v: f64) -> Cmds {
+        use tplink_api::{ActiveValue, BrightnessValue, Cmd};
+
         // If the brightness is zero, we trun off the dimmer instead
         // of setting the brightness to 0.0. If it's greater than 0.0,
         // set the brightness and then turn on the dimmer.
 
-        let mut cmds = if v > 0.0 {
-            vec! [
-		format!("{{\"smartlife.iot.dimmer\":{{\"set_brightness\":{{\"brightness\":{}}}}}}}", v as u8),
-		format!("{{\"system\":{{\"set_relay_state\":{{\"state\":1}}}}}}")
-	    ]
+        if v > 0.0 {
+            vec![
+                Cmd::Brightness {
+                    value: BrightnessValue { value: v as u8 },
+                },
+                Cmd::Active {
+                    value: ActiveValue { value: 1 },
+                },
+            ]
         } else {
-            vec![format!(
-                "{{\"system\":{{\"set_relay_state\":{{\"state\":0}}}}}}"
-            )]
-        };
-
-        // Pull each string from the vector, turn it into an array of
-        // bytes and then "encrypt" the contents. Form a new vector of
-        // encrypted commands.
-
-        cmds.drain(..)
-            .map(|s| {
-                let mut tmp = s.into_bytes();
-
-                Instance::crypt(&mut tmp[..]);
-                tmp
-            })
-            .collect()
+            vec![Cmd::Active {
+                value: ActiveValue { value: 0 },
+            }]
+        }
     }
 
     // Connects to the address. Sets a timeout of 1 second for the
@@ -301,4 +348,39 @@ impl driver::API for Instance {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::tplink_api::{ActiveValue, BrightnessValue, Cmd};
+    use serde_json;
+
+    #[test]
+    fn test_cmds() {
+        assert_eq!(
+            serde_json::to_string(&Cmd::Active {
+                value: ActiveValue { value: 1 }
+            })
+            .unwrap(),
+            "{\"system\":{\"set_relay_state\":{\"state\":1}}}"
+        );
+        assert_eq!(
+            serde_json::to_string(&Cmd::Brightness {
+                value: BrightnessValue { value: 0 }
+            })
+            .unwrap(),
+            "{\"smartlife.iot.dimmer\":{\"set_brightness\":{\"brightness\":0}}}"
+        );
+        assert_eq!(
+            serde_json::to_string(&Cmd::Brightness {
+                value: BrightnessValue { value: 50 }
+            })
+            .unwrap(),
+            "{\"smartlife.iot.dimmer\":{\"set_brightness\":{\"brightness\":50}}}"
+        );
+        assert_eq!(
+            serde_json::to_string(&Cmd::Brightness {
+                value: BrightnessValue { value: 100 }
+            })
+            .unwrap(),
+            "{\"smartlife.iot.dimmer\":{\"set_brightness\":{\"brightness\":100}}}"
+        );
+    }
+}
