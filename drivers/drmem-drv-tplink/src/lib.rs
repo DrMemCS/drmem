@@ -2,9 +2,15 @@
 // protocol sends and receives JSON data over a TCP connection. Some
 // sample exchanges for the HS220 dimmer:
 //
-//  Turning it on:
+//  Get status:
 //
-//   Sent:      {"system":{"set_relay_state":{"state":1}}}
+//   Sent:      {"system":{"get_sysinfo":{}}}
+//   Received:  ???
+//
+//  Turning it on/off:
+//
+//   Turn on:   {"system":{"set_relay_state":{"state":1}}}
+//   Turn off:  {"system":{"set_relay_state":{"state":0}}}
 //   Received:  {"system":{"set_relay_state":{"err_code":0}}}
 //
 //  Setting the brightness to 75%:
@@ -12,12 +18,13 @@
 //   Sent:      {"smartlife.iot.dimmer":{"set_brightness":{"brightness":75}}}
 //   Received:  {"smartlife.iot.dimmer":{"set_brightness":{"err_code":0}}}
 //
-//  Turning it off:
+//  Controlling LED indicator:
 //
-//   Sent:      {"system":{"set_relay_state":{"state":0}}}
-//   Received:  {"system":{"set_relay_state":{"err_code":0}}}
+//   Turn on:   {"system":{"set_led_off":{"off":0}}}
+//   Turn off:  {"system":{"set_led_off":{"off":1}}}
+//   Received:  {"system":{"set_led_off":{"err_code":0}}}
 //
-//  Error reply:
+//  Error reply (example):
 //
 //   Sent:      {"system":{"set_bright":{"bright":75}}}
 //   Received:  {"system":{"set_bright":{"err_code":-2,"err_msg":"member not support"}}}
