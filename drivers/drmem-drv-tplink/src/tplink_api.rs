@@ -35,41 +35,41 @@ pub struct BrightnessValue {
 #[derive(Serialize, PartialEq, Debug)]
 pub enum Cmd {
     #[serde(rename = "system")]
-    Active {
+    System {
         #[serde(rename = "set_relay_state")]
-        value: ActiveValue,
-    },
-
-    #[serde(rename = "system")]
-    Info {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        relay: Option<ActiveValue>,
         #[serde(rename = "get_sysinfo")]
-        value: InfoValue,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        info: Option<InfoValue>,
     },
 
     #[serde(rename = "smartlife.iot.dimmer")]
-    Brightness {
+    Dimmer {
         #[serde(rename = "set_brightness")]
         value: BrightnessValue,
     },
 }
 
 pub fn active_cmd(v: u8) -> Cmd {
-    Cmd::Active {
-        value: ActiveValue { value: v },
+    Cmd::System {
+        relay: Some(ActiveValue { value: v }),
+        info: None,
     }
 }
 
 pub fn brightness_cmd(v: u8) -> Cmd {
-    Cmd::Brightness {
+    Cmd::Dimmer {
         value: BrightnessValue { value: v },
     }
 }
 
 pub fn info_cmd() -> Cmd {
-    Cmd::Info {
-        value: InfoValue {
+    Cmd::System {
+        relay: None,
+        info: Some(InfoValue {
             nothing: PhantomData,
-        },
+        }),
     }
 }
 
