@@ -63,6 +63,8 @@ pub struct Devices {
     d_error: driver::ReportReading<bool>,
     d_brightness: driver::ReportReading<f64>,
     s_brightness: driver::SettingStream<f64>,
+    d_led: driver::ReportReading<bool>,
+    s_led: driver::SettingStream<bool>,
 }
 
 impl Instance {
@@ -172,6 +174,20 @@ impl Instance {
         }
     }
 
+    // Handles incoming settings for controlling the LED indicator.
+
+    async fn handle_led_setting(
+        v: bool,
+        reply: driver::SettingReply<bool>,
+        report: &driver::ReportReading<bool>,
+    ) {
+        // Always log incoming settings. Let the client know there was
+        // a successful setting, and include the value that was used.
+
+        report(v).await;
+        reply(Ok(v))
+    }
+
     // Checks to see if the current error state ('value') matches the
     // previosuly reported error state. If not, it saves the current
     // state and sends the updated value to the backend.
@@ -204,6 +220,9 @@ impl driver::API for Instance {
         let brightness_name = "brightness"
             .parse::<device::Base>()
             .expect("parsing 'brightness' should never fail");
+        let led_name = "led"
+            .parse::<device::Base>()
+            .expect("parsing 'led' should never fail");
         let addr = Instance::get_cfg_address(cfg);
 
         Box::pin(async move {
@@ -218,12 +237,16 @@ impl driver::API for Instance {
             let (d_brightness, s_brightness, _) = core
                 .add_rw_device(brightness_name, None, max_history)
                 .await?;
+            let (d_led, s_led, _) =
+                core.add_rw_device(led_name, None, max_history).await?;
 
             Ok(Devices {
                 addr,
                 d_error,
                 d_brightness,
                 s_brightness,
+                d_led,
+                s_led,
             })
         })
     }
@@ -281,6 +304,15 @@ impl driver::API for Instance {
                     Ok(s) => {
                         self.sync_error_state(&devices.d_error, false).await;
 
+			// Get mutable references to the setting
+			// channels.
+
+                        let Devices {
+                            s_brightness: ref mut s_b,
+                            s_led: ref mut s_l,
+                            ..
+                        } = *devices;
+
                         // Now wait for one of two events to occur.
 
                         #[rustfmt::skip]
@@ -295,9 +327,15 @@ impl driver::API for Instance {
                             _ = timer.tick() => {
                             }
 
-                            Some((v, reply)) = devices.s_brightness.next() => {
+                            Some((v, reply)) = s_b.next() => {
 				Instance::handle_brightness_setting(
 				    v, reply, &devices.d_brightness
+				).await
+                            }
+
+                            Some((v, reply)) = s_l.next() => {
+				Instance::handle_led_setting(
+				    v, reply, &devices.d_led
 				).await
                             }
                         }

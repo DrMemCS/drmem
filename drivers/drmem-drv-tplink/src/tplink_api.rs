@@ -61,7 +61,7 @@ pub fn active_cmd(v: u8) -> Cmd {
     Cmd::System {
         set_relay_state: Some(ActiveValue { state: v }),
         get_sysinfo: None,
-	set_led_off: None,
+        set_led_off: None,
     }
 }
 
@@ -77,7 +77,7 @@ pub fn info_cmd() -> Cmd {
         get_sysinfo: Some(InfoValue {
             nothing: PhantomData,
         }),
-	set_led_off: None
+        set_led_off: None,
     }
 }
 
@@ -85,7 +85,7 @@ pub fn led_cmd(v: bool) -> Cmd {
     Cmd::System {
         set_relay_state: None,
         get_sysinfo: None,
-	set_led_off: Some(LedValue { off: (!v) as u8 }),
+        set_led_off: Some(LedValue { off: (!v) as u8 }),
     }
 }
 

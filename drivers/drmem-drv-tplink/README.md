@@ -32,6 +32,7 @@ The driver creates these devices:
 |--------------|----------|-------|----------------------------------------|
 | `error`      | bool, RO |       | If true, there is an error communicating with the device. |
 | `brightness` | f64 , RW | %     | Accepts 0 - 100 for percent brightness. If the value is out of range, it will be brought back in range. |
+| `led`        | bool, RW |       | `true` and `false` turn the LED indicator on and off, respectively. |
 
 ## History
 
