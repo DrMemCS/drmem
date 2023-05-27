@@ -49,14 +49,34 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn, Span};
 
+// This module defines the commands that can be sent to the TP-Link
+// device. It also configures the `serde` crate so these commands are
+// converted to the expected JSON layout.
+
 mod tplink_api {
     use serde::{Deserialize, Serialize, Serializer};
+    use std::marker::PhantomData;
+
+    // Defines the internal value used by the `Active` command. Needs
+    // to convert to `{"state":value}`.
 
     #[derive(Serialize, PartialEq, Debug)]
     pub struct ActiveValue {
         #[serde(rename = "state")]
         pub value: u8,
     }
+
+    // Defines the internal value used by the `Info` command. Needs
+    // to convert to `{}`.
+
+    #[derive(Serialize, PartialEq, Debug)]
+    pub struct InfoValue {
+	#[serde(skip)]
+	pub nothing: PhantomData<()>
+    }
+
+    // Defines the internal value used by the `Brightness` command. Needs
+    // to convert to `{"brightness":value}`.
 
     #[derive(Serialize, PartialEq, Debug)]
     pub struct BrightnessValue {
@@ -72,11 +92,29 @@ mod tplink_api {
             value: ActiveValue,
         },
 
+        #[serde(rename = "system")]
+        Info {
+            #[serde(rename = "get_sysinfo")]
+            value: InfoValue,
+        },
+
         #[serde(rename = "smartlife.iot.dimmer")]
         Brightness {
             #[serde(rename = "set_brightness")]
             value: BrightnessValue,
         },
+    }
+
+    pub fn active_cmd(v: u8) -> Cmd {
+	Cmd::Active { value: ActiveValue { value: v } }
+    }
+
+    pub fn brightness_cmd(v: u8) -> Cmd {
+	Cmd::Brightness { value: BrightnessValue { value: v } }
+    }
+
+    pub fn info_cmd() -> Cmd {
+	Cmd::Info { value: InfoValue { nothing: PhantomData } }
     }
 }
 
@@ -142,7 +180,7 @@ impl Instance {
     // 0.0 ..= 100.0.
 
     fn set_brightness_cmd(v: f64) -> Cmds {
-        use tplink_api::{ActiveValue, BrightnessValue, Cmd};
+        use tplink_api::{active_cmd, brightness_cmd};
 
         // If the brightness is zero, we trun off the dimmer instead
         // of setting the brightness to 0.0. If it's greater than 0.0,
@@ -150,17 +188,11 @@ impl Instance {
 
         if v > 0.0 {
             vec![
-                Cmd::Brightness {
-                    value: BrightnessValue { value: v as u8 },
-                },
-                Cmd::Active {
-                    value: ActiveValue { value: 1 },
-                },
+                brightness_cmd(v as u8),
+                active_cmd(1),
             ]
         } else {
-            vec![Cmd::Active {
-                value: ActiveValue { value: 0 },
-            }]
+            vec![active_cmd(0)]
         }
     }
 
@@ -362,39 +394,31 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod tests {
     use super::{
-        tplink_api::{ActiveValue, BrightnessValue, Cmd},
-        Instance,
+        tplink_api::{active_cmd, brightness_cmd, info_cmd},
+        Instance
     };
     use serde_json;
 
     #[test]
     fn test_cmds() {
         assert_eq!(
-            serde_json::to_string(&Cmd::Active {
-                value: ActiveValue { value: 1 }
-            })
-            .unwrap(),
+            serde_json::to_string(&active_cmd(1)).unwrap(),
             "{\"system\":{\"set_relay_state\":{\"state\":1}}}"
         );
         assert_eq!(
-            serde_json::to_string(&Cmd::Brightness {
-                value: BrightnessValue { value: 0 }
-            })
-            .unwrap(),
+            serde_json::to_string(&info_cmd()).unwrap(),
+            "{\"system\":{\"get_sysinfo\":{}}}"
+        );
+        assert_eq!(
+            serde_json::to_string(&brightness_cmd(0)).unwrap(),
             "{\"smartlife.iot.dimmer\":{\"set_brightness\":{\"brightness\":0}}}"
         );
         assert_eq!(
-            serde_json::to_string(&Cmd::Brightness {
-                value: BrightnessValue { value: 50 }
-            })
-            .unwrap(),
+            serde_json::to_string(&brightness_cmd(50)).unwrap(),
             "{\"smartlife.iot.dimmer\":{\"set_brightness\":{\"brightness\":50}}}"
         );
         assert_eq!(
-            serde_json::to_string(&Cmd::Brightness {
-                value: BrightnessValue { value: 100 }
-            })
-            .unwrap(),
+            serde_json::to_string(&brightness_cmd(100)).unwrap(),
             "{\"smartlife.iot.dimmer\":{\"set_brightness\":{\"brightness\":100}}}"
         );
     }
@@ -403,41 +427,27 @@ mod tests {
     fn test_brightness_commands() {
         assert_eq!(
             Instance::set_brightness_cmd(0.0),
-            vec![Cmd::Active {
-                value: ActiveValue { value: 0 }
-            }]
+            vec![active_cmd(0)]
         );
         assert_eq!(
             Instance::set_brightness_cmd(1.0),
             vec![
-                Cmd::Brightness {
-                    value: BrightnessValue { value: 1 }
-                },
-                Cmd::Active {
-                    value: ActiveValue { value: 1 }
-                }
+                brightness_cmd(1),
+                active_cmd(1)
             ]
         );
         assert_eq!(
             Instance::set_brightness_cmd(50.0),
             vec![
-                Cmd::Brightness {
-                    value: BrightnessValue { value: 50 }
-                },
-                Cmd::Active {
-                    value: ActiveValue { value: 1 }
-                }
+                brightness_cmd(50),
+                active_cmd(1)
             ]
         );
         assert_eq!(
             Instance::set_brightness_cmd(100.0),
             vec![
-                Cmd::Brightness {
-                    value: BrightnessValue { value: 100 }
-                },
-                Cmd::Active {
-                    value: ActiveValue { value: 1 }
-                }
+                brightness_cmd(100),
+                active_cmd(1)
             ]
         );
     }
