@@ -110,9 +110,9 @@ impl Instance {
         }
     }
 
-    // Returns a buffer containing the encoded command to set the
-    // brightness. NOTE: This function assumes `v` is in the range
-    // 0.0 ..= 100.0.
+    // Returns command(s) to set the brightness to the specified
+    // value. NOTE: This function assumes `v` is in the range
+    // 0.0..=100.0.
 
     fn set_brightness_cmd(v: f64) -> Cmds {
         use tplink_api::{active_cmd, brightness_cmd};
@@ -304,8 +304,8 @@ impl driver::API for Instance {
                     Ok(s) => {
                         self.sync_error_state(&devices.d_error, false).await;
 
-			// Get mutable references to the setting
-			// channels.
+                        // Get mutable references to the setting
+                        // channels.
 
                         let Devices {
                             s_brightness: ref mut s_b,
