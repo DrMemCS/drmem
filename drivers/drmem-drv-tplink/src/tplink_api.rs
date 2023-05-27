@@ -10,8 +10,7 @@ use std::marker::PhantomData;
 
 #[derive(Serialize, PartialEq, Debug)]
 pub struct ActiveValue {
-    #[serde(rename = "state")]
-    pub value: u8,
+    pub state: u8,
 }
 
 // Defines the internal value used by the `Info` command. Needs
@@ -28,46 +27,43 @@ pub struct InfoValue {
 
 #[derive(Serialize, PartialEq, Debug)]
 pub struct BrightnessValue {
-    #[serde(rename = "brightness")]
-    pub value: u8,
+    pub brightness: u8,
 }
 
 #[derive(Serialize, PartialEq, Debug)]
 pub enum Cmd {
     #[serde(rename = "system")]
     System {
-        #[serde(rename = "set_relay_state")]
         #[serde(skip_serializing_if = "Option::is_none")]
-        relay: Option<ActiveValue>,
-        #[serde(rename = "get_sysinfo")]
+        set_relay_state: Option<ActiveValue>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        info: Option<InfoValue>,
+        get_sysinfo: Option<InfoValue>,
     },
 
     #[serde(rename = "smartlife.iot.dimmer")]
     Dimmer {
         #[serde(rename = "set_brightness")]
-        value: BrightnessValue,
+        set_brightness: BrightnessValue,
     },
 }
 
 pub fn active_cmd(v: u8) -> Cmd {
     Cmd::System {
-        relay: Some(ActiveValue { value: v }),
-        info: None,
+        set_relay_state: Some(ActiveValue { state: v }),
+        get_sysinfo: None,
     }
 }
 
 pub fn brightness_cmd(v: u8) -> Cmd {
     Cmd::Dimmer {
-        value: BrightnessValue { value: v },
+        set_brightness: BrightnessValue { brightness: v },
     }
 }
 
 pub fn info_cmd() -> Cmd {
     Cmd::System {
-        relay: None,
-        info: Some(InfoValue {
+        set_relay_state: None,
+        get_sysinfo: Some(InfoValue {
             nothing: PhantomData,
         }),
     }
