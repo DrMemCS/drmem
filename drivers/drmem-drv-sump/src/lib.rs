@@ -226,17 +226,34 @@ impl Instance {
         }
     }
 
-    async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
+    fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
+        use socket2::{Domain, Socket, Type};
+
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None)
+            .expect("couldn't create socket");
+
+        socket
+            .set_keepalive(true)
+            .expect("couldn't enable keep-alive on sump socket");
+
         info!("connecting to {}", addr);
 
-        let fut = TcpStream::connect(addr);
+        match socket.connect_timeout(
+            &<SocketAddrV4 as Into<socket2::SockAddr>>::into(*addr),
+            time::Duration::from_millis(100),
+        ) {
+            Ok(()) => {
+                // Before we move the socket into `tokio`'s control,
+                // it must be placed in non-blocking mode.
 
-        match Box::pin(time::timeout(time::Duration::from_secs(1), fut)).await {
-            Err(_) | Ok(Err(_)) => {
-                Err(Error::MissingPeer(String::from("sump pump")))
+                socket
+                    .set_nonblocking(true)
+                    .expect("couldn't make socket nonblocking");
+
+                TcpStream::from_std(socket.into())
+                    .map_err(|_| Error::MissingPeer(String::from("sump pump")))
             }
-
-            Ok(Ok(s)) => Ok(s),
+            Err(_) => Err(Error::MissingPeer(String::from("sump pump"))),
         }
     }
 
@@ -306,7 +323,7 @@ impl driver::API for Instance {
             // Connect with the remote process that is connected to
             // the sump pump.
 
-            let (rx, _tx) = Instance::connect(&addr).await?.into_split();
+            let (rx, _tx) = Instance::connect(&addr)?.into_split();
 
             Ok(Box::new(Instance {
                 state: State::Unknown,
