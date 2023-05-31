@@ -227,13 +227,16 @@ impl Instance {
     }
 
     fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
-        use socket2::{Domain, Socket, Type};
+        use socket2::{Domain, Socket, TcpKeepalive, Type};
 
+        let keepalive = TcpKeepalive::new()
+            .with_time(time::Duration::from_secs(5))
+            .with_interval(time::Duration::from_secs(5));
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)
             .expect("couldn't create socket");
 
         socket
-            .set_keepalive(true)
+            .set_tcp_keepalive(&keepalive)
             .expect("couldn't enable keep-alive on sump socket");
 
         info!("connecting to {}", addr);
