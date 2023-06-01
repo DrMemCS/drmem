@@ -412,6 +412,8 @@ impl driver::API for Instance {
             let addr = addr?;
             let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();
 
+            Span::current().record("cfg", addr.to_string());
+
             if let Ok(sock) = UdpSocket::bind(loc_if).await {
                 if sock.connect(addr).await.is_ok() {
                     return Ok(Box::new(Instance { sock, seq: 1 }));

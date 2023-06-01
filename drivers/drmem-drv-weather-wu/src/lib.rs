@@ -397,6 +397,8 @@ impl driver::API for Instance {
         let interval = Instance::get_cfg_interval(cfg);
         let key = Instance::get_cfg_key(cfg);
 
+        Span::current().record("cfg", Instance::get_cfg_station(cfg).unwrap());
+
         let fut = async move {
             match wu::create_client(Duration::from_secs(5)) {
                 Ok(mut con) => {
