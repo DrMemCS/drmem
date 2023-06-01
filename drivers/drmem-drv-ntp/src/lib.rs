@@ -13,7 +13,7 @@ use std::{
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::time::{self, Duration};
-use tracing::{debug, error, info, warn, Span};
+use tracing::{debug, error, trace, warn, Span};
 
 // Encapsulates data types and algorithms related to NTP server
 // information.
@@ -327,7 +327,7 @@ impl Instance {
 			    let dst_range = offset..offset + total;
 			    let src_range = 12..12 + total;
 
-			    debug!(
+			    trace!(
 				"copying {} bytes into {} through {}",
 				dst_range.len(),
 				dst_range.start,
@@ -461,7 +461,7 @@ impl driver::API for Instance {
                     match host_info {
                         Some(ref tmp) => {
                             if info != host_info {
-                                info!(
+                                debug!(
                                     "host: {}, offset: {} ms, delay: {} ms",
                                     tmp.get_host(),
                                     tmp.get_offset(),
