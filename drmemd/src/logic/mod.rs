@@ -21,7 +21,8 @@ type Inputs = Option<device::Value>;
 
 type Outputs = driver::TxDeviceSetting;
 
-// This is a set of streams that receives all the readings.
+// This is a set of streams that returns readings from all input
+// devices.
 
 type InputStream = StreamMap<usize, device::DataStream<device::Reading>>;
 
