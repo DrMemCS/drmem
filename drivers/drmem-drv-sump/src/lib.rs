@@ -16,7 +16,7 @@ use tokio::{
     sync::Mutex,
     time,
 };
-use tracing::{debug, info, warn, Span};
+use tracing::{debug, error, info, warn, Span};
 
 // The sump pump monitor uses a state machine to decide when to
 // calculate the duty cycle and in-flow.
@@ -239,13 +239,13 @@ impl Instance {
             .set_tcp_keepalive(&keepalive)
             .expect("couldn't enable keep-alive on sump socket");
 
-        info!("connecting to {}", addr);
-
         match socket.connect_timeout(
             &<SocketAddrV4 as Into<socket2::SockAddr>>::into(*addr),
             time::Duration::from_millis(100),
         ) {
             Ok(()) => {
+                info!("connected");
+
                 // Before we move the socket into `tokio`'s control,
                 // it must be placed in non-blocking mode.
 
@@ -253,10 +253,15 @@ impl Instance {
                     .set_nonblocking(true)
                     .expect("couldn't make socket nonblocking");
 
-                TcpStream::from_std(socket.into())
-                    .map_err(|_| Error::MissingPeer(String::from("sump pump")))
+                TcpStream::from_std(socket.into()).map_err(|_| {
+                    error!("couldn't convert to tokio::TcpStream");
+                    Error::MissingPeer(String::from("sump pump"))
+                })
             }
-            Err(_) => Err(Error::MissingPeer(String::from("sump pump"))),
+            Err(_) => {
+                error!("couldn't connect to {}", addr);
+                Err(Error::MissingPeer(String::from("sump pump")))
+            }
         }
     }
 
