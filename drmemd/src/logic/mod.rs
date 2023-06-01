@@ -186,6 +186,8 @@ impl Node {
                             error!("setting failed : {}", &e)
                         }
                     }
+                } else {
+                    error!("couldn't evaluate {}", &expr)
                 }
             }
         }
