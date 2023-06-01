@@ -4,8 +4,10 @@
 //
 // The language supports the following primitive types:
 //
+//     true/false        booleans
 //     ##                integers
 //     #.##              floating point numbers
+//     "TEXT"            strings
 //     {NAME}            variable named NAME (from config params)
 //
 // The token "->" represents assignment. The only items that can be on

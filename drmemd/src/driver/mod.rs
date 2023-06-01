@@ -46,7 +46,7 @@ where
             // using the provided configuration parameters.
 
             let result = T::create_instance(&cfg)
-                .instrument(info_span!("init", name = &name));
+                .instrument(info_span!("init", cfg = field::Empty));
 
             if let Ok(mut instance) = result.await {
                 let name = name.clone();

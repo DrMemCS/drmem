@@ -8,6 +8,13 @@ The NTP server needs to be configured to use UDP communications.
 Servers using broadcasts or multicasts to stay in sync will not
 generate any updates from this driver.
 
+It should be noted that, when these devices update, their timestamps
+are suspect. The author's RPi -- after a reboot -- takes hours before
+the time is within 1 ms of the remote time server. During that
+stabilization time, the timestamps hop around by tens of milliseconds.
+If your system is configured to write to a remote redis server, your
+timestamps will be more consistent.
+
 ## Configuration
 
 The driver needs to know the address of the NTP server. The NTP server

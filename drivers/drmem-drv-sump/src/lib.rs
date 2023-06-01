@@ -328,6 +328,8 @@ impl driver::API for Instance {
             let addr = addr?;
             let gpm = gpm?;
 
+            Span::current().record("cfg", addr.to_string());
+
             // Connect with the remote process that is connected to
             // the sump pump.
 
