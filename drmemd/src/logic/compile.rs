@@ -546,6 +546,7 @@ pub fn optimize(e: Expr) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use drmem_api::device;
 
     #[test]
     fn test_parser() {
@@ -1956,6 +1957,36 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "(4) < (((inp[0]) * (3)) + (inp[1])) -> out[1]"
+        );
+    }
+
+    fn evaluate(expr: &str) -> Option<device::Value> {
+        let env: Env = (&[], &[String::from("a")]);
+        let expr = format!("{} -> {{a}}", expr);
+        let prog = Program::compile(&expr, &env).unwrap();
+
+        eval(&prog.0, &[])
+    }
+
+    #[test]
+    fn test_evaluations() {
+        assert_eq!(evaluate("1 / 0"), None);
+        assert_eq!(evaluate("5 > true"), None);
+
+        assert_eq!(evaluate("1 + 2 * 3"), Some(device::Value::Int(7)));
+        assert_eq!(evaluate("(1 + 2) * 3"), Some(device::Value::Int(9)));
+        assert_eq!(evaluate("1 + (2 * 3)"), Some(device::Value::Int(7)));
+
+        assert_eq!(evaluate("1 + 2 < 1 + 3"), Some(device::Value::Bool(true)));
+        assert_eq!(evaluate("1 + 2 < 1 + 1"), Some(device::Value::Bool(false)));
+
+        assert_eq!(
+            evaluate("1 > 2 or 5 < 3"),
+            Some(device::Value::Bool(false))
+        );
+        assert_eq!(
+            evaluate("1 > 2 or 5 >= 3"),
+            Some(device::Value::Bool(true))
         );
     }
 }
