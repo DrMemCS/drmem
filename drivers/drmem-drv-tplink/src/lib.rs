@@ -35,11 +35,12 @@ use drmem_api::{
     Error, Result,
 };
 use futures::{Future, StreamExt};
+use std::mem::MaybeUninit;
 use std::net::SocketAddrV4;
 use std::sync::Arc;
 use std::{convert::Infallible, pin::Pin};
 use tokio::{
-    io::{self, AsyncReadExt},
+    io::{self, AsyncReadExt, AsyncWriteExt, ReadBuf},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
@@ -97,24 +98,74 @@ impl Instance {
         }
     }
 
-    // This is the encryption/decryption algorithm. It's a simple, XOR
-    // algorithm so running this function on the same buffer, over and
-    // over, encrypts it, then decrypts it, then encrypts it, etc.
+    // Performs an "RPC" call to the device; it sends the command and
+    // returns the reply.
 
-    fn crypt(buf: &mut [u8]) {
-        let mut key = 171u8;
+    async fn rpc(
+        s: &mut TcpStream,
+        cmd: tplink_api::Cmd,
+    ) -> Result<tplink_api::Reply> {
+        Instance::send_cmd(s, cmd).await?;
+        Instance::read_reply(s).await
+    }
 
-        for b in buf.iter_mut() {
-            key = *b ^ key;
-            *b = key;
+    // Sets the relay state on or off, depending on the argument.
+
+    async fn relay_state_rpc(s: &mut TcpStream, v: bool) -> Result<()> {
+        use tplink_api::{active_cmd, ErrorStatus, Reply};
+
+        match Instance::rpc(s, active_cmd(v as u8)).await? {
+            Reply::System {
+                set_relay_state: Some(ErrorStatus { err_code: 0, .. }),
+                ..
+            } => Ok(()),
+
+            Reply::System {
+                set_relay_state:
+                    Some(ErrorStatus {
+                        err_msg: Some(em), ..
+                    }),
+                ..
+            } => Err(Error::ProtocolError(format!("{}", &em))),
+
+            reply => Err(Error::ProtocolError(format!(
+                "unexpected reply : {:?}",
+                &reply
+            ))),
         }
     }
 
-    // Returns command(s) to set the brightness to the specified
-    // value. NOTE: This function assumes `v` is in the range
-    // 0.0..=100.0.
+    // Sets the brightness between 0 and 100, depending on the
+    // argument.
 
-    fn set_brightness_cmd(v: f64) -> Cmds {
+    async fn brightness_rpc(s: &mut TcpStream, v: u8) -> Result<()> {
+        use tplink_api::{brightness_cmd, ErrorStatus, Reply};
+
+        match Instance::rpc(s, brightness_cmd(v)).await? {
+            Reply::Dimmer {
+                set_brightness: Some(ErrorStatus { err_code: 0, .. }),
+                ..
+            } => Ok(()),
+
+            Reply::Dimmer {
+                set_brightness:
+                    Some(ErrorStatus {
+                        err_msg: Some(em), ..
+                    }),
+                ..
+            } => Err(Error::ProtocolError(format!("{}", &em))),
+
+            reply => Err(Error::ProtocolError(format!(
+                "unexpected reply : {:?}",
+                &reply
+            ))),
+        }
+    }
+
+    // Sends commands to change the brightness. NOTE: This function
+    // assumes `v` is in the range 0.0..=100.0.
+
+    async fn set_brightness(s: &mut TcpStream, v: f64) -> Result<()> {
         use tplink_api::{active_cmd, brightness_cmd};
 
         // If the brightness is zero, we trun off the dimmer instead
@@ -122,9 +173,42 @@ impl Instance {
         // set the brightness and then turn on the dimmer.
 
         if v > 0.0 {
-            vec![brightness_cmd(v as u8), active_cmd(1)]
+            Instance::send_cmd(s, brightness_cmd(v as u8)).await?;
+
+            if let tplink_api::Reply::Dimmer {
+                set_brightness:
+                    Some(tplink_api::ErrorStatus { err_code: 0, .. }),
+            } = Instance::read_reply(s).await?
+            {
+            } else {
+                unreachable!()
+            }
+
+            Instance::send_cmd(s, active_cmd(1)).await?;
+
+            if let tplink_api::Reply::System {
+                set_relay_state:
+                    Some(tplink_api::ErrorStatus { err_code: 0, .. }),
+                ..
+            } = Instance::read_reply(s).await?
+            {
+                Ok(())
+            } else {
+                unreachable!()
+            }
         } else {
-            vec![active_cmd(0)]
+            Instance::send_cmd(s, active_cmd(0)).await?;
+
+            if let tplink_api::Reply::System {
+                set_relay_state:
+                    Some(tplink_api::ErrorStatus { err_code: 0, .. }),
+                ..
+            } = Instance::read_reply(s).await?
+            {
+                Ok(())
+            } else {
+                unreachable!()
+            }
         }
     }
 
@@ -201,6 +285,41 @@ impl Instance {
             self.reported_error = Some(value);
             report(value).await;
         }
+    }
+
+    // Attempts to read a `tplink_api::Reply` type from the socket.
+    //
+    // NOTE: All replies are shorter than 1,000 bytes (on the wire.)
+    // Since the device has to encrypt the packet, it'll all go out in
+    // one 1500 byte fragment so we don't have to try to read until a
+    // complete message is received; it SHOULD all get included in one
+    // read.
+
+    async fn read_reply(s: &mut TcpStream) -> Result<tplink_api::Reply> {
+        let mut raw_buf: [MaybeUninit<u8>; 1000] =
+            [MaybeUninit::uninit(); 1000];
+        let mut buf = ReadBuf::uninit(&mut raw_buf);
+
+        if let Err(e) = s.read_buf(&mut buf).await {
+            error!("when reading reply : {}", &e);
+            Err(Error::MissingPeer("tplink device".into()))
+        } else {
+            tplink_api::Reply::decode(buf.filled_mut()).ok_or_else(|| {
+                error!("bad reply : {:?}", buf.filled());
+                Error::ParseError("tplink device".into())
+            })
+        }
+    }
+
+    // Attempts to send a command to the socket.
+
+    async fn send_cmd(s: &mut TcpStream, cmd: tplink_api::Cmd) -> Result<()> {
+        let buf = cmd.encode();
+
+        s.write_all(&buf)
+            .await
+            .map(|_| ())
+            .map_err(|_| Error::MissingPeer("tplink device".into()))
     }
 }
 
@@ -360,26 +479,4 @@ impl driver::API for Instance {
 }
 
 #[cfg(test)]
-mod test {
-    use super::{tplink_api, Instance};
-
-    #[test]
-    fn test_brightness_commands() {
-        assert_eq!(
-            Instance::set_brightness_cmd(0.0),
-            vec![tplink_api::active_cmd(0)]
-        );
-        assert_eq!(
-            Instance::set_brightness_cmd(1.0),
-            vec![tplink_api::brightness_cmd(1), tplink_api::active_cmd(1)]
-        );
-        assert_eq!(
-            Instance::set_brightness_cmd(50.0),
-            vec![tplink_api::brightness_cmd(50), tplink_api::active_cmd(1)]
-        );
-        assert_eq!(
-            Instance::set_brightness_cmd(100.0),
-            vec![tplink_api::brightness_cmd(100), tplink_api::active_cmd(1)]
-        );
-    }
-}
+mod test {}
