@@ -690,15 +690,24 @@ impl RedisStore {
             .await
             .map_err(xlat_err)
             .and_then(move |v| {
-                let info = client::DevInfoReply {
-                    total_points: v.length as u32,
-                    first_point: Some(Self::stream_id_to_reading(
-                        &v.first_entry,
-                    )?),
-                    last_point: Some(Self::stream_id_to_reading(
-                        &v.last_entry,
-                    )?),
-                    ..info
+                let info = if v.length > 0 {
+                    client::DevInfoReply {
+                        total_points: v.length as u32,
+                        first_point: Some(Self::stream_id_to_reading(
+                            &v.first_entry,
+                        )?),
+                        last_point: Some(Self::stream_id_to_reading(
+                            &v.last_entry,
+                        )?),
+                        ..info
+                    }
+                } else {
+                    client::DevInfoReply {
+                        total_points: 0,
+                        first_point: None,
+                        last_point: None,
+                        ..info
+                    }
                 };
 
                 Ok(info)
