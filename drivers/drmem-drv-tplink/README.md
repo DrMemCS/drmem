@@ -14,7 +14,7 @@ This table contains products that are known to work with this driver.
 
 | Device Model | Vendor | Description   |
 |--------------|--------|---------------|
-| HS220        | Kasa   | Dimmer switch |
+| HS220        | Kasa   | Dimmer switch. Note: it takes around 200ms for this module to respond to a command. In some instances, it took ~1s! So don't try controlling it rapidly. |
 
 ## Configuration
 
