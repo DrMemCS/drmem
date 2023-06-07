@@ -139,7 +139,8 @@ impl driver::API for Instance {
     type DeviceSet = Devices;
 
     fn register_devices(
-        core: driver::RequestChan, _cfg: &DriverConfig,
+        core: driver::RequestChan,
+        _cfg: &DriverConfig,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let output_name = "output".parse::<device::Base>().unwrap();
@@ -190,7 +191,8 @@ impl driver::API for Instance {
     }
 
     fn run<'a>(
-        &'a mut self, devices: Arc<Mutex<Self::DeviceSet>>,
+        &'a mut self,
+        devices: Arc<Mutex<Self::DeviceSet>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async move {
             let mut timer = time::interval(self.millis);

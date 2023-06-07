@@ -40,7 +40,9 @@ impl State {
     // will be returned.
 
     pub fn off_event(
-        &mut self, stamp: u64, gpm: f64,
+        &mut self,
+        stamp: u64,
+        gpm: f64,
     ) -> Option<(u64, f64, f64)> {
         match *self {
             State::Unknown => {
@@ -281,7 +283,9 @@ impl driver::API for Instance {
     type DeviceSet = Devices;
 
     fn register_devices(
-        core: driver::RequestChan, _: &DriverConfig, max_history: Option<usize>,
+        core: driver::RequestChan,
+        _: &DriverConfig,
+        max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let service_name = "service".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
@@ -347,7 +351,8 @@ impl driver::API for Instance {
     }
 
     fn run<'a>(
-        &'a mut self, devices: Arc<Mutex<Devices>>,
+        &'a mut self,
+        devices: Arc<Mutex<Devices>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async move {
             // Record the peer's address in the "cfg" field of the

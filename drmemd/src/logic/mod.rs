@@ -44,7 +44,8 @@ impl Node {
     // 2) A chained set of streams which provide the readings.
 
     async fn setup_inputs(
-        c_req: &client::RequestChan, vars: &HashMap<String, device::Name>,
+        c_req: &client::RequestChan,
+        vars: &HashMap<String, device::Name>,
     ) -> Result<(Vec<String>, InputStream)> {
         let mut inputs = Vec::with_capacity(vars.len());
         let mut in_stream = StreamMap::with_capacity(vars.len());
@@ -72,7 +73,8 @@ impl Node {
     }
 
     async fn setup_outputs(
-        c_req: &client::RequestChan, vars: &HashMap<String, device::Name>,
+        c_req: &client::RequestChan,
+        vars: &HashMap<String, device::Name>,
     ) -> Result<(Vec<String>, Vec<driver::TxDeviceSetting>)> {
         let mut outputs = Vec::with_capacity(vars.len());
         let mut out_chans = Vec::with_capacity(vars.len());
@@ -103,7 +105,8 @@ impl Node {
     // the configuration information.
 
     async fn init(
-        c_req: client::RequestChan, cfg: &config::Logic,
+        c_req: client::RequestChan,
+        cfg: &config::Logic,
     ) -> Result<Node> {
         debug!("compiling expressions");
 
@@ -202,7 +205,8 @@ impl Node {
     // Starts a new instance of a logic node.
 
     pub async fn start(
-        c_req: client::RequestChan, cfg: &config::Logic,
+        c_req: client::RequestChan,
+        cfg: &config::Logic,
     ) -> Result<JoinHandle<Result<Infallible>>> {
         let name = cfg.name.clone();
 

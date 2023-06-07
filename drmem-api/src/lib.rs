@@ -48,8 +48,11 @@ pub trait Store {
     /// the device, as saved in the back-end.
 
     async fn register_read_only_device(
-        &mut self, driver: &str, name: &types::device::Name,
-        units: &Option<String>, max_history: &Option<usize>,
+        &mut self,
+        driver: &str,
+        name: &types::device::Name,
+        units: &Option<String>,
+        max_history: &Option<usize>,
     ) -> Result<(
         driver::ReportReading<types::device::Value>,
         Option<types::device::Value>,
@@ -79,8 +82,11 @@ pub trait Store {
     /// the last value of the device, as saved in the back-end.
 
     async fn register_read_write_device(
-        &mut self, driver: &str, name: &types::device::Name,
-        units: &Option<String>, max_history: &Option<usize>,
+        &mut self,
+        driver: &str,
+        name: &types::device::Name,
+        units: &Option<String>,
+        max_history: &Option<usize>,
     ) -> Result<(
         driver::ReportReading<types::device::Value>,
         driver::RxDeviceSetting,
@@ -96,14 +102,17 @@ pub trait Store {
     /// consistent across back-ends.)
 
     async fn get_device_info(
-        &mut self, pattern: &Option<String>,
+        &mut self,
+        pattern: &Option<String>,
     ) -> Result<Vec<client::DevInfoReply>>;
 
     /// Sends a request to a driver to set its device to the specified
     /// value.
 
     async fn set_device(
-        &self, name: types::device::Name, value: types::device::Value,
+        &self,
+        name: types::device::Name,
+        value: types::device::Value,
     ) -> Result<types::device::Value>;
 
     /// Obtains the `mpsc::Sender<>` handle associated with the
@@ -115,13 +124,17 @@ pub trait Store {
     /// they should set it to true.
 
     async fn get_setting_chan(
-        &self, name: types::device::Name, own: bool,
+        &self,
+        name: types::device::Name,
+        own: bool,
     ) -> Result<driver::TxDeviceSetting>;
 
     /// Creates a stream that yields values of a device as it updates.
 
     async fn monitor_device(
-        &mut self, name: types::device::Name, start: Option<DateTime<Utc>>,
+        &mut self,
+        name: types::device::Name,
+        start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
     ) -> Result<types::device::DataStream<types::device::Reading>>;
 }

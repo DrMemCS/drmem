@@ -1,10 +1,10 @@
 [package]
-name = "drmem-db-simple"
+name = "drmem-drv-tplink"
+version = "0.1.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
-version = "0.3.0"
 edition = "2021"
-description = "Simple backend for DrMem control system"
 homepage = "https://github.com/DrMemCS/drmem"
+description = "DrMem driver for TP-Link devices"
 repository = "https://github.com/DrMemCS/drmem"
 license = "MIT"
 categories = ["embedded"]
@@ -13,22 +13,16 @@ keywords = ["control-system", "automation"]
 [lib]
 doctest = false
 
-[badges]
-maintenance = { status = "actively-developed" }
-
 [dependencies]
-async-trait.workspace = true
-
 toml.workspace = true
-chrono.workspace = true
 
 futures.workspace = true
-
-tokio.workspace = true
-tokio-stream.workspace = true
+tokio = { workspace = true, features = ["net"] }
 tracing.workspace = true
-
+tracing-futures.workspace = true
+tracing-subscriber.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
+serde_json.workspace = true
 
 drmem-api = { path = "../../drmem-api", version = "0.3" }

@@ -84,7 +84,9 @@ impl Instance {
     }
 
     async fn get_cfg_key_and_interval(
-        con: &mut reqwest::Client, key: Option<String>, interval: u64,
+        con: &mut reqwest::Client,
+        key: Option<String>,
+        interval: u64,
     ) -> Result<(String, Duration)> {
         match key {
             Some(val) => Ok((val, Duration::from_secs(interval * 60))),
@@ -125,7 +127,8 @@ impl Instance {
     // values.
 
     async fn handle(
-        &mut self, obs: &wu::Observation,
+        &mut self,
+        obs: &wu::Observation,
         devices: &<Instance as driver::API>::DeviceSet,
     ) {
         // Retreive all the parameters whose units can change between
@@ -264,7 +267,8 @@ impl driver::API for Instance {
     type DeviceSet = Devices;
 
     fn register_devices(
-        core: driver::RequestChan, cfg: &DriverConfig,
+        core: driver::RequestChan,
+        cfg: &DriverConfig,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();
@@ -431,7 +435,8 @@ impl driver::API for Instance {
     }
 
     fn run<'a>(
-        &'a mut self, devices: Arc<Mutex<Self::DeviceSet>>,
+        &'a mut self,
+        devices: Arc<Mutex<Self::DeviceSet>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async move {
             let devices = devices.lock().await;

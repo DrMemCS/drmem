@@ -67,7 +67,8 @@ mod server {
     // method.
 
     fn update_host_info(
-        mut state: (Option<String>, Option<f64>, Option<f64>), item: &str,
+        mut state: (Option<String>, Option<f64>, Option<f64>),
+        item: &str,
     ) -> (Option<String>, Option<f64>, Option<f64>) {
         match item.split('=').collect::<Vec<&str>>()[..] {
             ["srcadr", adr] => state.0 = Some(String::from(adr)),
@@ -367,7 +368,9 @@ impl driver::API for Instance {
     type DeviceSet = Devices;
 
     fn register_devices(
-        core: driver::RequestChan, _: &DriverConfig, max_history: Option<usize>,
+        core: driver::RequestChan,
+        _: &DriverConfig,
+        max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         // It's safe to use `.unwrap()` for these names because, in a
         // fully-tested, released version of this driver, we would
@@ -426,7 +429,8 @@ impl driver::API for Instance {
     }
 
     fn run<'a>(
-        &'a mut self, devices: Arc<Mutex<Devices>>,
+        &'a mut self,
+        devices: Arc<Mutex<Devices>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async move {
             // Record the peer's address in the "cfg" field of the

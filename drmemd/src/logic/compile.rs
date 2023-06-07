@@ -160,7 +160,8 @@ pub fn eval(e: &Expr, inp: &[Option<device::Value>]) -> Option<device::Value> {
 // Returns the latest value of the variable.
 
 fn eval_as_var(
-    idx: usize, inp: &[Option<device::Value>],
+    idx: usize,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     inp[idx].clone()
 }
@@ -169,7 +170,8 @@ fn eval_as_var(
 // booleans as values and simply complements the value.
 
 fn eval_as_not_expr(
-    e: &Expr, inp: &[Option<device::Value>],
+    e: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match eval(e, inp) {
         Some(device::Value::Bool(v)) => Some(device::Value::Bool(!v)),
@@ -184,7 +186,9 @@ fn eval_as_not_expr(
 // OR expressions. If the first subexpression is `true`, the second
 // subexpression isn't evaluated.
 fn eval_as_or_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match eval(a, inp) {
         v @ Some(device::Value::Bool(true)) => v,
@@ -207,7 +211,9 @@ fn eval_as_or_expr(
 // AND expressions. If the first subexpression is `false`, the second
 // subexpression isn't evaluated.
 fn eval_as_and_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match eval(a, inp) {
         v @ Some(device::Value::Bool(false)) => v,
@@ -229,7 +235,9 @@ fn eval_as_and_expr(
 
 // EQ expressions. Both expressions must be of the same type.
 fn eval_as_eq_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match (eval(a, inp), eval(b, inp)) {
         (Some(device::Value::Bool(a)), Some(device::Value::Bool(b))) => {
@@ -260,7 +268,9 @@ fn eval_as_eq_expr(
 
 // LT expressions. Both expressions must be of the same type.
 fn eval_as_lt_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match (eval(a, inp), eval(b, inp)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
@@ -288,7 +298,9 @@ fn eval_as_lt_expr(
 
 // LT_EQ expressions. Both expressions must be of the same type.
 fn eval_as_lteq_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match (eval(a, inp), eval(b, inp)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
@@ -316,7 +328,9 @@ fn eval_as_lteq_expr(
 
 // ADD expressions.
 fn eval_as_add_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match (eval(a, inp), eval(b, inp)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
@@ -353,7 +367,9 @@ fn eval_as_add_expr(
 
 // SUB expressions.
 fn eval_as_sub_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match (eval(a, inp), eval(b, inp)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
@@ -390,7 +406,9 @@ fn eval_as_sub_expr(
 
 // MUL expressions.
 fn eval_as_mul_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match (eval(a, inp), eval(b, inp)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
@@ -427,7 +445,9 @@ fn eval_as_mul_expr(
 
 // DIV expressions.
 fn eval_as_div_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match (eval(a, inp), eval(b, inp)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b)))
@@ -460,7 +480,9 @@ fn eval_as_div_expr(
 
 // REM expressions.
 fn eval_as_rem_expr(
-    a: &Expr, b: &Expr, inp: &[Option<device::Value>],
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
 ) -> Option<device::Value> {
     match (eval(a, inp), eval(b, inp)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) if b > 0 => {

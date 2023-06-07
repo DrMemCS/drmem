@@ -38,9 +38,16 @@ pub enum Error {
     /// how to recover.
     DbCommunicationError,
 
+    /// Communication was disrupted due to one end not following a
+    /// protocol.
+    ProtocolError(String),
+
     /// The requested operation cannot complete because the process
     /// hasn't provided proper authentication credentials.
     AuthenticationError,
+
+    /// An operation didn't complete in a timely fashion.
+    TimeoutError,
 
     /// The requested operation couldn't complete. The description
     /// field will have more information for the user.
@@ -77,7 +84,9 @@ impl fmt::Display for Error {
             Error::DbCommunicationError => {
                 write!(f, "db communication error")
             }
+            Error::ProtocolError(v) => write!(f, "protocol error: {}", &v),
             Error::AuthenticationError => write!(f, "permission error"),
+            Error::TimeoutError => write!(f, "timeout"),
             Error::OperationError => {
                 write!(f, "couldn't complete operation")
             }

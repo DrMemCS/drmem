@@ -21,8 +21,9 @@ tracing = { version = "0.1", features = ["std"] }
 tracing-futures = "0.2"
 tracing-subscriber = "0.2"
 
-serde = "1"
-serde_derive = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_derive = "1.0"
 
 # Profiles used by all binaries and packages.
 

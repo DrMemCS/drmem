@@ -82,7 +82,7 @@ impl State {
                 let result = self.backend.get_device_info(pattern).await;
 
                 if let Err(ref e) = result {
-                    info!("get_device_info() returned {}", e);
+                    info!("get_device_info() returned '{}'", e);
                 }
 
                 if rpy_chan.send(result).is_err() {
@@ -133,7 +133,8 @@ impl State {
     /// mutable state. Normally it is run as a background task using
     /// `task::spawn`.
     async fn run(
-        mut self, mut rx_drv_req: mpsc::Receiver<driver::Request>,
+        mut self,
+        mut rx_drv_req: mpsc::Receiver<driver::Request>,
         mut rx_clnt_req: mpsc::Receiver<client::Request>,
     ) -> Result<Infallible> {
         info!("starting");

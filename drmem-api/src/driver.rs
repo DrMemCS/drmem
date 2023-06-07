@@ -95,7 +95,9 @@ pub struct RequestChan {
 
 impl RequestChan {
     pub fn new(
-        driver_name: &str, prefix: &Path, req_chan: &mpsc::Sender<Request>,
+        driver_name: &str,
+        prefix: &Path,
+        req_chan: &mpsc::Sender<Request>,
     ) -> Self {
         RequestChan {
             driver_name: String::from(driver_name),
@@ -121,7 +123,10 @@ impl RequestChan {
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
     pub async fn add_ro_device<T: Into<Value> + TryFrom<Value>>(
-        &self, name: Base, units: Option<&str>, max_history: Option<usize>,
+        &self,
+        name: Base,
+        units: Option<&str>,
+        max_history: Option<usize>,
     ) -> super::Result<(ReportReading<T>, Option<T>)> {
         // Create a location for the reply.
 
@@ -205,7 +210,10 @@ impl RequestChan {
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
     pub async fn add_rw_device<T: Into<Value> + TryFrom<Value>>(
-        &self, name: Base, units: Option<&str>, max_history: Option<usize>,
+        &self,
+        name: Base,
+        units: Option<&str>,
+        max_history: Option<usize>,
     ) -> Result<(ReportReading<T>, SettingStream<T>, Option<T>)> {
         let (tx, rx) = oneshot::channel();
         let result = self
@@ -251,7 +259,9 @@ pub trait API: Send {
     type DeviceSet: Send + Sync;
 
     fn register_devices(
-        drc: RequestChan, cfg: &DriverConfig, max_history: Option<usize>,
+        drc: RequestChan,
+        cfg: &DriverConfig,
+        max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>>;
 
     /// Creates an instance of the driver.
@@ -297,7 +307,8 @@ pub trait API: Send {
     /// driver is restarted.
 
     fn run<'a>(
-        &'a mut self, devices: Arc<Mutex<Self::DeviceSet>>,
+        &'a mut self,
+        devices: Arc<Mutex<Self::DeviceSet>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>>;
 }
 

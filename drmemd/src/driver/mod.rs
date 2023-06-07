@@ -27,7 +27,9 @@ pub type DriverInfo = (&'static str, &'static str, Launcher);
 // driver panics.
 
 fn mgr_body<T>(
-    name: String, devices: T::DeviceSet, cfg: driver::DriverConfig,
+    name: String,
+    devices: T::DeviceSet,
+    cfg: driver::DriverConfig,
 ) -> MgrTask
 where
     T: driver::API + Send + 'static,
@@ -105,7 +107,9 @@ where
 // type.
 
 fn manage_instance<T>(
-    name: String, cfg: driver::DriverConfig, req_chan: driver::RequestChan,
+    name: String,
+    cfg: driver::DriverConfig,
+    req_chan: driver::RequestChan,
     max_history: Option<usize>,
 ) -> MgrFuncRet
 where
@@ -211,11 +215,27 @@ impl DriverDb {
             );
         }
 
-        // Load the set-up for the GPIO sump pump monitor.
+        // Load the set-up for the Weather Underground driver.
 
         #[cfg(feature = "driver-weather-wu")]
         {
             use drmem_drv_weather_wu::Instance;
+
+            table.insert(
+                Instance::NAME,
+                (
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    manage_instance::<Instance>,
+                ),
+            );
+        }
+
+        // Load the set-up for the TP-Link driver.
+
+        #[cfg(feature = "driver-tplink")]
+        {
+            use drmem_drv_tplink::Instance;
 
             table.insert(
                 Instance::NAME,
@@ -242,7 +262,8 @@ impl DriverDb {
     /// query and returns it.
 
     pub fn find(
-        &self, key: &str,
+        &self,
+        key: &str,
     ) -> Option<(String, &'static str, &'static str)> {
         self.get_driver(key)
             .map(|info| (key.to_string(), info.0, info.1))
