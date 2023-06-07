@@ -2,19 +2,30 @@
 // device. It also configures the `serde` crate so these commands are
 // converted to the expected JSON layout.
 
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
-// This is the encryption/decryption algorithm. It's a simple, XOR
-// algorithm so running this function on the same buffer, over and
-// over, encrypts it, then decrypts it, then encrypts it, etc.
+// This is the encryption algorithm.
 
-fn crypt(buf: &mut [u8]) {
+fn encrypt(buf: &mut [u8]) {
     let mut key = 171u8;
 
     for b in buf.iter_mut() {
         key = *b ^ key;
         *b = key;
+    }
+}
+
+// This is the decryption algorithm.
+
+fn decrypt(buf: &mut [u8]) {
+    let mut key = 171u8;
+
+    for b in buf.iter_mut() {
+        let tmp = *b;
+
+        *b = *b ^ key;
+        key = tmp;
     }
 }
 
@@ -71,7 +82,7 @@ impl Cmd {
     pub fn encode(&self) -> Vec<u8> {
         let mut buf = serde_json::to_vec(&self).unwrap();
 
-        crypt(&mut buf);
+        encrypt(&mut buf);
         buf
     }
 }
@@ -118,7 +129,7 @@ pub enum Reply {
 
 impl Reply {
     pub fn decode(buf: &mut [u8]) -> Option<Reply> {
-        crypt(buf);
+        decrypt(buf);
         serde_json::from_slice(buf).ok()
     }
 }
@@ -159,6 +170,16 @@ pub fn led_cmd(v: bool) -> Cmd {
 mod tests {
     use super::*;
     use serde_json;
+
+    #[test]
+    fn test_crypt() {
+        let buf = [1u8, 2u8, 3u8, 4u8, 5u8];
+        let mut buf2 = buf.clone();
+
+        encrypt(&mut buf2);
+        decrypt(&mut buf2);
+        assert_eq!(&buf, &buf2);
+    }
 
     #[test]
     fn test_cmds() {

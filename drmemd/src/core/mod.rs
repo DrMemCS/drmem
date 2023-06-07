@@ -82,7 +82,7 @@ impl State {
                 let result = self.backend.get_device_info(pattern).await;
 
                 if let Err(ref e) = result {
-                    info!("get_device_info() returned {}", e);
+                    info!("get_device_info() returned '{}'", e);
                 }
 
                 if rpy_chan.send(result).is_err() {

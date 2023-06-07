@@ -46,6 +46,9 @@ pub enum Error {
     /// hasn't provided proper authentication credentials.
     AuthenticationError,
 
+    /// An operation didn't complete in a timely fashion.
+    TimeoutError,
+
     /// The requested operation couldn't complete. The description
     /// field will have more information for the user.
     OperationError,
@@ -83,6 +86,7 @@ impl fmt::Display for Error {
             }
             Error::ProtocolError(v) => write!(f, "protocol error: {}", &v),
             Error::AuthenticationError => write!(f, "permission error"),
+            Error::TimeoutError => write!(f, "timeout"),
             Error::OperationError => {
                 write!(f, "couldn't complete operation")
             }

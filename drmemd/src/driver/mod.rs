@@ -215,11 +215,27 @@ impl DriverDb {
             );
         }
 
-        // Load the set-up for the GPIO sump pump monitor.
+        // Load the set-up for the Weather Underground driver.
 
         #[cfg(feature = "driver-weather-wu")]
         {
             use drmem_drv_weather_wu::Instance;
+
+            table.insert(
+                Instance::NAME,
+                (
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    manage_instance::<Instance>,
+                ),
+            );
+        }
+
+        // Load the set-up for the TP-Link driver.
+
+        #[cfg(feature = "driver-tplink")]
+        {
+            use drmem_drv_tplink::Instance;
 
             table.insert(
                 Instance::NAME,
