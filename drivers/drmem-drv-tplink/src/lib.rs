@@ -99,8 +99,19 @@ impl Instance {
         s: &mut TcpStream,
         cmd: tplink_api::Cmd,
     ) -> Result<tplink_api::Reply> {
-        Instance::send_cmd(s, cmd).await?;
-        Instance::read_reply(s).await
+        // Wrap the transaction in an async block and wrap the block
+        // in a future that expects it to complete in 3s.
+
+        let fut = time::timeout(time::Duration::from_millis(3_000), async {
+            Instance::send_cmd(s, cmd).await?;
+            Instance::read_reply(s).await
+        });
+
+        if let Ok(v) = fut.await {
+            v
+        } else {
+            Err(Error::TimeoutError)
+        }
     }
 
     // Sets the relay state on or off, depending on the argument.
