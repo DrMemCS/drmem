@@ -5,7 +5,7 @@ this version, we'll use the simple backend, no external drivers, and
 include the GraphQL interface. We'll also enable the built-in GraphQL
 editing interface.
 
-This tutorial is based on v0.2.0.
+This tutorial is based on v0.3.0.
 
 ## Build `drmemd`
 
@@ -14,7 +14,7 @@ Download and build the executable:
 ```
 $ git clone git@github.com:DrMemCS/drmem.git
 $ cd drmem
-$ cargo build --features simple-backend,graphql,graphiql
+$ cargo build --features simple-backend,graphql
 ```
 
 This builds the debug version which is found at `target/debug/drmemd`.
@@ -30,6 +30,11 @@ Several small, useful drivers are always available so we'll use one of
 them. Create the file `drmem.toml` with the following contents:
 
 ```
+# These can be filled in later.
+
+latitude = 0
+longitude = 0
+
 [graphql]
 name = "tutorial"
 
@@ -39,23 +44,24 @@ prefix = "demo-timer"
 cfg = { millis = 5000, active_level = true }
 ```
 
-The "name" parameter specifies which driver we're using for this
-instance. In this case, we're using the `timer` driver which
-implememts a one-shot timer. The timer driver creates two devices:
-`enable` and `output`.
+In the "driver" section, the "name" parameter specifies which driver
+we're using for this instance. In this case, we're using the `timer`
+driver which implememts a one-shot timer. The timer driver creates two
+devices: `enable` and `output`.
 
 The "prefix" parameter specifies the path to be prepended to the
 device names created by this driver. For this configuration, the two
 devices will be named `demo-timer:enable` and `demo-timer:output`.
-Multiple `[[driver]]` sections can use the `timer` driver to make many
+Multiple "driver" sections can use the `timer` driver to make many
 timer devices, but different prefixes need to be specified so all the
 created devices have unique names.
 
 Each driver has a "cfg" parameter which contains configuration
-information specific to the driver. For timers, we specify the length
-of its active time using the "millis" parameter (in this example, 5
-seconds.) The "active_level" parameter specifies the value of the
-`output` device while the timing is active.
+information specific to the driver. Each drivers' documentation will
+specify what parameters are needed in the configuration. For timers,
+we specify the length of its active time using the "millis" parameter
+(in this example, 5 seconds.) The "active_level" parameter specifies
+the value of the `output` device while the timing is active.
 
 ## Run `drmemd`
 
@@ -64,21 +70,28 @@ starts up. It also opens port 3000 for GraphQL clients.
 
 ## Interacting via GraphQL
 
-When the `graphiql` feature is used, `drmemd` includes a GraphQL
-client so you can use a browser to interact with it. Ambitious users
-can write web or mobile apps with GraphQL client libraries to control
-and browse `drmemd` devices.
+When the `graphql` feature is used, `drmemd` provides a GraphQL API so
+you can use GraphQL clients to interact with DrMem. There are free
+GraphQL clients available, which provide a low-level, GraphQL
+interface. Ambitious users can write web or mobile apps with GraphQL
+client libraries to control and browse `drmemd` devices.
 
-Open a browser window and go to "http://MACHINE:3000/graphiql/" --
+For this tutorial, download a free, GraphQL client for your desktop
+platform. There are GraphQL extensions for the major browsers, as
+well, so you could use one of them for this tutorial. (As of this
+writing, the author has had success with the Altair extension for the
+Chrome browser.)
+
+Open your GraphQL client and go to "http://MACHINE:3000/drmem/q" --
 replacing MACHINE with the name/address of the machine running
 DrMem. If you can't connect, you may have to open port 3000 in your
-firewall. If your browser successfully connects, you'll see an
-environment where you can submit GraphQL queries and see the results.
+firewall. If it successfully connects, you'll see an environment where
+you can submit GraphQL queries and see the results.
 
-On the far right are two tabs, "Docs" and "Schema". Clicking on the
-"Docs" tab will show documentation built into DrMem which describes
-available queries, their arguments, and the form of the responses.
-Take a moment to peruse the docs.
+Typically, on the right, are two tabs, "Docs" and "Schema". Clicking
+on the "Docs" tab will show the GraphQL schema documentation which
+describes available queries, their arguments, and the form of the
+responses. Take a moment to peruse the docs.
 
 ## Drive Information
 
@@ -161,13 +174,13 @@ see these changes in the next section.
 
 ## Setting a Device
 
-For a timer device, when the `enable` device goes from false to true,
-the timer starts timing.
+For a timer device, when the `enable` device goes from `false` to
+`true`, the timer starts timing.
 
-Put the current browser window, which is monitoring the `output`
-device, aside and open another browser window. Connect to DrMem using
-the same URL as before. In this window, we're going to set the timer's
-`enable` device to true so it begins timing.
+Put the current window, which is monitoring the `output` device, aside
+and open another window (or tab, depending on your GraphQL client.)
+Connect to DrMem using the same URL as before. In this window, we're
+going to set the timer's `enable` device to `true` so it begins timing.
 
 Enter this query:
 
@@ -179,10 +192,10 @@ mutation {
 }
 ```
 
-When you execute this query, you'll the timer output goes immediately
-to true and, after 5 seconds, goes back to false. To start the timer
-again, you first have to set the `enable` device to false before
-setting it to true.
+When you execute this query, you'll see the timer output goes
+immediately to true and, after 5 seconds, goes back to false. To start
+the timer again, you first have to set the `enable` device to `false`
+before setting it to `true`.
 
 GraphQL allows you to chain queries, but you have to add "alias"
 labels so results can be matched with the query. Try this:
@@ -199,8 +212,19 @@ mutation {
 ```
 
 Now each time you run this double query, the timer resets; the first
-query sets the `enable` device to false and the second to true. The
-timer driver only reports *changes* to `output` so, if you reset it
-before it times out, you'll see `output` change to false 5 seconds
-later. In other words, the timer driver won't issue two true or two
-false values.
+query sets the `enable` device to `false` and the second to `true`.
+The timer driver only reports *changes* to `output` so, if you reset
+it before it times out, you'll see `output` change to false 5 seconds
+later. In other words, the timer driver won't issue two `true` or two
+`false` values.
+
+## Summary
+
+This tutorial shows how the GraphQL interface can be used to query
+configuration information, receive updates to devices, and set devices
+to new value (i.e. control devices.) All modern programming languages
+have a GraphQL client library so you can use your favorite language to
+interact with DrMem.
+
+In [TUTORIAL2](TUTORIAL2.md), we'll explore a more advanced feature of
+DrMem.
