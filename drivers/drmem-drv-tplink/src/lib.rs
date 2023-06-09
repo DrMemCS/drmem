@@ -369,15 +369,25 @@ impl Instance {
     // Attempts to send a command to the socket.
 
     async fn send_cmd(s: &mut TcpStream, cmd: tplink_api::Cmd) -> Result<()> {
-        let buf = cmd.encode();
+        let cmd_buf = cmd.encode();
 
-        s.write_u32(buf.len() as u32)
+        let mut buf = [0u8; 1000];
+
+        buf[0] = (cmd_buf.len() >> 24) as u8;
+        buf[1] = (cmd_buf.len() >> 16) as u8;
+        buf[2] = (cmd_buf.len() >> 8) as u8;
+        buf[3] = cmd_buf.len() as u8;
+
+        let out_buf = &mut buf[0..4 + cmd_buf.len()];
+
+        out_buf[4..].copy_from_slice(&cmd_buf);
+
+        s.write_all(out_buf).await.map(|_| ()).map_err(|_| {
+            Error::MissingPeer("tplink device : write buf".into())
+        })?;
+        s.flush()
             .await
-            .map_err(|_| Error::MissingPeer("tplink device".into()))?;
-        s.write_all(&buf)
-            .await
-            .map(|_| ())
-            .map_err(|_| Error::MissingPeer("tplink device".into()))
+            .map_err(|_| Error::MissingPeer("tplink device : flush".into()))
     }
 
     async fn main_loop<'a>(&mut self, devices: &mut MutexGuard<'_, Devices>) {
