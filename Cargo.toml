@@ -8,22 +8,22 @@ members = [
 default-members = ["drmemd"]
 
 [workspace.dependencies]
-async-trait = "0.1"
+async-trait = { version = "0.1", default-features = false }
 
 futures = { version = "0.3", features = ["std"] }
 
-toml = "0.7"
-chrono = "0.4"
+toml = { version = "0.7", default-features = false }
+chrono = { version = "0.4", default-features = false }
 
-tokio = { version = "1", features = ["macros", "time", "sync"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
+tokio = { version = "1", default-features = false }
+tokio-stream = { version = "0.1", default-features = false }
 tracing = { version = "0.1", features = ["std"] }
-tracing-futures = "0.2"
-tracing-subscriber = "0.2"
+tracing-futures = { version = "0.2", default-features = false }
+tracing-subscriber = { version = "0.2", default-features = false }
 
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_derive = "1.0"
+serde = { version = "1.0", default-features = false }
+serde_json = { version = "1.0", default-features = false }
+serde_derive = { version = "1.0", default-features = false }
 
 # Profiles used by all binaries and packages.
 
