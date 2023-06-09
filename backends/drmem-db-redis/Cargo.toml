@@ -33,6 +33,8 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
 
-redis = { version = "0.22", features = ["tokio-comp"] }
+redis.version = "0.22"
+redis.default-features = false
+redis.features = ["tokio-comp", "streams"]
 
 drmem-api = { path = "../../drmem-api", version = "0.3" }

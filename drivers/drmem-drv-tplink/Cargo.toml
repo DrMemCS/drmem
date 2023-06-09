@@ -17,7 +17,7 @@ doctest = false
 toml.workspace = true
 
 futures.workspace = true
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["net", "macros"] }
 tracing.workspace = true
 tracing-futures.workspace = true
 tracing-subscriber.workspace = true
