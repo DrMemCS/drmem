@@ -44,7 +44,7 @@ use tokio::{
     sync::{Mutex, MutexGuard},
     time,
 };
-use tracing::{debug, error, info, Span};
+use tracing::{debug, error, Span};
 
 mod tplink_api;
 
@@ -108,6 +108,9 @@ impl Instance {
         });
 
         if let Ok(v) = fut.await {
+            if let Err(ref e) = v {
+                error!("rpc : {}", &e);
+            }
             v
         } else {
             Err(Error::TimeoutError)
@@ -438,7 +441,7 @@ impl Instance {
 			    // the driver, update the local state.
 
 			    if current_led != led {
-				info!("updating LED state: {}", led);
+				debug!("external LED update: {}", led);
 				current_led = led;
 				(devices.d_led)(led).await;
 			    }
@@ -448,7 +451,7 @@ impl Instance {
 			    // state.
 
 			    if current_brightness != br {
-				info!("updating brightness state: {}", br);
+				debug!("external brightness update: {}", br);
 				current_brightness = br;
 				(devices.d_brightness)(br).await;
 			    }
@@ -469,6 +472,7 @@ impl Instance {
 				current_brightness = v;
 			    }
 			} else {
+			    debug!("don't need to apply brightness setting");
 
 			    // Hardware wasn't updated, but we still
 			    // need to log the setting and return a
@@ -494,7 +498,7 @@ impl Instance {
 				current_led = v;
 			    }
 			} else {
-			    debug!("led won't change");
+			    debug!("don't need to apply led setting");
 
 			    // Hardware wasn't updated, but we still
 			    // need to log the setting and return a
