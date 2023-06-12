@@ -746,10 +746,12 @@ pub fn server(
 
     // Make mDNS run in the background.
 
-    let _ = tokio::spawn(async move {
+    let jh = tokio::spawn(async move {
         task.await;
         drop(service)
     });
+
+    std::mem::drop(jh);
 
     http_task.instrument(info_span!("http"))
 }
