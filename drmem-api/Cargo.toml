@@ -1,6 +1,6 @@
 [package]
 name = "drmem-api"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 description = "Traits and types used internally by the DrMem control system"
