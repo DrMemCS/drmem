@@ -134,7 +134,7 @@ impl Instance {
                         err_msg: Some(em), ..
                     }),
                 ..
-            } => Err(Error::ProtocolError(format!("{}", &em))),
+            } => Err(Error::ProtocolError(em)),
 
             reply => Err(Error::ProtocolError(format!(
                 "unexpected reply : {:?}",
@@ -163,7 +163,7 @@ impl Instance {
                         err_msg: Some(em), ..
                     }),
                 ..
-            } => Err(Error::ProtocolError(format!("{}", &em))),
+            } => Err(Error::ProtocolError(em)),
 
             reply => Err(Error::ProtocolError(format!(
                 "unexpected reply : {:?}",
@@ -220,7 +220,7 @@ impl Instance {
                         err_msg: Some(em), ..
                     }),
                 ..
-            } => Err(Error::ProtocolError(format!("{}", &em))),
+            } => Err(Error::ProtocolError(em)),
 
             reply => Err(Error::ProtocolError(format!(
                 "unexpected reply : {:?}",

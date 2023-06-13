@@ -11,7 +11,7 @@ fn encrypt(buf: &mut [u8]) {
     let mut key = 171u8;
 
     for b in buf.iter_mut() {
-        key = *b ^ key;
+        key ^= *b;
         *b = key;
     }
 }
@@ -24,7 +24,7 @@ fn decrypt(buf: &mut [u8]) {
     for b in buf.iter_mut() {
         let tmp = *b;
 
-        *b = *b ^ key;
+        *b ^= key;
         key = tmp;
     }
 }

@@ -147,7 +147,7 @@ async fn run() -> Result<()> {
 
                 // Push the driver instance at the end of the vector.
 
-                tasks.push(wrap_task(tokio::spawn(instance.map(|v| Ok(v)))))
+                tasks.push(wrap_task(tokio::spawn(instance.map(Ok))))
             } else {
                 error!("no driver named {}", driver.name);
                 return Err(Error::NotFound);
