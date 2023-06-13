@@ -44,7 +44,7 @@ use tokio::{
     sync::{Mutex, MutexGuard},
     time,
 };
-use tracing::{debug, error, Span};
+use tracing::{debug, error, warn, Span};
 
 mod tplink_api;
 
@@ -108,9 +108,6 @@ impl Instance {
         });
 
         if let Ok(v) = fut.await {
-            if let Err(ref e) = v {
-                error!("rpc : {}", &e);
-            }
             v
         } else {
             Err(Error::TimeoutError)
@@ -254,10 +251,10 @@ impl Instance {
             TcpStream::connect(addr),
         );
 
-        if let Ok(Ok(s)) = fut.await {
-            Ok(s)
-        } else {
-            Err(Error::MissingPeer("tplink device".into()))
+        match fut.await {
+            Ok(Ok(s)) => Ok(s),
+            Ok(Err(e)) => Err(Error::MissingPeer(e.to_string())),
+            Err(_) => Err(Error::MissingPeer("timeout".into())),
         }
     }
 
@@ -268,7 +265,7 @@ impl Instance {
         v: f64,
         reply: driver::SettingReply<f64>,
         report: &'a driver::ReportReading<f64>,
-    ) -> bool {
+    ) -> Result<Option<f64>> {
         if !v.is_nan() {
             // Clip incoming settings to the range 0.0..=100.0. Handle
             // infinities, too.
@@ -289,17 +286,17 @@ impl Instance {
                 Ok(()) => {
                     report(v).await;
                     reply(Ok(v));
-                    true
+                    Ok(Some(v))
                 }
                 Err(e) => {
-                    error!("brightness setting failed : {}", &e);
-                    reply(Err(e));
-                    false
+                    error!("setting brightness : {}", &e);
+                    reply(Err(e.clone()));
+                    Err(e)
                 }
             }
         } else {
             reply(Err(Error::InvArgument("device doesn't accept NaN".into())));
-            false
+            Ok(None)
         }
     }
 
@@ -310,19 +307,17 @@ impl Instance {
         v: bool,
         reply: driver::SettingReply<bool>,
         report: &'a driver::ReportReading<bool>,
-    ) -> bool {
-        debug!("setting LED");
+    ) -> Result<()> {
         match Instance::led_state_rpc(s, v).await {
             Ok(()) => {
-                debug!("success!");
                 report(v).await;
                 reply(Ok(v));
-                true
+                Ok(())
             }
             Err(e) => {
-                error!("LED setting failed : {}", &e);
-                reply(Err(e));
-                false
+                error!("setting LED : {}", &e);
+                reply(Err(e.clone()));
+                Err(e)
             }
         }
     }
@@ -343,29 +338,26 @@ impl Instance {
     }
 
     // Attempts to read a `tplink_api::Reply` type from the socket.
-    //
-    // NOTE: All replies are shorter than 1,000 bytes (on the wire.)
-    // Since the device has to encrypt the packet, it'll all go out in
-    // one 1500 byte fragment so we don't have to try to read until a
-    // complete message is received; it SHOULD all get included in one
-    // read.
+    // All replies have a 4-byte length header so we know how much
+    // data to read.
 
     async fn read_reply(s: &mut TcpStream) -> Result<tplink_api::Reply> {
         if let Ok(sz) = s.read_u32().await {
-            let mut buf = [0; 1000];
-            let filled = &mut buf[0..sz as usize];
+            let mut buf = Vec::with_capacity(sz as usize);
+            let filled = &mut buf[..];
 
             if let Err(e) = s.read_exact(filled).await {
-                error!("when reading reply : {}", &e);
-                Err(Error::MissingPeer("tplink device".into()))
+                Err(Error::MissingPeer(e.to_string()))
             } else {
                 tplink_api::Reply::decode(filled).ok_or_else(|| {
-                    error!("bad reply : {}", String::from_utf8_lossy(filled));
-                    Error::ParseError("tplink device".into())
+                    Error::ParseError(format!(
+                        "bad reply : {}",
+                        String::from_utf8_lossy(filled)
+                    ))
                 })
             }
         } else {
-            Err(Error::MissingPeer("tplink device".into()))
+            Err(Error::MissingPeer("error reading header".into()))
         }
     }
 
@@ -385,15 +377,20 @@ impl Instance {
 
         out_buf[4..].copy_from_slice(&cmd_buf);
 
-        s.write_all(out_buf).await.map(|_| ()).map_err(|_| {
-            Error::MissingPeer("tplink device : write buf".into())
-        })?;
+        s.write_all(out_buf)
+            .await
+            .map(|_| ())
+            .map_err(|e| Error::MissingPeer(e.to_string()))?;
         s.flush()
             .await
-            .map_err(|_| Error::MissingPeer("tplink device : flush".into()))
+            .map_err(|e| Error::MissingPeer(e.to_string()))
     }
 
-    async fn main_loop<'a>(&mut self, devices: &mut MutexGuard<'_, Devices>) {
+    async fn main_loop<'a>(
+        &mut self,
+        s: &mut TcpStream,
+        devices: &mut MutexGuard<'_, Devices>,
+    ) {
         // Create a 5-second interval timer which will be used to poll
         // the device to see if its state was changed by some outside
         // mechanism.
@@ -403,111 +400,107 @@ impl Instance {
         let mut current_led = false;
         let mut current_brightness = -1.0f64;
 
-        // First, connect to the device. We'll leave the TCP
-        // connection open so we're ready for the next transaction.
-        //
-        // XXX: Will keeping the socket open prevent the phone app
-        // from controlling the device?
+        // Main loop of the driver. This loop never ends.
 
-        if let Ok(mut s) = Instance::connect(&devices.addr).await {
-            // Main loop of the driver. This loop never ends.
+        'main: loop {
+            self.sync_error_state(&devices.d_error, false).await;
 
-            loop {
-                self.sync_error_state(&devices.d_error, false).await;
+            // Get mutable references to the setting channels.
 
-                // Get mutable references to the setting channels.
+            let Devices {
+                s_brightness: ref mut s_b,
+                s_led: ref mut s_l,
+                ..
+            } = **devices;
 
-                let Devices {
-                    s_brightness: ref mut s_b,
-                    s_led: ref mut s_l,
-                    ..
-                } = **devices;
+            // Now wait for one of two events to occur.
 
-                // Now wait for one of two events to occur.
+            #[rustfmt::skip]
+            tokio::select! {
+                // If the timer tick expires, it's time to get the
+                // latest state of the device. Since external apps can
+                // modify the device outside of DrMem's control, we
+                // have to periodically poll it to stay in sync.
 
-                #[rustfmt::skip]
-                tokio::select! {
-                    // If the timer tick expires, it's time to get the
-                    // latest state of the device. Since external apps
-                    // can modify the device outside of DrMem's
-                    // control, we have to periodically poll it to
-                    // stay in sync.
+                _ = timer.tick() => {
+		    if let Ok((led, br)) = Instance::info_rpc(s).await {
+			let br = br as f64;
 
-                    _ = timer.tick() => {
-			if let Ok((led, br)) = Instance::info_rpc(&mut s).await {
-			    let br = br as f64;
+			// If the LED state has changed outside of the
+			// driver, update the local state.
 
-			    // If the LED state has changed outside of
-			    // the driver, update the local state.
-
-			    if current_led != led {
-				debug!("external LED update: {}", led);
-				current_led = led;
-				(devices.d_led)(led).await;
-			    }
-
-			    // If the brightness state has changed
-			    // outside of the driver, update the local
-			    // state.
-
-			    if current_brightness != br {
-				debug!("external brightness update: {}", br);
-				current_brightness = br;
-				(devices.d_brightness)(br).await;
-			    }
+			if current_led != led {
+			    debug!("external LED update: {}", led);
+			    current_led = led;
+			    (devices.d_led)(led).await;
 			}
-                    }
 
-		    // Handle settings to the brightness device.
+			// If the brightness state has changed outside
+			// of the driver, update the local state.
 
-                    Some((v, reply)) = s_b.next() => {
+			if current_brightness != br {
+			    debug!("external brightness update: {}", br);
+			    current_brightness = br;
+			    (devices.d_brightness)(br).await;
+			}
+		    } else {
+			break 'main
+		    }
+                }
 
-			// If the settings matches the current state,
-			// then don't actually control the hardware.
+		// Handle settings to the brightness device.
 
-			if current_brightness != v {
-			    if Instance::handle_brightness_setting(
-				&mut s, v, reply, &devices.d_brightness
-			    ).await {
-				current_brightness = v;
-			    }
+                Some((v, reply)) = s_b.next() => {
+
+		    // If the settings matches the current state, then
+		    // don't actually control the hardware.
+
+		    if current_brightness != v {
+			match Instance::handle_brightness_setting(
+			    s, v, reply, &devices.d_brightness
+			).await {
+			    Ok(Some(v)) => current_brightness = v,
+			    Ok(None) => (),
+			    Err(_) => break 'main
+			}
+		    } else {
+			debug!("don't need to apply brightness setting");
+
+			// Hardware wasn't updated, but we still need
+			// to log the setting and return a reply to
+			// the client.
+
+			(devices.d_brightness)(v).await;
+			reply(Ok(v))
+		    }
+                }
+
+		// Handle settings to the LED indicator device.
+
+                Some((v, reply)) = s_l.next() => {
+		    debug!("led setting -> {}", &v);
+
+		    // If the settings matches the current state, then
+		    // don't actually control the hardware.
+
+		    if current_led != v {
+			if Instance::handle_led_setting(
+			    s, v, reply, &devices.d_led
+			).await == Ok(()) {
+			    current_led = v;
 			} else {
-			    debug!("don't need to apply brightness setting");
-
-			    // Hardware wasn't updated, but we still
-			    // need to log the setting and return a
-			    // reply to the client.
-
-			    (devices.d_brightness)(v).await;
-			    reply(Ok(v))
+			    break 'main
 			}
-                    }
+		    } else {
+			debug!("don't need to apply led setting");
 
-		    // Handle settings to the LED indicator device.
+			// Hardware wasn't updated, but we still need
+			// to log the setting and return a reply to
+			// the client.
 
-                    Some((v, reply)) = s_l.next() => {
-			debug!("led setting -> {}", &v);
-
-			// If the settings matches the current state,
-			// then don't actually control the hardware.
-
-			if current_led != v {
-			    if Instance::handle_led_setting(
-				&mut s, v, reply, &devices.d_led
-			    ).await {
-				current_led = v;
-			    }
-			} else {
-			    debug!("don't need to apply led setting");
-
-			    // Hardware wasn't updated, but we still
-			    // need to log the setting and return a
-			    // reply to the client.
-
-			    (devices.d_led)(v).await;
-			    reply(Ok(v))
-			}
-                    }
+			(devices.d_led)(v).await;
+			reply(Ok(v))
+		    }
                 }
             }
         }
@@ -594,7 +587,20 @@ impl driver::API for Instance {
             Span::current().record("cfg", devices.addr.to_string());
 
             loop {
-                self.main_loop(&mut devices).await;
+                // First, connect to the device. We'll leave the TCP
+                // connection open so we're ready for the next
+                // transaction. Tests have shown that the HS220
+                // handles multiple client connections.
+
+                match Instance::connect(&devices.addr).await {
+                    Ok(mut s) => {
+                        self.main_loop(&mut s, &mut devices).await;
+                    }
+                    Err(e) => {
+                        warn!("couldn't connect : '{}'", e);
+                    }
+                }
+
                 self.sync_error_state(&devices.d_error, true).await;
 
                 // Log the error and then sleep for 10 seconds.
