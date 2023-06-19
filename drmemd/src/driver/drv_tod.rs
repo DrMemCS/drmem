@@ -6,10 +6,13 @@ use drmem_api::{
 };
 use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 use tokio::{sync::Mutex, time};
+use tracing::info;
 
 pub struct Instance;
 
 pub struct Devices {
+    utc: bool,
+
     d_year: driver::ReportReading<u16>,
     d_month: driver::ReportReading<u16>,
     d_day: driver::ReportReading<u16>,
@@ -33,6 +36,44 @@ impl Instance {
 
         (10020 - extra) % 1000
     }
+
+    fn get_utc_flag(cfg: &DriverConfig) -> Result<bool> {
+        match cfg.get("utc") {
+            Some(toml::value::Value::Boolean(level)) => Ok(*level),
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'utc' config parameter should be a boolean",
+            ))),
+            None => Ok(false),
+        }
+    }
+
+    fn get_time(utc: bool) -> (u16, u16, u16, u16, u16, u16, u16) {
+        if utc {
+            let now = chrono::Utc::now();
+
+            (
+                now.year() as u16,
+                now.month0() as u16,
+                now.day0() as u16,
+                now.weekday().num_days_from_monday() as u16,
+                now.hour() as u16,
+                now.minute() as u16,
+                now.second() as u16,
+            )
+        } else {
+            let now = chrono::Local::now();
+
+            (
+                now.year() as u16,
+                now.month0() as u16,
+                now.day0() as u16,
+                now.weekday().num_days_from_monday() as u16,
+                now.hour() as u16,
+                now.minute() as u16,
+                now.second() as u16,
+            )
+        }
+    }
 }
 
 impl driver::API for Instance {
@@ -40,7 +81,7 @@ impl driver::API for Instance {
 
     fn register_devices(
         core: driver::RequestChan,
-        _cfg: &DriverConfig,
+        cfg: &DriverConfig,
         _max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let year_name = "year".parse::<device::Base>().unwrap();
@@ -51,7 +92,11 @@ impl driver::API for Instance {
         let second_name = "second".parse::<device::Base>().unwrap();
         let dow_name = "day-of-week".parse::<device::Base>().unwrap();
 
+        let utc = Instance::get_utc_flag(cfg);
+
         Box::pin(async move {
+            let utc = utc?;
+
             let (d_year, _) =
                 core.add_ro_device(year_name, None, Some(1)).await?;
             let (d_month, _) =
@@ -68,6 +113,7 @@ impl driver::API for Instance {
                 core.add_ro_device(dow_name, None, Some(1)).await?;
 
             Ok(Devices {
+                utc,
                 d_year,
                 d_month,
                 d_day,
@@ -111,16 +157,15 @@ impl driver::API for Instance {
             loop {
                 let _inst = interval.tick().await;
 
-                let now = chrono::Utc::now().naive_utc();
-
-                let now_year = now.year() as u16;
-                let now_month = now.month0() as u16;
-                let now_day = now.day0() as u16;
-                let now_dow = now.weekday().num_days_from_monday() as u16;
-
-                let now_hour = now.hour() as u16;
-                let now_min = now.minute() as u16;
-                let now_sec = now.second() as u16;
+                let (
+                    now_year,
+                    now_month,
+                    now_day,
+                    now_dow,
+                    now_hour,
+                    now_min,
+                    now_sec,
+                ) = Instance::get_time(devices.utc);
 
                 if year != Some(now_year) {
                     year = Some(now_year);
