@@ -34,7 +34,7 @@ serde_derive.workspace = true
 
 clap = { version = "4", features = ["cargo"] }
 
-chrono.workspace = true
+chrono = { workspace = true, features = ["clock"] }
 
 lazy_static = "1"
 
