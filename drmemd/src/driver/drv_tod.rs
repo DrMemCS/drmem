@@ -41,7 +41,7 @@ impl driver::API for Instance {
     fn register_devices(
         core: driver::RequestChan,
         _cfg: &DriverConfig,
-        max_history: Option<usize>,
+        _max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let year_name = "year".parse::<device::Base>().unwrap();
         let month_name = "month".parse::<device::Base>().unwrap();
@@ -53,19 +53,19 @@ impl driver::API for Instance {
 
         Box::pin(async move {
             let (d_year, _) =
-                core.add_ro_device(year_name, None, max_history).await?;
+                core.add_ro_device(year_name, None, Some(1)).await?;
             let (d_month, _) =
-                core.add_ro_device(month_name, None, max_history).await?;
+                core.add_ro_device(month_name, None, Some(1)).await?;
             let (d_day, _) =
-                core.add_ro_device(day_name, None, max_history).await?;
+                core.add_ro_device(day_name, None, Some(1)).await?;
             let (d_hour, _) =
-                core.add_ro_device(hour_name, None, max_history).await?;
+                core.add_ro_device(hour_name, None, Some(1)).await?;
             let (d_min, _) =
-                core.add_ro_device(min_name, None, max_history).await?;
+                core.add_ro_device(min_name, None, Some(1)).await?;
             let (d_second, _) =
-                core.add_ro_device(second_name, None, max_history).await?;
+                core.add_ro_device(second_name, None, Some(1)).await?;
             let (d_dow, _) =
-                core.add_ro_device(dow_name, None, max_history).await?;
+                core.add_ro_device(dow_name, None, Some(1)).await?;
 
             Ok(Devices {
                 d_year,
