@@ -343,8 +343,8 @@ impl Instance {
 
     async fn read_reply(s: &mut TcpStream) -> Result<tplink_api::Reply> {
         if let Ok(sz) = s.read_u32().await {
-            let mut buf = Vec::with_capacity(sz as usize);
-            let filled = &mut buf[..];
+            let mut buf = [0; 1_000];
+            let filled = &mut buf[0..sz as usize];
 
             if let Err(e) = s.read_exact(filled).await {
                 Err(Error::MissingPeer(e.to_string()))
