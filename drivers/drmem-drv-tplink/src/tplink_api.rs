@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 
 // This is the encryption algorithm.
 
-fn encrypt(buf: &mut [u8]) {
+pub fn encrypt(buf: &mut [u8]) {
     let mut key = 171u8;
 
     for b in buf.iter_mut() {

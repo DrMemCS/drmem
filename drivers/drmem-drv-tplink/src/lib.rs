@@ -341,21 +341,34 @@ impl Instance {
     // All replies have a 4-byte length header so we know how much
     // data to read.
 
-    async fn read_reply(s: &mut TcpStream) -> Result<tplink_api::Reply> {
-        if let Ok(sz) = s.read_u32().await {
-            let mut buf = [0; 1_000];
-            let filled = &mut buf[0..sz as usize];
+    async fn read_reply<R>(s: &mut R) -> Result<tplink_api::Reply>
+    where
+        R: AsyncReadExt + std::marker::Unpin,
+    {
+	const RCV_TOTAL: usize = 1_000;
 
-            if let Err(e) = s.read_exact(filled).await {
-                Err(Error::MissingPeer(e.to_string()))
-            } else {
-                tplink_api::Reply::decode(filled).ok_or_else(|| {
-                    Error::ParseError(format!(
-                        "bad reply : {}",
-                        String::from_utf8_lossy(filled)
-                    ))
-                })
-            }
+        if let Ok(sz) = s.read_u32().await {
+	    let sz = sz as usize;
+
+	    if sz <= RCV_TOTAL {
+		let mut buf = [0u8; RCV_TOTAL];
+		let filled = &mut buf[0..sz as usize];
+
+		if let Err(e) = s.read_exact(filled).await {
+                    Err(Error::MissingPeer(e.to_string()))
+		} else {
+                    tplink_api::Reply::decode(filled).ok_or_else(|| {
+			Error::ParseError(format!(
+                            "bad reply : {}",
+                            String::from_utf8_lossy(filled)
+			))
+                    })
+		}
+	    } else {
+                Err(Error::ParseError(format!(
+		    "reply size ({sz}) is greater than {RCV_TOTAL}"
+                )))
+	    }
         } else {
             Err(Error::MissingPeer("error reading header".into()))
         }
@@ -615,4 +628,37 @@ impl driver::API for Instance {
 }
 
 #[cfg(test)]
-mod test {}
+mod test {
+    use super::{tplink_api, Instance};
+
+    #[tokio::test]
+    async fn test_read_reply() {
+	// Make sure packets with less than 4 bytes causes an error.
+
+	{
+	    let buf: &[u8] = &[0, 0, 0];
+
+	    assert!(Instance::read_reply(&mut &buf[0..=0]).await.is_err());
+	    assert!(Instance::read_reply(&mut &buf[0..1]).await.is_err());
+	    assert!(Instance::read_reply(&mut &buf[0..2]).await.is_err());
+	    assert!(Instance::read_reply(&mut &buf[0..3]).await.is_err());
+	}
+
+	{
+	    const REPLY: &[u8] =
+		b"{\"system\":{\"set_led_off\":{\"err_code\":0}}}";
+
+	    let mut buf = vec![0, 0, 0, 41];
+
+	    buf.extend_from_slice(REPLY);
+	    tplink_api::encrypt(&mut buf[4..]);
+
+	    assert!(buf.len() == 45);
+	    assert!(buf.as_slice().len() == 45);
+
+	    assert!(Instance::read_reply(&mut &buf[0..4]).await.is_err());
+	    assert!(Instance::read_reply(&mut &buf[0..5]).await.is_err());
+	    assert!(Instance::read_reply(&mut buf.as_slice()).await.is_ok());
+	}
+    }
+}
