@@ -51,27 +51,17 @@ mod tplink_api;
 const BUF_TOTAL: usize = 4_096;
 
 pub struct Instance {
+    addr: SocketAddrV4,
     reported_error: Option<bool>,
     buf: [u8; BUF_TOTAL],
 }
 
 pub struct Devices {
-    addr: SocketAddrV4,
-
     d_error: driver::ReportReading<bool>,
     d_brightness: driver::ReportReading<f64>,
     s_brightness: driver::SettingStream<f64>,
     d_led: driver::ReportReading<bool>,
     s_led: driver::SettingStream<bool>,
-}
-
-impl Default for Instance {
-    fn default() -> Self {
-        Instance {
-            reported_error: None,
-            buf: [0; BUF_TOTAL],
-        }
-    }
 }
 
 impl Instance {
@@ -555,7 +545,7 @@ impl driver::API for Instance {
 
     fn register_devices(
         core: driver::RequestChan,
-        cfg: &DriverConfig,
+        _cfg: &DriverConfig,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let error_name = "error"
@@ -567,13 +557,8 @@ impl driver::API for Instance {
         let led_name = "led"
             .parse::<device::Base>()
             .expect("parsing 'led' should never fail");
-        let addr = Instance::get_cfg_address(cfg);
 
         Box::pin(async move {
-            // Validate the configuration.
-
-            let addr = addr?;
-
             // Define the devices managed by this driver.
 
             let (d_error, _) =
@@ -585,7 +570,6 @@ impl driver::API for Instance {
                 core.add_rw_device(led_name, None, max_history).await?;
 
             Ok(Devices {
-                addr,
                 d_error,
                 d_brightness,
                 s_brightness,
@@ -599,9 +583,17 @@ impl driver::API for Instance {
     // stored in local variables in the `.run()` method.
 
     fn create_instance(
-        _cfg: &DriverConfig,
+        cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
-        Box::pin(async { Ok(Box::default()) })
+        let cfg_addr = Instance::get_cfg_address(cfg);
+
+        Box::pin(async {
+            Ok(Box::new(Instance {
+                addr: cfg_addr?,
+                reported_error: None,
+                buf: [0; BUF_TOTAL],
+            }))
+        })
     }
 
     // Main run loop for the driver.
@@ -621,7 +613,7 @@ impl driver::API for Instance {
             // Record the devices's address in the "cfg" field of the
             // span.
 
-            Span::current().record("cfg", devices.addr.to_string());
+            Span::current().record("cfg", self.addr.to_string());
 
             loop {
                 // First, connect to the device. We'll leave the TCP
@@ -629,7 +621,7 @@ impl driver::API for Instance {
                 // transaction. Tests have shown that the HS220
                 // handles multiple client connections.
 
-                match Instance::connect(&devices.addr).await {
+                match Instance::connect(&self.addr).await {
                     Ok(mut s) => {
                         self.main_loop(&mut s, &mut devices).await;
                     }
@@ -654,7 +646,11 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod test {
     use super::{tplink_api, Instance};
-    use std::io::Write;
+    use crate::BUF_TOTAL;
+    use std::{
+        io::Write,
+        net::{Ipv4Addr, SocketAddrV4},
+    };
 
     #[tokio::test]
     async fn test_read_reply() {
@@ -662,7 +658,11 @@ mod test {
 
         {
             let buf: &[u8] = &[0, 0, 0];
-            let mut inst = Instance::default();
+            let mut inst = Instance {
+                addr: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
+                reported_error: None,
+                buf: [0u8; BUF_TOTAL],
+            };
 
             assert!(inst.read_reply(&mut &buf[0..=0]).await.is_err());
             assert!(inst.read_reply(&mut &buf[0..1]).await.is_err());
@@ -685,7 +685,11 @@ mod test {
             assert!(buf.len() == 45);
             assert!(buf.as_slice().len() == 45);
 
-            let mut inst = Instance::default();
+            let mut inst = Instance {
+                addr: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
+                reported_error: None,
+                buf: [0u8; BUF_TOTAL],
+            };
 
             assert!(inst.read_reply(&mut &buf[0..4]).await.is_err());
             assert!(inst.read_reply(&mut &buf[0..5]).await.is_err());
