@@ -6,7 +6,6 @@ use drmem_api::{
 };
 use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 use tokio::{sync::Mutex, time};
-use tracing::info;
 
 pub struct Instance;
 
