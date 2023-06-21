@@ -107,16 +107,20 @@ impl Instance {
     // Performs an "RPC" call to the device; it sends the command and
     // returns the reply.
 
-    async fn rpc(
-        s: &mut TcpStream,
+    async fn rpc<T>(
+        &mut self,
+        s: &mut T,
         cmd: tplink_api::Cmd,
-    ) -> Result<tplink_api::Reply> {
+    ) -> Result<tplink_api::Reply>
+    where
+        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+    {
         // Wrap the transaction in an async block and wrap the block
         // in a future that expects it to complete in 3s.
 
         let fut = time::timeout(time::Duration::from_millis(3_000), async {
             Instance::send_cmd(s, cmd).await?;
-            Instance::read_reply(s).await
+            self.read_reply(s).await
         });
 
         if let Ok(v) = fut.await {
@@ -128,10 +132,13 @@ impl Instance {
 
     // Sets the relay state on or off, depending on the argument.
 
-    async fn relay_state_rpc(s: &mut TcpStream, v: bool) -> Result<()> {
+    async fn relay_state_rpc<T>(&mut self, s: &mut T, v: bool) -> Result<()>
+    where
+        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+    {
         use tplink_api::{active_cmd, ErrorStatus, Reply};
 
-        match Instance::rpc(s, active_cmd(v as u8)).await? {
+        match self.rpc(s, active_cmd(v as u8)).await? {
             Reply::System {
                 set_relay_state: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -154,13 +161,16 @@ impl Instance {
 
     // Sets the LED state on or off, depending on the argument.
 
-    async fn led_state_rpc(s: &mut TcpStream, v: bool) -> Result<()> {
+    async fn led_state_rpc<T>(&mut self, s: &mut T, v: bool) -> Result<()>
+    where
+        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+    {
         use tplink_api::{led_cmd, ErrorStatus, Reply};
 
         // Send the request and receive the reply. Use pattern
         // matching to determine the return value of the function.
 
-        match Instance::rpc(s, led_cmd(v)).await? {
+        match self.rpc(s, led_cmd(v)).await? {
             Reply::System {
                 set_led_off: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -183,13 +193,16 @@ impl Instance {
 
     // Retrieves info.
 
-    async fn info_rpc(s: &mut TcpStream) -> Result<(bool, u8)> {
+    async fn info_rpc<T>(&mut self, s: &mut T) -> Result<(bool, u8)>
+    where
+        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+    {
         use tplink_api::{info_cmd, Reply};
 
         // Send the request and receive the reply. Use pattern
         // matching to determine the return value of the function.
 
-        match Instance::rpc(s, info_cmd()).await? {
+        match self.rpc(s, info_cmd()).await? {
             Reply::System {
                 get_sysinfo: Some(info),
                 ..
@@ -214,10 +227,13 @@ impl Instance {
     // Sets the brightness between 0 and 100, depending on the
     // argument.
 
-    async fn brightness_rpc(s: &mut TcpStream, v: u8) -> Result<()> {
+    async fn brightness_rpc<T>(&mut self, s: &mut T, v: u8) -> Result<()>
+    where
+        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+    {
         use tplink_api::{brightness_cmd, ErrorStatus, Reply};
 
-        match Instance::rpc(s, brightness_cmd(v)).await? {
+        match self.rpc(s, brightness_cmd(v)).await? {
             Reply::Dimmer {
                 set_brightness: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -241,16 +257,19 @@ impl Instance {
     // Sends commands to change the brightness. NOTE: This function
     // assumes `v` is in the range 0.0..=100.0.
 
-    async fn set_brightness(s: &mut TcpStream, v: f64) -> Result<()> {
+    async fn set_brightness<T>(&mut self, s: &mut T, v: f64) -> Result<()>
+    where
+        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+    {
         // If the brightness is zero, we trun off the dimmer instead
         // of setting the brightness to 0.0. If it's greater than 0.0,
         // set the brightness and then turn on the dimmer.
 
         if v > 0.0 {
-            Instance::brightness_rpc(s, v as u8).await?;
-            Instance::relay_state_rpc(s, true).await
+            self.brightness_rpc(s, v as u8).await?;
+            self.relay_state_rpc(s, true).await
         } else {
-            Instance::relay_state_rpc(s, false).await
+            self.relay_state_rpc(s, false).await
         }
     }
 
@@ -272,12 +291,16 @@ impl Instance {
 
     // Handles incoming settings for brightness.
 
-    async fn handle_brightness_setting<'a>(
-        s: &'a mut TcpStream,
+    async fn handle_brightness_setting<'a, T>(
+        &mut self,
+        s: &'a mut T,
         v: f64,
         reply: driver::SettingReply<f64>,
         report: &'a driver::ReportReading<f64>,
-    ) -> Result<Option<f64>> {
+    ) -> Result<Option<f64>>
+    where
+        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+    {
         if !v.is_nan() {
             // Clip incoming settings to the range 0.0..=100.0. Handle
             // infinities, too.
@@ -294,7 +317,7 @@ impl Instance {
             // was a successful setting, and include the value that
             // was used.
 
-            match Instance::set_brightness(s, v).await {
+            match self.set_brightness(s, v).await {
                 Ok(()) => {
                     report(v).await;
                     reply(Ok(v));
@@ -314,13 +337,17 @@ impl Instance {
 
     // Handles incoming settings for controlling the LED indicator.
 
-    async fn handle_led_setting<'a>(
-        s: &'a mut TcpStream,
+    async fn handle_led_setting<'a, T>(
+        &mut self,
+        s: &'a mut T,
         v: bool,
         reply: driver::SettingReply<bool>,
         report: &'a driver::ReportReading<bool>,
-    ) -> Result<()> {
-        match Instance::led_state_rpc(s, v).await {
+    ) -> Result<()>
+    where
+        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+    {
+        match self.led_state_rpc(s, v).await {
             Ok(()) => {
                 report(v).await;
                 reply(Ok(v));
@@ -353,18 +380,15 @@ impl Instance {
     // All replies have a 4-byte length header so we know how much
     // data to read.
 
-    async fn read_reply<R>(s: &mut R) -> Result<tplink_api::Reply>
+    async fn read_reply<R>(&mut self, s: &mut R) -> Result<tplink_api::Reply>
     where
         R: AsyncReadExt + std::marker::Unpin,
     {
-        const RCV_TOTAL: usize = 1_000;
-
         if let Ok(sz) = s.read_u32().await {
             let sz = sz as usize;
 
-            if sz <= RCV_TOTAL {
-                let mut buf = [0u8; RCV_TOTAL];
-                let filled = &mut buf[0..sz as usize];
+            if sz <= BUF_TOTAL {
+                let filled = &mut self.buf[0..sz];
 
                 if let Err(e) = s.read_exact(filled).await {
                     Err(Error::MissingPeer(e.to_string()))
@@ -378,7 +402,7 @@ impl Instance {
                 }
             } else {
                 Err(Error::ParseError(format!(
-                    "reply size ({sz}) is greater than {RCV_TOTAL}"
+                    "reply size ({sz}) is greater than {BUF_TOTAL}"
                 )))
             }
         } else {
@@ -440,7 +464,7 @@ impl Instance {
                 // have to periodically poll it to stay in sync.
 
                 _ = timer.tick() => {
-		    if let Ok((led, br)) = Instance::info_rpc(s).await {
+		    if let Ok((led, br)) = self.info_rpc(s).await {
 			let br = br as f64;
 
 			// If the LED state has changed outside of the
@@ -473,7 +497,7 @@ impl Instance {
 		    // don't actually control the hardware.
 
 		    if current_brightness != v {
-			match Instance::handle_brightness_setting(
+			match self.handle_brightness_setting(
 			    s, v, reply, &devices.d_brightness
 			).await {
 			    Ok(Some(v)) => current_brightness = v,
@@ -501,7 +525,7 @@ impl Instance {
 		    // don't actually control the hardware.
 
 		    if current_led != v {
-			if Instance::handle_led_setting(
+			if self.handle_led_setting(
 			    s, v, reply, &devices.d_led
 			).await == Ok(()) {
 			    current_led = v;
@@ -577,11 +601,7 @@ impl driver::API for Instance {
     fn create_instance(
         _cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
-        Box::pin(async {
-            Ok(Box::new(Instance {
-                reported_error: None,
-            }))
-        })
+        Box::pin(async { Ok(Box::default()) })
     }
 
     // Main run loop for the driver.
@@ -642,11 +662,12 @@ mod test {
 
         {
             let buf: &[u8] = &[0, 0, 0];
+            let mut inst = Instance::default();
 
-            assert!(Instance::read_reply(&mut &buf[0..=0]).await.is_err());
-            assert!(Instance::read_reply(&mut &buf[0..1]).await.is_err());
-            assert!(Instance::read_reply(&mut &buf[0..2]).await.is_err());
-            assert!(Instance::read_reply(&mut &buf[0..3]).await.is_err());
+            assert!(inst.read_reply(&mut &buf[0..=0]).await.is_err());
+            assert!(inst.read_reply(&mut &buf[0..1]).await.is_err());
+            assert!(inst.read_reply(&mut &buf[0..2]).await.is_err());
+            assert!(inst.read_reply(&mut &buf[0..3]).await.is_err());
         }
 
         {
@@ -664,9 +685,11 @@ mod test {
             assert!(buf.len() == 45);
             assert!(buf.as_slice().len() == 45);
 
-            assert!(Instance::read_reply(&mut &buf[0..4]).await.is_err());
-            assert!(Instance::read_reply(&mut &buf[0..5]).await.is_err());
-            assert!(Instance::read_reply(&mut buf.as_slice()).await.is_ok());
+            let mut inst = Instance::default();
+
+            assert!(inst.read_reply(&mut &buf[0..4]).await.is_err());
+            assert!(inst.read_reply(&mut &buf[0..5]).await.is_err());
+            assert!(inst.read_reply(&mut buf.as_slice()).await.is_ok());
         }
     }
 }
