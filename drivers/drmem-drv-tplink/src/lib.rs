@@ -48,8 +48,11 @@ use tracing::{debug, error, warn, Span};
 
 mod tplink_api;
 
+const BUF_TOTAL: usize = 4_096;
+
 pub struct Instance {
     reported_error: Option<bool>,
+    buf: [u8; BUF_TOTAL],
 }
 
 pub struct Devices {
@@ -60,6 +63,15 @@ pub struct Devices {
     s_brightness: driver::SettingStream<f64>,
     d_led: driver::ReportReading<bool>,
     s_led: driver::SettingStream<bool>,
+}
+
+impl Default for Instance {
+    fn default() -> Self {
+        Instance {
+            reported_error: None,
+            buf: [0; BUF_TOTAL],
+        }
+    }
 }
 
 impl Instance {
@@ -376,21 +388,13 @@ impl Instance {
 
     // Attempts to send a command to the socket.
 
-    async fn send_cmd(s: &mut TcpStream, cmd: tplink_api::Cmd) -> Result<()> {
-        let cmd_buf = cmd.encode();
+    async fn send_cmd<S>(s: &mut S, cmd: tplink_api::Cmd) -> Result<()>
+    where
+        S: AsyncWriteExt + std::marker::Unpin,
+    {
+        let out_buf = cmd.encode();
 
-        let mut buf = [0u8; 1000];
-
-        buf[0] = (cmd_buf.len() >> 24) as u8;
-        buf[1] = (cmd_buf.len() >> 16) as u8;
-        buf[2] = (cmd_buf.len() >> 8) as u8;
-        buf[3] = cmd_buf.len() as u8;
-
-        let out_buf = &mut buf[0..4 + cmd_buf.len()];
-
-        out_buf[4..].copy_from_slice(&cmd_buf);
-
-        s.write_all(out_buf)
+        s.write_all(&out_buf[..])
             .await
             .map(|_| ())
             .map_err(|e| Error::MissingPeer(e.to_string()))?;
@@ -630,6 +634,7 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod test {
     use super::{tplink_api, Instance};
+    use std::io::Write;
 
     #[tokio::test]
     async fn test_read_reply() {
@@ -648,10 +653,13 @@ mod test {
             const REPLY: &[u8] =
                 b"{\"system\":{\"set_led_off\":{\"err_code\":0}}}";
 
-            let mut buf = vec![0, 0, 0, 41];
+            let mut buf = vec![0, 0, 0, REPLY.len() as u8];
 
-            buf.extend_from_slice(REPLY);
-            tplink_api::encrypt(&mut buf[4..]);
+            {
+                let mut wr = tplink_api::CmdWriter::create(&mut buf);
+
+                assert_eq!(wr.write(REPLY).unwrap(), REPLY.len());
+            }
 
             assert!(buf.len() == 45);
             assert!(buf.as_slice().len() == 45);
