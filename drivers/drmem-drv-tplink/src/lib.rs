@@ -416,11 +416,13 @@ impl Instance {
             .map_err(|e| Error::MissingPeer(e.to_string()))
     }
 
-    async fn main_loop<'a>(
+    async fn main_loop<'a, T>(
         &mut self,
-        s: &mut TcpStream,
+        s: &mut T,
         devices: &mut MutexGuard<'_, Devices>,
-    ) {
+    ) where
+        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+    {
         // Create a 5-second interval timer which will be used to poll
         // the device to see if its state was changed by some outside
         // mechanism.
