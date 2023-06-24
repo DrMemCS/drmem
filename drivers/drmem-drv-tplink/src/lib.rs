@@ -410,7 +410,6 @@ impl Instance {
 
         s.write_all(&out_buf[..])
             .await
-            .map(|_| ())
             .map_err(|e| Error::MissingPeer(e.to_string()))?;
         s.flush()
             .await
