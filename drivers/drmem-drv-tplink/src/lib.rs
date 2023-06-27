@@ -94,278 +94,6 @@ impl Instance {
         }
     }
 
-    // Performs an "RPC" call to the device; it sends the command and
-    // returns the reply.
-
-    async fn rpc<T>(
-        &mut self,
-        s: &mut T,
-        cmd: tplink_api::Cmd,
-    ) -> Result<tplink_api::Reply>
-    where
-        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
-    {
-        // Wrap the transaction in an async block and wrap the block
-        // in a future that expects it to complete in 3s.
-
-        let fut = time::timeout(time::Duration::from_millis(3_000), async {
-            Instance::send_cmd(s, cmd).await?;
-            self.read_reply(s).await
-        });
-
-        if let Ok(v) = fut.await {
-            v
-        } else {
-            Err(Error::TimeoutError)
-        }
-    }
-
-    // Sets the relay state on or off, depending on the argument.
-
-    async fn relay_state_rpc<T>(&mut self, s: &mut T, v: bool) -> Result<()>
-    where
-        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
-    {
-        use tplink_api::{active_cmd, ErrorStatus, Reply};
-
-        match self.rpc(s, active_cmd(v as u8)).await? {
-            Reply::System {
-                set_relay_state: Some(ErrorStatus { err_code: 0, .. }),
-                ..
-            } => Ok(()),
-
-            Reply::System {
-                set_relay_state:
-                    Some(ErrorStatus {
-                        err_msg: Some(em), ..
-                    }),
-                ..
-            } => Err(Error::ProtocolError(em)),
-
-            reply => Err(Error::ProtocolError(format!(
-                "unexpected reply : {:?}",
-                &reply
-            ))),
-        }
-    }
-
-    // Sets the LED state on or off, depending on the argument.
-
-    async fn led_state_rpc<T>(&mut self, s: &mut T, v: bool) -> Result<()>
-    where
-        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
-    {
-        use tplink_api::{led_cmd, ErrorStatus, Reply};
-
-        // Send the request and receive the reply. Use pattern
-        // matching to determine the return value of the function.
-
-        match self.rpc(s, led_cmd(v)).await? {
-            Reply::System {
-                set_led_off: Some(ErrorStatus { err_code: 0, .. }),
-                ..
-            } => Ok(()),
-
-            Reply::System {
-                set_led_off:
-                    Some(ErrorStatus {
-                        err_msg: Some(em), ..
-                    }),
-                ..
-            } => Err(Error::ProtocolError(em)),
-
-            reply => Err(Error::ProtocolError(format!(
-                "unexpected reply : {:?}",
-                &reply
-            ))),
-        }
-    }
-
-    // Retrieves info.
-
-    async fn info_rpc<T>(&mut self, s: &mut T) -> Result<(bool, u8)>
-    where
-        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
-    {
-        use tplink_api::{info_cmd, Reply};
-
-        // Send the request and receive the reply. Use pattern
-        // matching to determine the return value of the function.
-
-        match self.rpc(s, info_cmd()).await? {
-            Reply::System {
-                get_sysinfo: Some(info),
-                ..
-            } => {
-                let led = info.led_off.unwrap_or(1) == 0;
-
-                match (info.relay_state.map(|v| v != 0), info.brightness) {
-                    (None, None) => Ok((led, 0)),
-                    (None, Some(br)) => Ok((led, br)),
-                    (Some(false), _) => Ok((led, 0)),
-                    (Some(true), br) => Ok((led, br.unwrap_or(100))),
-                }
-            }
-
-            reply => Err(Error::ProtocolError(format!(
-                "unexpected reply : {:?}",
-                &reply
-            ))),
-        }
-    }
-
-    // Sets the brightness between 0 and 100, depending on the
-    // argument.
-
-    async fn brightness_rpc<T>(&mut self, s: &mut T, v: u8) -> Result<()>
-    where
-        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
-    {
-        use tplink_api::{brightness_cmd, ErrorStatus, Reply};
-
-        match self.rpc(s, brightness_cmd(v)).await? {
-            Reply::Dimmer {
-                set_brightness: Some(ErrorStatus { err_code: 0, .. }),
-                ..
-            } => Ok(()),
-
-            Reply::Dimmer {
-                set_brightness:
-                    Some(ErrorStatus {
-                        err_msg: Some(em), ..
-                    }),
-                ..
-            } => Err(Error::ProtocolError(em)),
-
-            reply => Err(Error::ProtocolError(format!(
-                "unexpected reply : {:?}",
-                &reply
-            ))),
-        }
-    }
-
-    // Sends commands to change the brightness. NOTE: This function
-    // assumes `v` is in the range 0.0..=100.0.
-
-    async fn set_brightness<T>(&mut self, s: &mut T, v: f64) -> Result<()>
-    where
-        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
-    {
-        // If the brightness is zero, we trun off the dimmer instead
-        // of setting the brightness to 0.0. If it's greater than 0.0,
-        // set the brightness and then turn on the dimmer.
-
-        if v > 0.0 {
-            self.brightness_rpc(s, v as u8).await?;
-            self.relay_state_rpc(s, true).await
-        } else {
-            self.relay_state_rpc(s, false).await
-        }
-    }
-
-    // Connects to the address. Sets a timeout of 1 second for the
-    // connection.
-
-    async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
-        let fut = time::timeout(
-            time::Duration::from_secs(1),
-            TcpStream::connect(addr),
-        );
-
-        match fut.await {
-            Ok(Ok(s)) => Ok(s),
-            Ok(Err(e)) => Err(Error::MissingPeer(e.to_string())),
-            Err(_) => Err(Error::MissingPeer("timeout".into())),
-        }
-    }
-
-    // Handles incoming settings for brightness.
-
-    async fn handle_brightness_setting<'a, T>(
-        &mut self,
-        s: &'a mut T,
-        v: f64,
-        reply: driver::SettingReply<f64>,
-        report: &'a driver::ReportReading<f64>,
-    ) -> Result<Option<f64>>
-    where
-        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
-    {
-        if !v.is_nan() {
-            // Clip incoming settings to the range 0.0..=100.0. Handle
-            // infinities, too.
-
-            let v = match v {
-                v if v == f64::INFINITY => 100.0,
-                v if v == f64::NEG_INFINITY => 0.0,
-                v if v < 0.0 => 0.0,
-                v if v > 100.0 => 100.0,
-                v => v,
-            };
-
-            // Always log incoming settings. Let the client know there
-            // was a successful setting, and include the value that
-            // was used.
-
-            match self.set_brightness(s, v).await {
-                Ok(()) => {
-                    report(v).await;
-                    reply(Ok(v));
-                    Ok(Some(v))
-                }
-                Err(e) => {
-                    error!("setting brightness : {}", &e);
-                    reply(Err(e.clone()));
-                    Err(e)
-                }
-            }
-        } else {
-            reply(Err(Error::InvArgument("device doesn't accept NaN".into())));
-            Ok(None)
-        }
-    }
-
-    // Handles incoming settings for controlling the LED indicator.
-
-    async fn handle_led_setting<'a, T>(
-        &mut self,
-        s: &'a mut T,
-        v: bool,
-        reply: driver::SettingReply<bool>,
-        report: &'a driver::ReportReading<bool>,
-    ) -> Result<()>
-    where
-        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
-    {
-        match self.led_state_rpc(s, v).await {
-            Ok(()) => {
-                report(v).await;
-                reply(Ok(v));
-                Ok(())
-            }
-            Err(e) => {
-                error!("setting LED : {}", &e);
-                reply(Err(e.clone()));
-                Err(e)
-            }
-        }
-    }
-
-    // Checks to see if the current error state ('value') matches the
-    // previosuly reported error state. If not, it saves the current
-    // state and sends the updated value to the backend.
-
-    async fn sync_error_state(
-        &mut self,
-        report: &driver::ReportReading<bool>,
-        value: bool,
-    ) {
-        if self.reported_error != Some(value) {
-            self.reported_error = Some(value);
-            report(value).await;
-        }
-    }
-
     // Attempts to read a `tplink_api::Reply` type from the socket.
     // All replies have a 4-byte length header so we know how much
     // data to read.
@@ -406,23 +134,307 @@ impl Instance {
     where
         S: AsyncWriteExt + std::marker::Unpin,
     {
+        const ERR_F: fn(std::io::Error) -> Error =
+            |e| Error::MissingPeer(e.to_string());
         let out_buf = cmd.encode();
 
-        s.write_all(&out_buf[..])
-            .await
-            .map_err(|e| Error::MissingPeer(e.to_string()))?;
-        s.flush()
-            .await
-            .map_err(|e| Error::MissingPeer(e.to_string()))
+        s.write_all(&out_buf[..]).await.map_err(ERR_F)?;
+        s.flush().await.map_err(ERR_F)
     }
 
-    async fn main_loop<'a, T>(
+    // Performs an "RPC" call to the device; it sends the command and
+    // returns the reply.
+
+    async fn rpc<R, S>(
         &mut self,
-        s: &mut T,
-        devices: &mut MutexGuard<'_, Devices>,
-    ) where
-        T: AsyncReadExt + AsyncWriteExt + std::marker::Unpin,
+        rx: &mut R,
+        tx: &mut S,
+        cmd: tplink_api::Cmd,
+    ) -> Result<tplink_api::Reply>
+    where
+        R: AsyncReadExt + std::marker::Unpin,
+        S: AsyncWriteExt + std::marker::Unpin,
     {
+        // Wrap the transaction in an async block and wrap the block
+        // in a future that expects it to complete in 1/2 s.
+
+        let fut = time::timeout(time::Duration::from_millis(500), async {
+            let res = tokio::try_join!(
+                Instance::send_cmd(tx, cmd),
+                self.read_reply(rx)
+            );
+
+            res.map(|(_, reply)| reply)
+        });
+
+        if let Ok(v) = fut.await {
+            v
+        } else {
+            Err(Error::TimeoutError)
+        }
+    }
+
+    // Sets the relay state on or off, depending on the argument.
+
+    async fn relay_state_rpc(
+        &mut self,
+        s: &mut TcpStream,
+        v: bool,
+    ) -> Result<()> {
+        use tplink_api::{active_cmd, ErrorStatus, Reply};
+
+        let (mut rx, mut tx) = s.split();
+
+        match self.rpc(&mut rx, &mut tx, active_cmd(v as u8)).await? {
+            Reply::System {
+                set_relay_state: Some(ErrorStatus { err_code: 0, .. }),
+                ..
+            } => Ok(()),
+
+            Reply::System {
+                set_relay_state:
+                    Some(ErrorStatus {
+                        err_msg: Some(em), ..
+                    }),
+                ..
+            } => Err(Error::ProtocolError(em)),
+
+            reply => Err(Error::ProtocolError(format!(
+                "unexpected reply : {:?}",
+                &reply
+            ))),
+        }
+    }
+
+    // Sets the LED state on or off, depending on the argument.
+
+    async fn led_state_rpc(
+        &mut self,
+        s: &mut TcpStream,
+        v: bool,
+    ) -> Result<()> {
+        use tplink_api::{led_cmd, ErrorStatus, Reply};
+
+        let (mut rx, mut tx) = s.split();
+
+        // Send the request and receive the reply. Use pattern
+        // matching to determine the return value of the function.
+
+        match self.rpc(&mut rx, &mut tx, led_cmd(v)).await? {
+            Reply::System {
+                set_led_off: Some(ErrorStatus { err_code: 0, .. }),
+                ..
+            } => Ok(()),
+
+            Reply::System {
+                set_led_off:
+                    Some(ErrorStatus {
+                        err_msg: Some(em), ..
+                    }),
+                ..
+            } => Err(Error::ProtocolError(em)),
+
+            reply => Err(Error::ProtocolError(format!(
+                "unexpected reply : {:?}",
+                &reply
+            ))),
+        }
+    }
+
+    // Retrieves info.
+
+    async fn info_rpc(&mut self, s: &mut TcpStream) -> Result<(bool, u8)> {
+        use tplink_api::{info_cmd, Reply};
+
+        let (mut rx, mut tx) = s.split();
+
+        // Send the request and receive the reply. Use pattern
+        // matching to determine the return value of the function.
+
+        match self.rpc(&mut rx, &mut tx, info_cmd()).await? {
+            Reply::System {
+                get_sysinfo: Some(info),
+                ..
+            } => {
+                let led = info.led_off.unwrap_or(1) == 0;
+
+                match (info.relay_state.map(|v| v != 0), info.brightness) {
+                    (None, None) => Ok((led, 0)),
+                    (None, Some(br)) => Ok((led, br)),
+                    (Some(false), _) => Ok((led, 0)),
+                    (Some(true), br) => Ok((led, br.unwrap_or(100))),
+                }
+            }
+
+            reply => Err(Error::ProtocolError(format!(
+                "unexpected reply : {:?}",
+                &reply
+            ))),
+        }
+    }
+
+    // Sets the brightness between 0 and 100, depending on the
+    // argument.
+
+    async fn brightness_rpc(&mut self, s: &mut TcpStream, v: u8) -> Result<()> {
+        use tplink_api::{brightness_cmd, ErrorStatus, Reply};
+
+        let (mut rx, mut tx) = s.split();
+
+        match self.rpc(&mut rx, &mut tx, brightness_cmd(v)).await? {
+            Reply::Dimmer {
+                set_brightness: Some(ErrorStatus { err_code: 0, .. }),
+                ..
+            } => Ok(()),
+
+            Reply::Dimmer {
+                set_brightness:
+                    Some(ErrorStatus {
+                        err_msg: Some(em), ..
+                    }),
+                ..
+            } => Err(Error::ProtocolError(em)),
+
+            reply => Err(Error::ProtocolError(format!(
+                "unexpected reply : {:?}",
+                &reply
+            ))),
+        }
+    }
+
+    // Sends commands to change the brightness. NOTE: This function
+    // assumes `v` is in the range 0.0..=100.0.
+
+    async fn set_brightness(
+        &mut self,
+        s: &mut TcpStream,
+        v: f64,
+    ) -> Result<()> {
+        // If the brightness is zero, we trun off the dimmer instead
+        // of setting the brightness to 0.0. If it's greater than 0.0,
+        // set the brightness and then turn on the dimmer.
+
+        if v > 0.0 {
+            self.brightness_rpc(s, v as u8).await?;
+            self.relay_state_rpc(s, true).await
+        } else {
+            self.relay_state_rpc(s, false).await
+        }
+    }
+
+    // Connects to the address. Sets a timeout of 1 second for the
+    // connection.
+
+    async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
+        use tokio::net::TcpSocket;
+
+        let fut = time::timeout(time::Duration::from_secs(1), async {
+            match TcpSocket::new_v4() {
+                Ok(s) => {
+                    s.set_recv_buffer_size(2048)?;
+
+                    let s = s.connect((*addr).into()).await?;
+
+                    s.set_nodelay(false)?;
+                    Ok(s)
+                }
+                Err(e) => Err(e),
+            }
+        });
+
+        match fut.await {
+            Ok(Ok(s)) => Ok(s),
+            Ok(Err(e)) => Err(Error::MissingPeer(e.to_string())),
+            Err(_) => Err(Error::MissingPeer("timeout".into())),
+        }
+    }
+
+    // Handles incoming settings for brightness.
+
+    async fn handle_brightness_setting<'a>(
+        &mut self,
+        s: &'a mut TcpStream,
+        v: f64,
+        reply: driver::SettingReply<f64>,
+        report: &'a driver::ReportReading<f64>,
+    ) -> Result<Option<f64>> {
+        if !v.is_nan() {
+            // Clip incoming settings to the range 0.0..=100.0. Handle
+            // infinities, too.
+
+            let v = match v {
+                v if v == f64::INFINITY => 100.0,
+                v if v == f64::NEG_INFINITY => 0.0,
+                v if v < 0.0 => 0.0,
+                v if v > 100.0 => 100.0,
+                v => v,
+            };
+
+            // Always log incoming settings. Let the client know there
+            // was a successful setting, and include the value that
+            // was used.
+
+            match self.set_brightness(s, v).await {
+                Ok(()) => {
+                    report(v).await;
+                    reply(Ok(v));
+                    Ok(Some(v))
+                }
+                Err(e) => {
+                    error!("setting brightness : {}", &e);
+                    reply(Err(e.clone()));
+                    Err(e)
+                }
+            }
+        } else {
+            reply(Err(Error::InvArgument("device doesn't accept NaN".into())));
+            Ok(None)
+        }
+    }
+
+    // Handles incoming settings for controlling the LED indicator.
+
+    async fn handle_led_setting<'a>(
+        &mut self,
+        s: &'a mut TcpStream,
+        v: bool,
+        reply: driver::SettingReply<bool>,
+        report: &'a driver::ReportReading<bool>,
+    ) -> Result<()> {
+        match self.led_state_rpc(s, v).await {
+            Ok(()) => {
+                report(v).await;
+                reply(Ok(v));
+                Ok(())
+            }
+            Err(e) => {
+                error!("setting LED : {}", &e);
+                reply(Err(e.clone()));
+                Err(e)
+            }
+        }
+    }
+
+    // Checks to see if the current error state ('value') matches the
+    // previosuly reported error state. If not, it saves the current
+    // state and sends the updated value to the backend.
+
+    async fn sync_error_state(
+        &mut self,
+        report: &driver::ReportReading<bool>,
+        value: bool,
+    ) {
+        if self.reported_error != Some(value) {
+            self.reported_error = Some(value);
+            report(value).await;
+        }
+    }
+
+    async fn main_loop<'a>(
+        &mut self,
+        s: &mut TcpStream,
+        devices: &mut MutexGuard<'_, Devices>,
+    ) {
         // Create a 5-second interval timer which will be used to poll
         // the device to see if its state was changed by some outside
         // mechanism.
