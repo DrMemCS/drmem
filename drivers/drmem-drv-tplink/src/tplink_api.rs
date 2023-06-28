@@ -3,16 +3,45 @@
 // converted to the expected JSON layout.
 
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
+use std::{io::Write, marker::PhantomData};
 
-// This is the encryption algorithm.
+// This type allows us to write a TP-Link command into a vector in one
+// pass. When it is created, it contains the initial key. As data is
+// written, it is "encrypted" and the key is updated.
 
-fn encrypt(buf: &mut [u8]) {
-    let mut key = 171u8;
+pub struct CmdWriter<'a> {
+    key: u8,
+    buf: &'a mut Vec<u8>,
+}
 
-    for b in buf.iter_mut() {
-        key ^= *b;
-        *b = key;
+impl<'a> CmdWriter<'a> {
+    // Creates a new, initialized writer. The parameter is the vector
+    // that is to receive the encrypted data.
+
+    pub fn create(b: &'a mut Vec<u8>) -> Self {
+        CmdWriter { key: 171u8, buf: b }
+    }
+}
+
+impl Write for CmdWriter<'_> {
+    // This is a mandatory method, but it doesn't do anything.
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    // Writes a buffer of data to the vector. As the data is
+    // transferred, it is "encrypted". Returns the number of bytes
+    // written (which is always the number passed in.)
+
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        let sz = b.len();
+
+        for ii in b.iter() {
+            self.key ^= *ii;
+            self.buf.push(self.key);
+        }
+        Ok(sz)
     }
 }
 
@@ -80,9 +109,22 @@ pub enum Cmd {
 
 impl Cmd {
     pub fn encode(&self) -> Vec<u8> {
-        let mut buf = serde_json::to_vec(&self).unwrap();
+        let mut buf = Vec::with_capacity(100);
 
-        encrypt(&mut buf);
+        buf.push(0u8);
+        buf.push(0u8);
+        buf.push(0u8);
+        buf.push(0u8);
+
+        serde_json::to_writer(CmdWriter::create(&mut buf), &self).unwrap();
+
+        let sz = buf.len() - 4;
+
+        buf[0] = (sz >> 24) as u8;
+        buf[1] = (sz >> 16) as u8;
+        buf[2] = (sz >> 8) as u8;
+        buf[3] = sz as u8;
+
         buf
     }
 }
@@ -174,11 +216,16 @@ mod tests {
     #[test]
     fn test_crypt() {
         let buf = [1u8, 2u8, 3u8, 4u8, 5u8];
-        let mut buf2 = buf.clone();
+        let mut v: Vec<u8> = Vec::new();
 
-        encrypt(&mut buf2);
-        decrypt(&mut buf2);
-        assert_eq!(&buf, &buf2);
+        {
+            let mut wr = CmdWriter::create(&mut v);
+
+            assert_eq!(wr.write(&buf).unwrap(), 5);
+        }
+
+        decrypt(&mut v[..]);
+        assert_eq!(&buf, &v[..]);
     }
 
     #[test]

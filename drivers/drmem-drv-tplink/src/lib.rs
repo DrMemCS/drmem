@@ -48,13 +48,15 @@ use tracing::{debug, error, warn, Span};
 
 mod tplink_api;
 
+const BUF_TOTAL: usize = 4_096;
+
 pub struct Instance {
+    addr: SocketAddrV4,
     reported_error: Option<bool>,
+    buf: [u8; BUF_TOTAL],
 }
 
 pub struct Devices {
-    addr: SocketAddrV4,
-
     d_error: driver::ReportReading<bool>,
     d_brightness: driver::ReportReading<f64>,
     s_brightness: driver::SettingStream<f64>,
@@ -92,19 +94,77 @@ impl Instance {
         }
     }
 
+    // Attempts to read a `tplink_api::Reply` type from the socket.
+    // All replies have a 4-byte length header so we know how much
+    // data to read.
+
+    async fn read_reply<R>(&mut self, s: &mut R) -> Result<tplink_api::Reply>
+    where
+        R: AsyncReadExt + std::marker::Unpin,
+    {
+        if let Ok(sz) = s.read_u32().await {
+            let sz = sz as usize;
+
+            if sz <= BUF_TOTAL {
+                let filled = &mut self.buf[0..sz];
+
+                if let Err(e) = s.read_exact(filled).await {
+                    Err(Error::MissingPeer(e.to_string()))
+                } else {
+                    tplink_api::Reply::decode(filled).ok_or_else(|| {
+                        Error::ParseError(format!(
+                            "bad reply : {}",
+                            String::from_utf8_lossy(filled)
+                        ))
+                    })
+                }
+            } else {
+                Err(Error::ParseError(format!(
+                    "reply size ({sz}) is greater than {BUF_TOTAL}"
+                )))
+            }
+        } else {
+            Err(Error::MissingPeer("error reading header".into()))
+        }
+    }
+
+    // Attempts to send a command to the socket.
+
+    async fn send_cmd<S>(s: &mut S, cmd: tplink_api::Cmd) -> Result<()>
+    where
+        S: AsyncWriteExt + std::marker::Unpin,
+    {
+        const ERR_F: fn(std::io::Error) -> Error =
+            |e| Error::MissingPeer(e.to_string());
+        let out_buf = cmd.encode();
+
+        s.write_all(&out_buf[..]).await.map_err(ERR_F)?;
+        s.flush().await.map_err(ERR_F)
+    }
+
     // Performs an "RPC" call to the device; it sends the command and
     // returns the reply.
 
-    async fn rpc(
-        s: &mut TcpStream,
+    async fn rpc<R, S>(
+        &mut self,
+        rx: &mut R,
+        tx: &mut S,
         cmd: tplink_api::Cmd,
-    ) -> Result<tplink_api::Reply> {
+    ) -> Result<tplink_api::Reply>
+    where
+        R: AsyncReadExt + std::marker::Unpin,
+        S: AsyncWriteExt + std::marker::Unpin,
+    {
         // Wrap the transaction in an async block and wrap the block
-        // in a future that expects it to complete in 3s.
+        // in a future that expects it to complete in 1/2 s.
 
-        let fut = time::timeout(time::Duration::from_millis(3_000), async {
-            Instance::send_cmd(s, cmd).await?;
-            Instance::read_reply(s).await
+        let fut = time::timeout(time::Duration::from_millis(500), async {
+            let res = tokio::try_join!(
+                Instance::send_cmd(tx, cmd),
+                self.read_reply(rx)
+            );
+
+            res.map(|(_, reply)| reply)
         });
 
         if let Ok(v) = fut.await {
@@ -116,10 +176,16 @@ impl Instance {
 
     // Sets the relay state on or off, depending on the argument.
 
-    async fn relay_state_rpc(s: &mut TcpStream, v: bool) -> Result<()> {
+    async fn relay_state_rpc(
+        &mut self,
+        s: &mut TcpStream,
+        v: bool,
+    ) -> Result<()> {
         use tplink_api::{active_cmd, ErrorStatus, Reply};
 
-        match Instance::rpc(s, active_cmd(v as u8)).await? {
+        let (mut rx, mut tx) = s.split();
+
+        match self.rpc(&mut rx, &mut tx, active_cmd(v as u8)).await? {
             Reply::System {
                 set_relay_state: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -142,13 +208,19 @@ impl Instance {
 
     // Sets the LED state on or off, depending on the argument.
 
-    async fn led_state_rpc(s: &mut TcpStream, v: bool) -> Result<()> {
+    async fn led_state_rpc(
+        &mut self,
+        s: &mut TcpStream,
+        v: bool,
+    ) -> Result<()> {
         use tplink_api::{led_cmd, ErrorStatus, Reply};
+
+        let (mut rx, mut tx) = s.split();
 
         // Send the request and receive the reply. Use pattern
         // matching to determine the return value of the function.
 
-        match Instance::rpc(s, led_cmd(v)).await? {
+        match self.rpc(&mut rx, &mut tx, led_cmd(v)).await? {
             Reply::System {
                 set_led_off: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -171,13 +243,15 @@ impl Instance {
 
     // Retrieves info.
 
-    async fn info_rpc(s: &mut TcpStream) -> Result<(bool, u8)> {
+    async fn info_rpc(&mut self, s: &mut TcpStream) -> Result<(bool, u8)> {
         use tplink_api::{info_cmd, Reply};
+
+        let (mut rx, mut tx) = s.split();
 
         // Send the request and receive the reply. Use pattern
         // matching to determine the return value of the function.
 
-        match Instance::rpc(s, info_cmd()).await? {
+        match self.rpc(&mut rx, &mut tx, info_cmd()).await? {
             Reply::System {
                 get_sysinfo: Some(info),
                 ..
@@ -202,10 +276,12 @@ impl Instance {
     // Sets the brightness between 0 and 100, depending on the
     // argument.
 
-    async fn brightness_rpc(s: &mut TcpStream, v: u8) -> Result<()> {
+    async fn brightness_rpc(&mut self, s: &mut TcpStream, v: u8) -> Result<()> {
         use tplink_api::{brightness_cmd, ErrorStatus, Reply};
 
-        match Instance::rpc(s, brightness_cmd(v)).await? {
+        let (mut rx, mut tx) = s.split();
+
+        match self.rpc(&mut rx, &mut tx, brightness_cmd(v)).await? {
             Reply::Dimmer {
                 set_brightness: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -229,16 +305,20 @@ impl Instance {
     // Sends commands to change the brightness. NOTE: This function
     // assumes `v` is in the range 0.0..=100.0.
 
-    async fn set_brightness(s: &mut TcpStream, v: f64) -> Result<()> {
+    async fn set_brightness(
+        &mut self,
+        s: &mut TcpStream,
+        v: f64,
+    ) -> Result<()> {
         // If the brightness is zero, we trun off the dimmer instead
         // of setting the brightness to 0.0. If it's greater than 0.0,
         // set the brightness and then turn on the dimmer.
 
         if v > 0.0 {
-            Instance::brightness_rpc(s, v as u8).await?;
-            Instance::relay_state_rpc(s, true).await
+            self.brightness_rpc(s, v as u8).await?;
+            self.relay_state_rpc(s, true).await
         } else {
-            Instance::relay_state_rpc(s, false).await
+            self.relay_state_rpc(s, false).await
         }
     }
 
@@ -246,10 +326,21 @@ impl Instance {
     // connection.
 
     async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
-        let fut = time::timeout(
-            time::Duration::from_secs(1),
-            TcpStream::connect(addr),
-        );
+        use tokio::net::TcpSocket;
+
+        let fut = time::timeout(time::Duration::from_secs(1), async {
+            match TcpSocket::new_v4() {
+                Ok(s) => {
+                    s.set_recv_buffer_size(2048)?;
+
+                    let s = s.connect((*addr).into()).await?;
+
+                    s.set_nodelay(false)?;
+                    Ok(s)
+                }
+                Err(e) => Err(e),
+            }
+        });
 
         match fut.await {
             Ok(Ok(s)) => Ok(s),
@@ -261,6 +352,7 @@ impl Instance {
     // Handles incoming settings for brightness.
 
     async fn handle_brightness_setting<'a>(
+        &mut self,
         s: &'a mut TcpStream,
         v: f64,
         reply: driver::SettingReply<f64>,
@@ -282,7 +374,7 @@ impl Instance {
             // was a successful setting, and include the value that
             // was used.
 
-            match Instance::set_brightness(s, v).await {
+            match self.set_brightness(s, v).await {
                 Ok(()) => {
                     report(v).await;
                     reply(Ok(v));
@@ -303,12 +395,13 @@ impl Instance {
     // Handles incoming settings for controlling the LED indicator.
 
     async fn handle_led_setting<'a>(
+        &mut self,
         s: &'a mut TcpStream,
         v: bool,
         reply: driver::SettingReply<bool>,
         report: &'a driver::ReportReading<bool>,
     ) -> Result<()> {
-        match Instance::led_state_rpc(s, v).await {
+        match self.led_state_rpc(s, v).await {
             Ok(()) => {
                 report(v).await;
                 reply(Ok(v));
@@ -335,55 +428,6 @@ impl Instance {
             self.reported_error = Some(value);
             report(value).await;
         }
-    }
-
-    // Attempts to read a `tplink_api::Reply` type from the socket.
-    // All replies have a 4-byte length header so we know how much
-    // data to read.
-
-    async fn read_reply(s: &mut TcpStream) -> Result<tplink_api::Reply> {
-        if let Ok(sz) = s.read_u32().await {
-            let mut buf = Vec::with_capacity(sz as usize);
-            let filled = &mut buf[..];
-
-            if let Err(e) = s.read_exact(filled).await {
-                Err(Error::MissingPeer(e.to_string()))
-            } else {
-                tplink_api::Reply::decode(filled).ok_or_else(|| {
-                    Error::ParseError(format!(
-                        "bad reply : {}",
-                        String::from_utf8_lossy(filled)
-                    ))
-                })
-            }
-        } else {
-            Err(Error::MissingPeer("error reading header".into()))
-        }
-    }
-
-    // Attempts to send a command to the socket.
-
-    async fn send_cmd(s: &mut TcpStream, cmd: tplink_api::Cmd) -> Result<()> {
-        let cmd_buf = cmd.encode();
-
-        let mut buf = [0u8; 1000];
-
-        buf[0] = (cmd_buf.len() >> 24) as u8;
-        buf[1] = (cmd_buf.len() >> 16) as u8;
-        buf[2] = (cmd_buf.len() >> 8) as u8;
-        buf[3] = cmd_buf.len() as u8;
-
-        let out_buf = &mut buf[0..4 + cmd_buf.len()];
-
-        out_buf[4..].copy_from_slice(&cmd_buf);
-
-        s.write_all(out_buf)
-            .await
-            .map(|_| ())
-            .map_err(|e| Error::MissingPeer(e.to_string()))?;
-        s.flush()
-            .await
-            .map_err(|e| Error::MissingPeer(e.to_string()))
     }
 
     async fn main_loop<'a>(
@@ -423,7 +467,7 @@ impl Instance {
                 // have to periodically poll it to stay in sync.
 
                 _ = timer.tick() => {
-		    if let Ok((led, br)) = Instance::info_rpc(s).await {
+		    if let Ok((led, br)) = self.info_rpc(s).await {
 			let br = br as f64;
 
 			// If the LED state has changed outside of the
@@ -456,7 +500,7 @@ impl Instance {
 		    // don't actually control the hardware.
 
 		    if current_brightness != v {
-			match Instance::handle_brightness_setting(
+			match self.handle_brightness_setting(
 			    s, v, reply, &devices.d_brightness
 			).await {
 			    Ok(Some(v)) => current_brightness = v,
@@ -484,7 +528,7 @@ impl Instance {
 		    // don't actually control the hardware.
 
 		    if current_led != v {
-			if Instance::handle_led_setting(
+			if self.handle_led_setting(
 			    s, v, reply, &devices.d_led
 			).await == Ok(()) {
 			    current_led = v;
@@ -514,7 +558,7 @@ impl driver::API for Instance {
 
     fn register_devices(
         core: driver::RequestChan,
-        cfg: &DriverConfig,
+        _cfg: &DriverConfig,
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let error_name = "error"
@@ -526,13 +570,8 @@ impl driver::API for Instance {
         let led_name = "led"
             .parse::<device::Base>()
             .expect("parsing 'led' should never fail");
-        let addr = Instance::get_cfg_address(cfg);
 
         Box::pin(async move {
-            // Validate the configuration.
-
-            let addr = addr?;
-
             // Define the devices managed by this driver.
 
             let (d_error, _) =
@@ -544,7 +583,6 @@ impl driver::API for Instance {
                 core.add_rw_device(led_name, None, max_history).await?;
 
             Ok(Devices {
-                addr,
                 d_error,
                 d_brightness,
                 s_brightness,
@@ -558,11 +596,15 @@ impl driver::API for Instance {
     // stored in local variables in the `.run()` method.
 
     fn create_instance(
-        _cfg: &DriverConfig,
+        cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+        let cfg_addr = Instance::get_cfg_address(cfg);
+
         Box::pin(async {
             Ok(Box::new(Instance {
+                addr: cfg_addr?,
                 reported_error: None,
+                buf: [0; BUF_TOTAL],
             }))
         })
     }
@@ -584,7 +626,7 @@ impl driver::API for Instance {
             // Record the devices's address in the "cfg" field of the
             // span.
 
-            Span::current().record("cfg", devices.addr.to_string());
+            Span::current().record("cfg", self.addr.to_string());
 
             loop {
                 // First, connect to the device. We'll leave the TCP
@@ -592,7 +634,7 @@ impl driver::API for Instance {
                 // transaction. Tests have shown that the HS220
                 // handles multiple client connections.
 
-                match Instance::connect(&devices.addr).await {
+                match Instance::connect(&self.addr).await {
                     Ok(mut s) => {
                         self.main_loop(&mut s, &mut devices).await;
                     }
@@ -615,4 +657,56 @@ impl driver::API for Instance {
 }
 
 #[cfg(test)]
-mod test {}
+mod test {
+    use super::{tplink_api, Instance};
+    use crate::BUF_TOTAL;
+    use std::{
+        io::Write,
+        net::{Ipv4Addr, SocketAddrV4},
+    };
+
+    #[tokio::test]
+    async fn test_read_reply() {
+        // Make sure packets with less than 4 bytes causes an error.
+
+        {
+            let buf: &[u8] = &[0, 0, 0];
+            let mut inst = Instance {
+                addr: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
+                reported_error: None,
+                buf: [0u8; BUF_TOTAL],
+            };
+
+            assert!(inst.read_reply(&mut &buf[0..=0]).await.is_err());
+            assert!(inst.read_reply(&mut &buf[0..1]).await.is_err());
+            assert!(inst.read_reply(&mut &buf[0..2]).await.is_err());
+            assert!(inst.read_reply(&mut &buf[0..3]).await.is_err());
+        }
+
+        {
+            const REPLY: &[u8] =
+                b"{\"system\":{\"set_led_off\":{\"err_code\":0}}}";
+
+            let mut buf = vec![0, 0, 0, REPLY.len() as u8];
+
+            {
+                let mut wr = tplink_api::CmdWriter::create(&mut buf);
+
+                assert_eq!(wr.write(REPLY).unwrap(), REPLY.len());
+            }
+
+            assert!(buf.len() == 45);
+            assert!(buf.as_slice().len() == 45);
+
+            let mut inst = Instance {
+                addr: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
+                reported_error: None,
+                buf: [0u8; BUF_TOTAL],
+            };
+
+            assert!(inst.read_reply(&mut &buf[0..4]).await.is_err());
+            assert!(inst.read_reply(&mut &buf[0..5]).await.is_err());
+            assert!(inst.read_reply(&mut buf.as_slice()).await.is_ok());
+        }
+    }
+}
