@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tokio_stream::{StreamExt, StreamMap};
-use tracing::{debug, error, info, info_span};
+use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
 use super::config;
@@ -13,24 +13,67 @@ mod compile;
 // These are some helpful type aliases.
 
 // The logic node will contain an array of these types. As readings
-// come in, they'll be saved in this array.
+// come in, they'll be saved in the array.
 
 type Inputs = Option<device::Value>;
-
-// This is an array of channels in which settings are sent.
-
-type Outputs = driver::TxDeviceSetting;
 
 // This is a set of streams that returns readings from all input
 // devices.
 
 type InputStream = StreamMap<usize, device::DataStream<device::Reading>>;
 
+// Manages settings to a device. It makes sure we don't send duplicate
+// settings and it encapsulates the request/reply transaction.
+
+pub struct Output {
+    prev: Option<device::Value>,
+    chan: driver::TxDeviceSetting,
+}
+
+impl Output {
+    // Creates a new `Output`. It takes ownership of the provided
+    // setting channel and starts with its setting history cleared.
+
+    pub fn create(chan: driver::TxDeviceSetting) -> Self {
+        Output { prev: None, chan }
+    }
+
+    // Attempts to set the associated device to a new value.
+
+    pub async fn send(&mut self, value: device::Value) -> () {
+        // Only attempt the setting if the device isn't set to the
+        // value.
+
+        if self.prev.as_ref() != Some(&value) {
+            let (tx_rpy, rx_rpy) = oneshot::channel();
+
+            if let Ok(()) = self.chan.send((value.clone(), tx_rpy)).await {
+                match rx_rpy.await {
+                    Ok(Ok(v)) => {
+                        // Save the value returned by the driver. This
+                        // should, hopefully, be the same that we
+                        // sent. If it isn't, add a warning to the
+                        // log.
+
+                        self.prev = Some(v.clone());
+                        if v != value {
+                            warn!("setting was adjusted")
+                        }
+                    }
+                    Ok(Err(e)) => error!("driver rejected setting : {}", &e),
+                    Err(e) => error!("setting failed : {}", &e),
+                }
+            } else {
+                error!("driver not accepting settings")
+            }
+        }
+    }
+}
+
 pub struct Node {
     inputs: Vec<Inputs>,
-    outputs: Vec<Outputs>,
+    outputs: Vec<Output>,
     in_stream: InputStream,
-    // outputs: Vec<(String, )>,
     exprs: Vec<compile::Program>,
 }
 
@@ -75,7 +118,7 @@ impl Node {
     async fn setup_outputs(
         c_req: &client::RequestChan,
         vars: &HashMap<String, device::Name>,
-    ) -> Result<(Vec<String>, Vec<driver::TxDeviceSetting>)> {
+    ) -> Result<(Vec<String>, Vec<Output>)> {
         let mut outputs = Vec::with_capacity(vars.len());
         let mut out_chans = Vec::with_capacity(vars.len());
 
@@ -89,7 +132,7 @@ impl Node {
                     // is also the index in the vector, so we know
                     // which entry to update.
 
-                    out_chans.push(ch);
+                    out_chans.push(Output::create(ch));
                     outputs.push(vv.clone())
                 }
                 Err(e) => {
@@ -172,23 +215,7 @@ impl Node {
                 // operation, like dividing by 0.)
 
                 if let Some(result) = compile::eval(expr, &self.inputs) {
-                    let (tx_rpy, rx_rpy) = oneshot::channel();
-
-                    // Send the result to the correct setting channel.
-
-                    if let Ok(()) =
-                        self.outputs[*idx].send((result, tx_rpy)).await
-                    {
-                        // Wait for the result. It is possible that
-                        // the driver returns a different value
-                        // (clipping a setting, for instance.) We
-                        // don't pay it any mind because the outer
-                        // loop will receive the updated value.
-
-                        if let Err(e) = rx_rpy.await {
-                            error!("setting failed : {}", &e)
-                        }
-                    }
+                    self.outputs[*idx].send(result).await
                 } else {
                     error!("couldn't evaluate {}", &expr)
                 }
