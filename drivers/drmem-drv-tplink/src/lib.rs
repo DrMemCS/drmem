@@ -331,7 +331,7 @@ impl Instance {
         let fut = time::timeout(time::Duration::from_secs(1), async {
             match TcpSocket::new_v4() {
                 Ok(s) => {
-                    s.set_recv_buffer_size(2048)?;
+                    s.set_recv_buffer_size((BUF_TOTAL * 2) as u32)?;
 
                     let s = s.connect((*addr).into()).await?;
 
