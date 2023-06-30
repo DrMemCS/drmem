@@ -1984,21 +1984,21 @@ mod tests {
             ("{a} and {b} -> {c}", "inp[0] and inp[1] -> out[1]"),
             ("{a} or {b} -> {c}", "inp[0] or inp[1] -> out[1]"),
             (
-		"{a} and {b} or true -> {c}",
-		"inp[0] and inp[1] or true -> out[1]"
-	    ),
+                "{a} and {b} or true -> {c}",
+                "inp[0] and inp[1] or true -> out[1]",
+            ),
             (
-		"{a} and ({b} or true) -> {c}",
-		"inp[0] and (inp[1] or true) -> out[1]"
-	    ),
+                "{a} and ({b} or true) -> {c}",
+                "inp[0] and (inp[1] or true) -> out[1]",
+            ),
             ("{a} = {b} -> {c}", "inp[0] = inp[1] -> out[1]"),
             ("{a} < {b} -> {c}", "inp[0] < inp[1] -> out[1]"),
             ("{a} <= {b} -> {c}", "inp[0] <= inp[1] -> out[1]"),
             ("{a} + {b} -> {c}", "inp[0] + inp[1] -> out[1]"),
             (
-		"{a} + {b} + {b} -> {c}",
-		"inp[0] + inp[1] + inp[1] -> out[1]"
-	    ),
+                "{a} + {b} + {b} -> {c}",
+                "inp[0] + inp[1] + inp[1] -> out[1]",
+            ),
             ("{a} - {b} -> {c}", "inp[0] - inp[1] -> out[1]"),
             ("{a} * {b} -> {c}", "inp[0] * inp[1] -> out[1]"),
             ("{a} / {b} -> {c}", "inp[0] / inp[1] -> out[1]"),
