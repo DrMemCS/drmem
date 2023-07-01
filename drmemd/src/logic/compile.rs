@@ -60,22 +60,101 @@ pub enum Expr {
     Rem(Box<Expr>, Box<Expr>),
 }
 
+impl Expr {
+    pub fn precedence(&self) -> u32 {
+        match self {
+            Expr::Lit(_) | Expr::Var(_) => 10,
+            Expr::Not(_) => 9,
+            Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 6,
+            Expr::Add(_, _) | Expr::Sub(_, _) => 5,
+            Expr::Lt(_, _) | Expr::LtEq(_, _) => 4,
+            Expr::Eq(_, _) => 3,
+            Expr::And(_, _) => 2,
+            Expr::Or(_, _) => 1,
+        }
+    }
+
+    fn fmt_subexpr(&self, e: &Expr, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let my_prec = self.precedence();
+
+        if my_prec > e.precedence() {
+            write!(f, "({})", &e)
+        } else {
+            write!(f, "{}", &e)
+        }
+    }
+}
+
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Lit(v) => write!(f, "{}", &v),
             Expr::Var(v) => write!(f, "inp[{}]", &v),
-            Expr::Not(e) => write!(f, "not ({})", &e),
-            Expr::And(a, b) => write!(f, "({}) and ({})", &a, &b),
-            Expr::Or(a, b) => write!(f, "({}) or ({})", &a, &b),
-            Expr::Eq(a, b) => write!(f, "({}) = ({})", &a, &b),
-            Expr::Lt(a, b) => write!(f, "({}) < ({})", &a, &b),
-            Expr::LtEq(a, b) => write!(f, "({}) <= ({})", &a, &b),
-            Expr::Add(a, b) => write!(f, "({}) + ({})", &a, &b),
-            Expr::Sub(a, b) => write!(f, "({}) - ({})", &a, &b),
-            Expr::Mul(a, b) => write!(f, "({}) * ({})", &a, &b),
-            Expr::Div(a, b) => write!(f, "({}) / ({})", &a, &b),
-            Expr::Rem(a, b) => write!(f, "({}) % ({})", &a, &b),
+
+            Expr::Not(e) => {
+                write!(f, "not ")?;
+                self.fmt_subexpr(e, f)
+            }
+
+            Expr::And(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " and ")?;
+                self.fmt_subexpr(b, f)
+            }
+
+            Expr::Or(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " or ")?;
+                self.fmt_subexpr(b, f)
+            }
+
+            Expr::Eq(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " = ")?;
+                self.fmt_subexpr(b, f)
+            }
+
+            Expr::Lt(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " < ")?;
+                self.fmt_subexpr(b, f)
+            }
+
+            Expr::LtEq(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " <= ")?;
+                self.fmt_subexpr(b, f)
+            }
+
+            Expr::Add(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " + ")?;
+                self.fmt_subexpr(b, f)
+            }
+
+            Expr::Sub(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " - ")?;
+                self.fmt_subexpr(b, f)
+            }
+
+            Expr::Mul(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " * ")?;
+                self.fmt_subexpr(b, f)
+            }
+
+            Expr::Div(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " / ")?;
+                self.fmt_subexpr(b, f)
+            }
+
+            Expr::Rem(a, b) => {
+                self.fmt_subexpr(a, f)?;
+                write!(f, " % ")?;
+                self.fmt_subexpr(b, f)
+            }
         }
     }
 }
@@ -1898,88 +1977,50 @@ mod tests {
             &[String::from("b"), String::from("c")],
         );
 
-        assert_eq!(
-            Program::compile("{a} -> {b}", &env).unwrap().to_string(),
-            "inp[0] -> out[0]"
-        );
+        const TESTS: &[(&str, &str)] = &[
+            ("{a} -> {b}", "inp[0] -> out[0]"),
+            ("true -> {b}", "true -> out[0]"),
+            ("not true -> {b}", "not true -> out[0]"),
+            ("{a} and {b} -> {c}", "inp[0] and inp[1] -> out[1]"),
+            ("{a} or {b} -> {c}", "inp[0] or inp[1] -> out[1]"),
+            (
+                "{a} and {b} or true -> {c}",
+                "inp[0] and inp[1] or true -> out[1]",
+            ),
+            (
+                "{a} and ({b} or true) -> {c}",
+                "inp[0] and (inp[1] or true) -> out[1]",
+            ),
+            ("{a} = {b} -> {c}", "inp[0] = inp[1] -> out[1]"),
+            ("{a} < {b} -> {c}", "inp[0] < inp[1] -> out[1]"),
+            ("{a} <= {b} -> {c}", "inp[0] <= inp[1] -> out[1]"),
+            ("{a} + {b} -> {c}", "inp[0] + inp[1] -> out[1]"),
+            (
+                "{a} + {b} + {b} -> {c}",
+                "inp[0] + inp[1] + inp[1] -> out[1]",
+            ),
+            ("{a} - {b} -> {c}", "inp[0] - inp[1] -> out[1]"),
+            ("{a} * {b} -> {c}", "inp[0] * inp[1] -> out[1]"),
+            ("{a} / {b} -> {c}", "inp[0] / inp[1] -> out[1]"),
+            ("{a} % {b} -> {c}", "inp[0] % inp[1] -> out[1]"),
+            (
+                "{a} * 3 + {b} > 4 -> {c}",
+                "4 < inp[0] * 3 + inp[1] -> out[1]",
+            ),
+            (
+                "{a} * (3 + {b}) > 4 -> {c}",
+                "4 < inp[0] * (3 + inp[1]) -> out[1]",
+            ),
+        ];
 
-        assert_eq!(
-            Program::compile("true -> {b}", &env).unwrap().to_string(),
-            "true -> out[0]"
-        );
-        assert_eq!(
-            Program::compile("not true -> {b}", &env)
-                .unwrap()
-                .to_string(),
-            "not (true) -> out[0]"
-        );
-        assert_eq!(
-            Program::compile("{a} and {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) and (inp[1]) -> out[1]"
-        );
-        assert_eq!(
-            Program::compile("{a} or {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) or (inp[1]) -> out[1]"
-        );
-        assert_eq!(
-            Program::compile("{a} = {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) = (inp[1]) -> out[1]"
-        );
-        assert_eq!(
-            Program::compile("{a} < {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) < (inp[1]) -> out[1]"
-        );
-        assert_eq!(
-            Program::compile("{a} <= {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) <= (inp[1]) -> out[1]"
-        );
-        assert_eq!(
-            Program::compile("{a} + {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) + (inp[1]) -> out[1]"
-        );
-        assert_eq!(
-            Program::compile("{a} - {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) - (inp[1]) -> out[1]"
-        );
-        assert_eq!(
-            Program::compile("{a} * {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) * (inp[1]) -> out[1]"
-        );
-        assert_eq!(
-            Program::compile("{a} / {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) / (inp[1]) -> out[1]"
-        );
-        assert_eq!(
-            Program::compile("{a} % {b} -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(inp[0]) % (inp[1]) -> out[1]"
-        );
-
-        assert_eq!(
-            Program::compile("{a} * 3 + {b} > 4 -> {c}", &env)
-                .unwrap()
-                .to_string(),
-            "(4) < (((inp[0]) * (3)) + (inp[1])) -> out[1]"
-        );
+        for (in_val, out_val) in TESTS {
+            assert_eq!(
+                Program::compile(in_val, &env).unwrap().to_string(),
+                *out_val,
+                "failed on: {}",
+                in_val
+            )
+        }
     }
 
     fn evaluate(expr: &str) -> Option<device::Value> {
