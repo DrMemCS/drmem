@@ -295,15 +295,6 @@ impl Config {
     }
 }
 
-struct EditConfig;
-
-#[juniper::graphql_object(context = ConfigDb)]
-impl EditConfig {
-    fn mod_redis(_param: String) -> result::Result<bool, FieldError> {
-        Err(FieldError::new("not implemented", Value::null()))
-    }
-}
-
 // The `Control` mutation is used to group queries that attempt to
 // control devices by sending them settings.
 
@@ -446,18 +437,6 @@ impl Control {
     }
 }
 
-struct MutRoot;
-
-#[juniper::graphql_object(context = ConfigDb)]
-impl MutRoot {
-    fn config() -> EditConfig {
-        EditConfig
-    }
-    fn control() -> Control {
-        Control
-    }
-}
-
 #[derive(GraphQLInputObject)]
 #[graphql(description = "Defines a range of time between two dates.")]
 struct DateRange {
@@ -595,10 +574,10 @@ impl Subscription {
     }
 }
 
-type Schema = RootNode<'static, Config, MutRoot, Subscription>;
+type Schema = RootNode<'static, Config, Control, Subscription>;
 
 fn schema() -> Schema {
-    Schema::new(Config {}, MutRoot {}, Subscription {})
+    Schema::new(Config {}, Control {}, Subscription {})
 }
 
 // Define the URI paths used by the GraphQL interface.
