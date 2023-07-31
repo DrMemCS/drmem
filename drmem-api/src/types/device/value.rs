@@ -168,7 +168,7 @@ impl TryFrom<&toml::value::Value> for Value {
                 .map(Value::Int)
                 .map_err(|_| Error::TypeError),
             toml::value::Value::Float(v) => Ok(Value::Flt(*v)),
-	    toml::value::Value::String(v) => Ok(Value::Str(v.clone())),
+            toml::value::Value::String(v) => Ok(Value::Str(v.clone())),
             _ => Err(Error::TypeError),
         }
     }
