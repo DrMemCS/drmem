@@ -158,6 +158,22 @@ impl From<&String> for Value {
     }
 }
 
+impl TryFrom<&toml::value::Value> for Value {
+    type Error = Error;
+
+    fn try_from(value: &toml::value::Value) -> Result<Self, Self::Error> {
+        match value {
+            toml::value::Value::Boolean(v) => Ok(Value::Bool(*v)),
+            toml::value::Value::Integer(v) => i32::try_from(*v)
+                .map(Value::Int)
+                .map_err(|_| Error::TypeError),
+            toml::value::Value::Float(v) => Ok(Value::Flt(*v)),
+	    toml::value::Value::String(v) => Ok(Value::Str(v.clone())),
+            _ => Err(Error::TypeError),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +237,76 @@ mod tests {
         assert!(u16::try_from(Value::Int(-1i32)).is_err());
         assert!(u16::try_from(Value::Flt(0.0)).is_err());
         assert!(u16::try_from(Value::Str(String::from("hello"))).is_err());
+    }
+
+    #[test]
+    fn test_toml_value_tryfrom() {
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Boolean(true)),
+            Ok(Value::Bool(true))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Boolean(false)),
+            Ok(Value::Bool(false))
+        );
+
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Integer(0)),
+            Ok(Value::Int(0))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Integer(10)),
+            Ok(Value::Int(10))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Integer(-10)),
+            Ok(Value::Int(-10))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Integer(0x7fffffff)),
+            Ok(Value::Int(0x7fffffff))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Integer(-0x80000000)),
+            Ok(Value::Int(-0x80000000))
+        );
+        assert!(
+            Value::try_from(&toml::value::Value::Integer(-0x80000001)).is_err(),
+        );
+        assert!(
+            Value::try_from(&toml::value::Value::Integer(0x80000000)).is_err(),
+        );
+
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Float(0.0)),
+            Ok(Value::Flt(0.0))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Float(10.0)),
+            Ok(Value::Flt(10.0))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::Float(-10.0)),
+            Ok(Value::Flt(-10.0))
+        );
+
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("hello".into())),
+            Ok(Value::Str("hello".into()))
+        );
+
+        assert!(Value::try_from(&toml::value::Value::Datetime(
+            toml::value::Datetime {
+                date: None,
+                time: None,
+                offset: None
+            }
+        ))
+        .is_err());
+        assert!(Value::try_from(&toml::value::Value::Array(vec![])).is_err());
+        assert!(Value::try_from(&toml::value::Value::Table(
+            toml::map::Map::new()
+        ))
+        .is_err());
     }
 }
