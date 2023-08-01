@@ -10,14 +10,15 @@ This driver is always available in DrMem.
 
 This driver uses the following configuration parameters.
 
-- `active_level` is a boolean which defines the output value when the
-  timer is active. Once the timer expires, the output will be set to
-  the complement of this.
 - `millis` is the number of milliseconds the timer will remain
-  active. NOTE: Officially, DrMem uses 20 Hz (50 ms) as it's fastest
+  active. NOTE: Officially, DrMem uses 20 Hz (50 ms) as its fastest
   response time. Although you could specify a shorter time, you might
   be disappointed in its accuracy (depending on your system hardware
   and its CPU load.)
+- `disabled` is the value of the `output` device when the timer isn't
+  active. This value can be any type supported by DrMem devices.
+- `enabled` is the value of the `output` device while the timer is
+  active. This value can be any type supported by DrMem devices.
 
 ## Devices
 
@@ -26,7 +27,7 @@ The driver creates these devices:
 | Base Name | Type     | Units | Comment                                                        |
 |-----------|----------|-------|----------------------------------------------------------------|
 | `enable`  | bool, RW |       | A `false` to `true` transition will reset and start the timer. |
-| `output`  | bool, RO |       | Output state of timer.                                         |
+| `output`  | T, RO    |       | Output state of timer.                                         |
 
 Every value sent to the `enable` device will be reported -- even
 duplicates. This allows one to, if using the redis backend, see the
