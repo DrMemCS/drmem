@@ -13,20 +13,22 @@ use tracing::{self, debug};
 #[derive(Debug, PartialEq)]
 enum CycleState {
     Idle,
-    CycleHigh,
-    CycleLow,
+    Cycling,
 }
 
 // The state of a driver instance.
 
 pub struct Instance {
     enabled_at_boot: bool,
+    disabled: device::Value,
+    enabled: Vec<device::Value>,
     state: CycleState,
+    index: usize,
     millis: time::Duration,
 }
 
 pub struct Devices {
-    d_output: driver::ReportReading<bool>,
+    d_output: driver::ReportReading<device::Value>,
     d_enable: driver::ReportReading<bool>,
     s_enable: driver::SettingStream<bool>,
 }
@@ -41,10 +43,18 @@ impl Instance {
 
     /// Creates a new, idle `Instance`.
 
-    pub fn new(enabled: bool, millis: time::Duration) -> Instance {
+    pub fn new(
+        enabled_at_boot: bool,
+        millis: time::Duration,
+        disabled: device::Value,
+        enabled: Vec<device::Value>,
+    ) -> Instance {
         Instance {
-            enabled_at_boot: enabled,
+            enabled_at_boot,
             state: CycleState::Idle,
+            disabled,
+            enabled,
+            index: 0,
             millis,
         }
     }
@@ -56,13 +66,13 @@ impl Instance {
             Some(toml::value::Value::Integer(millis)) => {
                 // DrMem's official sample rate is 20 Hz, so the cycle
                 // shouldn't change faster than that. Limit the
-                // `cycle` driver's output to 10 hz so we can see the
+                // `cycle` driver's output to 20 hz so we can see the
                 // output change 20 times a second.
                 //
                 // XXX: Should there be a global constant in the
                 // drmem-api crate indicating the max sample rate?
 
-                if (100..=3_600_000).contains(millis) {
+                if (50..=3_600_000).contains(millis) {
                     Ok(time::Duration::from_millis(*millis as u64 / 2))
                 } else {
                     Err(Error::BadConfig(String::from("'millis' out of range")))
@@ -80,27 +90,60 @@ impl Instance {
     // Validates the enable-at-boot parameter.
 
     fn get_cfg_enabled(cfg: &DriverConfig) -> Result<bool> {
-        match cfg.get("enabled") {
+        match cfg.get("enabled_at_boot") {
             Some(toml::value::Value::Boolean(level)) => Ok(*level),
             Some(_) => Err(Error::BadConfig(String::from(
-                "'enabled' config parameter should be a boolean",
+                "'enabled_at_boot' config parameter should be a boolean",
             ))),
             None => Ok(false),
         }
     }
 
-    fn time_expired(&mut self) -> Option<bool> {
+    // Validates the inactive value parameter.
+
+    fn get_inactive_value(cfg: &DriverConfig) -> Result<device::Value> {
+        match cfg.get("disabled") {
+            Some(value) => value.try_into(),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'disabled' parameter in config",
+            ))),
+        }
+    }
+
+    fn get_active_values(cfg: &DriverConfig) -> Result<Vec<device::Value>> {
+        match cfg.get("enabled") {
+            Some(toml::value::Value::Array(value)) => {
+                if value.len() > 1 {
+                    value.iter().map(|v| v.try_into()).collect()
+                } else {
+                    Err(Error::BadConfig(String::from(
+                        "'enabled' array should have at least 2 values",
+                    )))
+                }
+            }
+            Some(_) => Err(Error::BadConfig(String::from(
+                "'enabled' parameter should be an array of values",
+            ))),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'enabled' parameter in config",
+            ))),
+        }
+    }
+
+    fn time_expired(&mut self) -> Option<device::Value> {
         match self.state {
             CycleState::Idle => None,
 
-            CycleState::CycleHigh => {
-                self.state = CycleState::CycleLow;
-                Some(false)
-            }
+            CycleState::Cycling => {
+                let current = &self.enabled[self.index];
 
-            CycleState::CycleLow => {
-                self.state = CycleState::CycleHigh;
-                Some(true)
+                self.index = (self.index + 1) % self.enabled.len();
+
+                if &self.enabled[self.index] != current {
+                    Some(self.enabled[self.index].clone())
+                } else {
+                    None
+                }
             }
         }
     }
@@ -111,24 +154,45 @@ impl Instance {
     // value with to set the output. If `None`, the output remains
     // unchanged.
 
-    fn update_state(&mut self, val: bool) -> (bool, Option<bool>) {
+    fn update_state(&mut self, val: bool) -> (bool, Option<device::Value>) {
         match self.state {
             CycleState::Idle => {
                 if val {
-                    self.state = CycleState::CycleHigh;
-                    (true, Some(true))
+                    self.state = CycleState::Cycling;
+                    self.index = 0;
+
+                    let value = &self.enabled[self.index];
+
+                    (
+                        true,
+                        // If the output is already at the desired
+                        // value, don't emit it again.
+                        if value != &self.disabled {
+                            Some(value.clone())
+                        } else {
+                            None
+                        },
+                    )
                 } else {
                     (false, None)
                 }
             }
 
-            CycleState::CycleHigh | CycleState::CycleLow => (
+            CycleState::Cycling => (
                 false,
                 if val {
                     None
                 } else {
                     self.state = CycleState::Idle;
-                    Some(false)
+
+                    // If the output is already at the desired value,
+                    // don't emit it again.
+
+                    if &self.disabled != &self.enabled[self.index] {
+                        Some(self.disabled.clone())
+                    } else {
+                        None
+                    }
                 },
             ),
         }
@@ -176,15 +240,17 @@ impl driver::API for Instance {
         cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
         let millis = Instance::get_cfg_millis(cfg);
-        let enabled = Instance::get_cfg_enabled(cfg);
+        let enabled_at_boot = Instance::get_cfg_enabled(cfg);
+        let disabled = Instance::get_inactive_value(cfg);
+        let enabled = Instance::get_active_values(cfg);
 
         let fut = async move {
-            // Validate the configuration.
-
-            let millis = millis?;
-            let enabled = enabled?;
-
-            Ok(Box::new(Instance::new(enabled, millis)))
+            Ok(Box::new(Instance::new(
+                enabled_at_boot?,
+                millis?,
+                disabled?,
+                enabled?,
+            )))
         };
 
         Box::pin(fut)
@@ -199,12 +265,12 @@ impl driver::API for Instance {
             let mut devices = devices.lock().await;
 
             if self.enabled_at_boot {
-                self.state = CycleState::CycleHigh;
+                self.state = CycleState::Cycling;
                 (devices.d_enable)(true).await;
-                (devices.d_output)(true).await;
+                (devices.d_output)(self.enabled[self.index].clone()).await;
             } else {
                 (devices.d_enable)(false).await;
-                (devices.d_output)(false).await;
+                (devices.d_output)(self.disabled.clone()).await;
             }
 
             loop {
@@ -247,7 +313,7 @@ impl driver::API for Instance {
                         (devices.d_enable)(b).await;
 
                         if let Some(out) = out {
-			    (devices.d_output)(out).await;
+			    (devices.d_output)(out.clone()).await;
                         }
                     }
                 }
@@ -264,7 +330,12 @@ mod tests {
 
     #[test]
     fn test_state_changes() {
-        let mut timer = Instance::new(false, time::Duration::from_millis(1000));
+        let mut timer = Instance::new(
+            false,
+            time::Duration::from_millis(1000),
+            device::Value::Bool(false),
+            vec![device::Value::Bool(true), device::Value::Bool(false)],
+        );
 
         // Verify that, when in the Idle state, an input of `false` or
         // a timer timeout doesn't move the FSM out of the Idle state.
@@ -278,20 +349,155 @@ mod tests {
         // timer to be reset and the output to be reported. Verify a
         // second `true` has no effect.
 
-        assert_eq!((true, Some(true)), timer.update_state(true));
+        assert_eq!((true, Some(true.into())), timer.update_state(true));
         assert_eq!((false, None), timer.update_state(true));
 
         // Verify timeouts result in the toggling of the output.
 
-        assert_eq!(Some(false), timer.time_expired());
-        assert_eq!(Some(true), timer.time_expired());
-        assert_eq!(Some(false), timer.time_expired());
-        assert_eq!(Some(true), timer.time_expired());
+        assert_eq!(Some(false.into()), timer.time_expired());
+        assert_eq!(Some(true.into()), timer.time_expired());
+        assert_eq!(Some(false.into()), timer.time_expired());
+        assert_eq!(Some(true.into()), timer.time_expired());
 
         // Verify that, while cycling, a `false` input brings us back
         // to the Idle state.
 
-        assert_eq!((false, Some(false)), timer.update_state(false));
+        assert_eq!((false, Some(false.into())), timer.update_state(false));
+        assert_eq!(timer.state, CycleState::Idle);
+    }
+
+    #[test]
+    fn test_numeric_cycles() {
+        let mut timer = Instance::new(
+            false,
+            time::Duration::from_millis(1000),
+            device::Value::Int(0),
+            vec![
+                device::Value::Int(1),
+                device::Value::Int(2),
+                device::Value::Int(3),
+            ],
+        );
+
+        // Verify that, when in the Idle state, an input of `false` or
+        // a timer timeout doesn't move the FSM out of the Idle state.
+
+        assert_eq!(timer.state, CycleState::Idle);
+        assert_eq!((false, None), timer.update_state(false));
+        assert_eq!(None, timer.time_expired());
+        assert_eq!(timer.state, CycleState::Idle);
+
+        // Verify that a `true` input in the Idle state requires the
+        // timer to be reset and the output to be reported. Verify a
+        // second `true` has no effect.
+
+        assert_eq!((true, Some((1).into())), timer.update_state(true));
+        assert_eq!((false, None), timer.update_state(true));
+
+        // Verify timeouts result in the cycling of the output.
+
+        assert_eq!(Some((2).into()), timer.time_expired());
+        assert_eq!(Some((3).into()), timer.time_expired());
+        assert_eq!(Some((1).into()), timer.time_expired());
+        assert_eq!(Some((2).into()), timer.time_expired());
+
+        // Verify that, while cycling, a `false` input brings us back
+        // to the Idle state.
+
+        assert_eq!((false, Some((0).into())), timer.update_state(false));
+        assert_eq!(timer.state, CycleState::Idle);
+
+        // Now verify restarting the cycle emits the first value in
+        // the array.
+
+        assert_eq!((true, Some((1).into())), timer.update_state(true));
+    }
+
+    #[test]
+    fn test_duplicate_skips() {
+        let mut timer = Instance::new(
+            false,
+            time::Duration::from_millis(1000),
+            device::Value::Bool(false),
+            vec![
+                device::Value::Bool(true),
+                device::Value::Bool(false),
+                device::Value::Bool(false),
+            ],
+        );
+
+        // Verify that, when in the Idle state, an input of `false` or
+        // a timer timeout doesn't move the FSM out of the Idle state.
+
+        assert_eq!(timer.state, CycleState::Idle);
+        assert_eq!((false, None), timer.update_state(false));
+        assert_eq!(None, timer.time_expired());
+        assert_eq!(timer.state, CycleState::Idle);
+
+        // Verify that a `true` input in the Idle state requires the
+        // timer to be reset and the output to be reported. Verify a
+        // second `true` has no effect.
+
+        assert_eq!((true, Some(true.into())), timer.update_state(true));
+        assert_eq!((false, None), timer.update_state(true));
+
+        // Verify timeouts result in the toggling of the output.
+
+        assert_eq!(Some(false.into()), timer.time_expired());
+        assert_eq!(None, timer.time_expired());
+        assert_eq!(Some(true.into()), timer.time_expired());
+        assert_eq!(Some(false.into()), timer.time_expired());
+        assert_eq!(None, timer.time_expired());
+        assert_eq!(Some(true.into()), timer.time_expired());
+
+        // Verify that, while cycling, a `false` input brings us back
+        // to the Idle state.
+
+        assert_eq!((false, Some(false.into())), timer.update_state(false));
+        assert_eq!(timer.state, CycleState::Idle);
+    }
+
+    #[test]
+    fn test_transition_skips() {
+        let mut timer = Instance::new(
+            false,
+            time::Duration::from_millis(1000),
+            device::Value::Bool(false),
+            vec![
+                device::Value::Bool(false),
+                device::Value::Bool(true),
+                device::Value::Bool(false),
+            ],
+        );
+
+        // Verify that, when in the Idle state, an input of `false` or
+        // a timer timeout doesn't move the FSM out of the Idle state.
+
+        assert_eq!(timer.state, CycleState::Idle);
+        assert_eq!((false, None), timer.update_state(false));
+        assert_eq!(None, timer.time_expired());
+        assert_eq!(timer.state, CycleState::Idle);
+
+        // Verify that a `true` input in the Idle state requires the
+        // timer to be reset but the output is skipped (because it's
+        // the same value.) Verify a second `true` has no effect.
+
+        assert_eq!((true, None), timer.update_state(true));
+        assert_eq!((false, None), timer.update_state(true));
+
+        // Verify timeouts result in the toggling of the output.
+
+        assert_eq!(Some(true.into()), timer.time_expired());
+        assert_eq!(Some(false.into()), timer.time_expired());
+        assert_eq!(None, timer.time_expired());
+        assert_eq!(Some(true.into()), timer.time_expired());
+        assert_eq!(Some(false.into()), timer.time_expired());
+
+        // Verify that, while cycling, a `false` input brings us back
+        // to the Idle state and the output is skipped because we're
+        // already at `false`.
+
+        assert_eq!((false, None), timer.update_state(false));
         assert_eq!(timer.state, CycleState::Idle);
     }
 }
