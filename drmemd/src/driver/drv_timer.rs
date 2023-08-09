@@ -22,12 +22,13 @@ enum TimerState {
 
 pub struct Instance {
     state: TimerState,
-    active_level: bool,
+    active_value: device::Value,
+    inactive_value: device::Value,
     millis: time::Duration,
 }
 
 pub struct Devices {
-    d_output: driver::ReportReading<bool>,
+    d_output: driver::ReportReading<device::Value>,
     d_enable: driver::ReportReading<bool>,
     s_enable: driver::SettingStream<bool>,
 }
@@ -43,10 +44,15 @@ impl Instance {
     /// Creates a new `Instance` instance. It is assumed the external
     /// input is `false` so the initial timer state is `Armed`.
 
-    pub fn new(active_level: bool, millis: time::Duration) -> Instance {
+    pub fn new(
+        active_value: device::Value,
+        inactive_value: device::Value,
+        millis: time::Duration,
+    ) -> Instance {
         Instance {
             state: TimerState::Armed,
-            active_level,
+            active_value,
+            inactive_value,
             millis,
         }
     }
@@ -89,16 +95,24 @@ impl Instance {
         }
     }
 
-    // Validates the logic level parameter.
+    // Validates the active value parameter.
 
-    fn get_cfg_level(cfg: &DriverConfig) -> Result<bool> {
-        match cfg.get("active_level") {
-            Some(toml::value::Value::Boolean(level)) => Ok(*level),
-            Some(_) => Err(Error::BadConfig(String::from(
-                "'active_level' config parameter should be a boolean",
-            ))),
+    fn get_active_value(cfg: &DriverConfig) -> Result<device::Value> {
+        match cfg.get("enabled") {
+            Some(value) => value.try_into(),
             None => Err(Error::BadConfig(String::from(
-                "missing 'active_level' parameter in config",
+                "missing 'enabled' parameter in config",
+            ))),
+        }
+    }
+
+    // Validates the inactive value parameter.
+
+    fn get_inactive_value(cfg: &DriverConfig) -> Result<device::Value> {
+        match cfg.get("disabled") {
+            Some(value) => value.try_into(),
+            None => Err(Error::BadConfig(String::from(
+                "missing 'disabled' parameter in config",
             ))),
         }
     }
@@ -110,7 +124,7 @@ impl Instance {
     fn update_state(
         &mut self,
         val: bool,
-    ) -> (Option<bool>, Option<time::Instant>) {
+    ) -> (Option<device::Value>, Option<time::Instant>) {
         match self.state {
             // Currently timing and the input was set to `false`.
             TimerState::TimingAndArmed => {
@@ -137,7 +151,7 @@ impl Instance {
                 if val {
                     self.state = TimerState::Timing;
                     (
-                        Some(self.active_level),
+                        Some(self.active_value.clone()),
                         Some(time::Instant::now() + self.millis),
                     )
                 } else {
@@ -212,17 +226,23 @@ impl driver::API for Instance {
         cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
         let millis = Instance::get_cfg_millis(cfg);
-        let level = Instance::get_cfg_level(cfg);
+        let active_value = Instance::get_active_value(cfg);
+        let inactive_value = Instance::get_inactive_value(cfg);
 
         let fut = async move {
             // Validate the configuration.
 
             let millis = millis?;
-            let level = level?;
+            let active_value = active_value?;
+            let inactive_value = inactive_value?;
 
             // Build and return the future.
 
-            Ok(Box::new(Instance::new(level, millis)))
+            Ok(Box::new(Instance::new(
+                active_value,
+                inactive_value,
+                millis,
+            )))
         };
 
         Box::pin(fut)
@@ -237,7 +257,7 @@ impl driver::API for Instance {
             let mut devices = devices.lock().await;
 
             (devices.d_enable)(false).await;
-            (devices.d_output)(!self.active_level).await;
+            (devices.d_output)(self.inactive_value.clone()).await;
 
             loop {
                 info!("state {:?} : waiting for event", &self.state);
@@ -254,7 +274,7 @@ impl driver::API for Instance {
 			// set the output to the inactive value.
 
 			self.time_expired();
-			(devices.d_output)(!self.active_level).await;
+			(devices.d_output)(self.inactive_value.clone()).await;
                     }
 
                     // Always look for settings. We're pattern
@@ -296,7 +316,11 @@ mod tests {
 
     #[test]
     fn test_state_changes() {
-        let mut timer = Instance::new(true, time::Duration::from_millis(1000));
+        let mut timer = Instance::new(
+            device::Value::Bool(true),
+            device::Value::Bool(false),
+            time::Duration::from_millis(1000),
+        );
 
         assert_eq!(timer.state, TimerState::Armed);
         assert_eq!((None, None), timer.update_state(false));
@@ -304,7 +328,7 @@ mod tests {
         let (a, b) = timer.update_state(true);
 
         assert_eq!(timer.state, TimerState::Timing);
-        assert_eq!(Some(true), a);
+        assert_eq!(Some(device::Value::Bool(true)), a);
         assert!(b.is_some());
 
         assert_eq!((None, None), timer.update_state(true));
@@ -334,7 +358,7 @@ mod tests {
         let (a, b) = timer.update_state(true);
 
         assert_eq!(timer.state, TimerState::Timing);
-        assert_eq!(Some(true), a);
+        assert_eq!(Some(device::Value::Bool(true)), a);
         assert!(b.is_some());
 
         assert_eq!((None, None), timer.update_state(false));
