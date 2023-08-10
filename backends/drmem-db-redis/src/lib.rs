@@ -41,12 +41,6 @@ pub mod config;
 
 fn xlat_err(e: redis::RedisError) -> Error {
     match e.kind() {
-        redis::ErrorKind::ResponseError
-        | redis::ErrorKind::ClusterDown
-        | redis::ErrorKind::CrossSlot
-        | redis::ErrorKind::MasterDown
-        | redis::ErrorKind::IoError => Error::DbCommunicationError,
-
         redis::ErrorKind::AuthenticationFailed
         | redis::ErrorKind::InvalidClientConfig => Error::AuthenticationError,
 
@@ -57,13 +51,15 @@ fn xlat_err(e: redis::RedisError) -> Error {
         | redis::ErrorKind::TryAgain
         | redis::ErrorKind::ClientError
         | redis::ErrorKind::ExtensionError
-        | redis::ErrorKind::ReadOnly => Error::OperationError,
+        | redis::ErrorKind::ReadOnly => {
+            Error::OperationError("backend is read-only".to_owned())
+        }
 
         redis::ErrorKind::NoScriptError
         | redis::ErrorKind::Moved
         | redis::ErrorKind::Ask => Error::NotFound,
 
-        _ => Error::UnknownError,
+        _ => Error::BackendError(format!("{}", &e)),
     }
 }
 

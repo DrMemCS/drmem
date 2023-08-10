@@ -226,7 +226,7 @@ impl Node {
         // problem and return an error.
 
         error!("all inputs have closed ... terminating");
-        Err(Error::OperationError)
+        Err(Error::OperationError("no available inputs".to_owned()))
     }
 
     // Starts a new instance of a logic node.

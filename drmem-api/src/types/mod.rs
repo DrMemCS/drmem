@@ -33,10 +33,9 @@ pub enum Error {
     /// An invalid value was provided.
     InvArgument(String),
 
-    /// Returned when a communication error occurred with the backend
-    /// database. Each backend will have its own recommendations on
-    /// how to recover.
-    DbCommunicationError,
+    /// A general error returned by the backend storage. The string
+    /// will have more information about the error.
+    BackendError(String),
 
     /// Communication was disrupted due to one end not following a
     /// protocol.
@@ -51,7 +50,7 @@ pub enum Error {
 
     /// The requested operation couldn't complete. The description
     /// field will have more information for the user.
-    OperationError,
+    OperationError(String),
 
     /// A bad parameter was given in a configuration or a
     /// configuration was missing a required parameter.
@@ -60,10 +59,6 @@ pub enum Error {
     /// There was a problem parsing a string. The associated string
     /// will describe how the parsing failed.
     ParseError(String),
-
-    /// A dependent library introduced a new error that hasn't been
-    /// properly mapped in DrMem. This needs to be reported as a bug.
-    UnknownError,
 }
 
 impl std::error::Error for Error {}
@@ -80,19 +75,18 @@ impl fmt::Display for Error {
                 write!(f, "{} is missing peer", detail)
             }
             Error::TypeError => write!(f, "incorrect type"),
-            Error::InvArgument(s) => write!(f, "{}", s),
-            Error::DbCommunicationError => {
-                write!(f, "db communication error")
+            Error::InvArgument(v) => write!(f, "{}", &v),
+            Error::BackendError(v) => {
+                write!(f, "backend error: {}", &v)
             }
             Error::ProtocolError(v) => write!(f, "protocol error: {}", &v),
             Error::AuthenticationError => write!(f, "permission error"),
             Error::TimeoutError => write!(f, "timeout"),
-            Error::OperationError => {
-                write!(f, "couldn't complete operation")
+            Error::OperationError(v) => {
+                write!(f, "couldn't complete operation: {}", &v)
             }
             Error::BadConfig(v) => write!(f, "config error: {}", &v),
             Error::ParseError(v) => write!(f, "parse error: {}", &v),
-            Error::UnknownError => write!(f, "unhandled error"),
         }
     }
 }

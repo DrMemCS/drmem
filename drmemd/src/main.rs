@@ -60,12 +60,12 @@ async fn wrap_task(
     match handle.await {
         Err(e) if e.is_panic() => {
             error!("terminated due to panic");
-            Err(Error::OperationError)
+            Err(Error::OperationError("task panicked".to_owned()))
         }
 
         Err(_) => {
             error!("terminated due to cancellation");
-            Err(Error::OperationError)
+            Err(Error::OperationError("task was canceled".to_owned()))
         }
 
         Ok(Ok(_)) => unreachable!(),
@@ -110,7 +110,9 @@ async fn run() -> Result<()> {
                 drv_tbl.clone(),
                 tx_clnt_req.clone(),
             )
-            .then(|_| async { Err(Error::OperationError) });
+            .then(|_| async {
+                Err(Error::OperationError("graphql server exited".to_owned()))
+            });
 
             tasks.push(wrap_task(tokio::spawn(f)));
         }
