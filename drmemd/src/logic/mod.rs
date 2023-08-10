@@ -40,7 +40,7 @@ impl Output {
 
     // Attempts to set the associated device to a new value.
 
-    pub async fn send(&mut self, value: device::Value) -> () {
+    pub async fn send(&mut self, value: device::Value) {
         // Only attempt the setting if the device isn't set to the
         // value.
 
