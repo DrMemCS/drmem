@@ -1,4 +1,5 @@
-//! This crate is used by various, internal tasks of `drmemd`.
+//! This crate is used by internal tasks of `drmemd` as well as
+//! hardware drivers.
 //!
 //! The interfaces and types defined in this crate are useful for
 //! those wishing to write a new back-end storage module or a driver

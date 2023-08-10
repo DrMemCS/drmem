@@ -1,4 +1,5 @@
-//! This module defines types related to devices.
+//! Defines types related to devices.
+
 use std::{pin::Pin, time};
 use tokio_stream::Stream;
 
