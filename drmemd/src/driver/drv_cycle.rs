@@ -188,7 +188,7 @@ impl Instance {
                     // If the output is already at the desired value,
                     // don't emit it again.
 
-                    if &self.disabled != &self.enabled[self.index] {
+                    if self.disabled != self.enabled[self.index] {
                         Some(self.disabled.clone())
                     } else {
                         None
