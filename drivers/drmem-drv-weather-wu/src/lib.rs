@@ -100,7 +100,7 @@ impl Instance {
                     ))
                 } else {
                     error!("couldn't determine public API key");
-                    Err(Error::UnknownError)
+                    Err(Error::NotFound)
                 }
             }
         }

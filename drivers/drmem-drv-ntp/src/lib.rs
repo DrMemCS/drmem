@@ -422,7 +422,7 @@ impl driver::API for Instance {
                     return Ok(Box::new(Instance { sock, seq: 1 }));
                 }
             }
-            Err(Error::OperationError)
+            Err(Error::OperationError("couldn't create socket".to_owned()))
         };
 
         Box::pin(fut)

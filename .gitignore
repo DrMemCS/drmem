@@ -1,1 +1,20 @@
 /target
+
+# These are local files of the author that shouldn't get included with
+# the project.
+
+CHAT-GPT.md
+test.sh
+watch.sh
+build-dev.sh
+build-release.sh
+publish-api.sh
+publish-backends.sh
+publish-drivers.sh
+publish-drmemd.sh
+run-clippy.sh
+run-tests.sh
+test-publish-api.sh
+test-publish-backends.sh
+test-publish-drivers.sh
+test-publish-drmemd.sh

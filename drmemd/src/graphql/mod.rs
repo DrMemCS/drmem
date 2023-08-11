@@ -671,7 +671,10 @@ pub fn server(
         .with(
             warp::cors()
                 .allow_any_origin()
-                .allow_headers(vec!["content-type"])
+                .allow_headers(vec![
+                    "content-type",
+                    "Access-Control-Allow-Origin",
+                ])
                 .allow_methods(vec!["OPTIONS", "GET", "POST"])
                 .max_age(Duration::from_secs(3_600)),
         );

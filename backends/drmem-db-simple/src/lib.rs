@@ -335,7 +335,7 @@ impl Store for SimpleStore {
                     )),
                 }
             } else {
-                Err(Error::OperationError)
+                Err(Error::OperationError(format!("{} is read-only", &name)))
             }
         } else {
             Err(Error::NotFound)
@@ -457,7 +457,9 @@ impl Store for SimpleStore {
                     }
                 }
             } else {
-                Err(Error::OperationError)
+                Err(Error::OperationError(
+                    "unable to lock reading channel".to_owned(),
+                ))
             }
         } else {
             Err(Error::NotFound)

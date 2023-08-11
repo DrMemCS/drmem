@@ -1,5 +1,5 @@
-//! This module defines types and interfaces that drivers use to
-//! interact with the core of DrMem.
+//! Defines types and interfaces that drivers use to interact with the
+//! core of DrMem.
 
 use crate::types::{
     device::{Base, Name, Path, Value},

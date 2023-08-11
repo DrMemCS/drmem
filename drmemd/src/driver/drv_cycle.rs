@@ -73,7 +73,7 @@ impl Instance {
                 // drmem-api crate indicating the max sample rate?
 
                 if (50..=3_600_000).contains(millis) {
-                    Ok(time::Duration::from_millis(*millis as u64 / 2))
+                    Ok(time::Duration::from_millis(*millis as u64))
                 } else {
                     Err(Error::BadConfig(String::from("'millis' out of range")))
                 }
@@ -188,7 +188,7 @@ impl Instance {
                     // If the output is already at the desired value,
                     // don't emit it again.
 
-                    if &self.disabled != &self.enabled[self.index] {
+                    if self.disabled != self.enabled[self.index] {
                         Some(self.disabled.clone())
                     } else {
                         None
@@ -327,6 +327,132 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use drmem_api::driver::API;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn test_cfg() {
+        {
+            let mut cfg = DriverConfig::new();
+
+            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
+            cfg.insert(
+                "enabled_at_boot".to_owned(),
+                toml::value::Value::Boolean(true),
+            );
+            cfg.insert(
+                "disabled".to_owned(),
+                toml::value::Value::Boolean(false),
+            );
+            cfg.insert(
+                "enabled".to_owned(),
+                toml::value::Value::Array(vec![
+                    toml::value::Value::Boolean(true),
+                    toml::value::Value::Boolean(false),
+                ]),
+            );
+
+            let inst = Instance::create_instance(&cfg).await.unwrap();
+
+            assert_eq!(inst.enabled_at_boot, true);
+            assert_eq!(inst.millis, Duration::from_millis(500));
+            assert_eq!(inst.disabled, device::Value::Bool(false));
+            assert_eq!(
+                inst.enabled,
+                vec![device::Value::Bool(true), device::Value::Bool(false)]
+            );
+        }
+
+        {
+            let mut cfg = DriverConfig::new();
+
+            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
+            cfg.insert(
+                "disabled".to_owned(),
+                toml::value::Value::Boolean(false),
+            );
+            cfg.insert(
+                "enabled".to_owned(),
+                toml::value::Value::Array(vec![
+                    toml::value::Value::Boolean(true),
+                    toml::value::Value::Boolean(false),
+                ]),
+            );
+
+            let inst = Instance::create_instance(&cfg).await.unwrap();
+
+            assert_eq!(inst.enabled_at_boot, false);
+            assert_eq!(inst.millis, Duration::from_millis(500));
+            assert_eq!(inst.disabled, device::Value::Bool(false));
+            assert_eq!(
+                inst.enabled,
+                vec![device::Value::Bool(true), device::Value::Bool(false)]
+            );
+        }
+
+        {
+            let mut cfg = DriverConfig::new();
+
+            cfg.insert(
+                "disabled".to_owned(),
+                toml::value::Value::Boolean(false),
+            );
+            cfg.insert(
+                "enabled".to_owned(),
+                toml::value::Value::Array(vec![
+                    toml::value::Value::Boolean(true),
+                    toml::value::Value::Boolean(false),
+                ]),
+            );
+
+            assert!(Instance::create_instance(&cfg).await.is_err());
+        }
+
+        {
+            let mut cfg = DriverConfig::new();
+
+            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
+            cfg.insert(
+                "enabled".to_owned(),
+                toml::value::Value::Array(vec![
+                    toml::value::Value::Boolean(true),
+                    toml::value::Value::Boolean(false),
+                ]),
+            );
+
+            assert!(Instance::create_instance(&cfg).await.is_err());
+        }
+
+        {
+            let mut cfg = DriverConfig::new();
+
+            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
+            cfg.insert(
+                "disabled".to_owned(),
+                toml::value::Value::Boolean(false),
+            );
+
+            assert!(Instance::create_instance(&cfg).await.is_err());
+        }
+
+        {
+            let mut cfg = DriverConfig::new();
+
+            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
+            cfg.insert(
+                "disabled".to_owned(),
+                toml::value::Value::Boolean(false),
+            );
+            cfg.insert(
+                "enabled".to_owned(),
+                toml::value::Value::Array(vec![toml::value::Value::Boolean(
+                    true,
+                )]),
+            );
+
+            assert!(Instance::create_instance(&cfg).await.is_err());
+        }
+    }
 
     #[test]
     fn test_state_changes() {

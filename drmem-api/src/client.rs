@@ -1,6 +1,6 @@
-//! This module defines types and interfaces that internal clients use
-//! to interact with the core of DrMem. The primary, internal client
-//! is the GraphQL interface.
+//! Defines types and interfaces that internal clients use to interact
+//! with the core of DrMem. The primary, internal client is the
+//! GraphQL interface, but asks in logic blocks also use this module.
 //!
 //! Any new, internal tasks that need access to device readings or
 //! wish to set the value of the device need to have a
