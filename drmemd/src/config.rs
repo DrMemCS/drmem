@@ -267,7 +267,6 @@ pub async fn get() -> Option<Config> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
 
     #[test]
     fn test_config() {
@@ -333,6 +332,8 @@ log_level = "warn"
     #[cfg(feature = "graphql")]
     #[test]
     fn test_graphql_config() {
+        use std::net::Ipv4Addr;
+
         match toml::from_str::<Config>(
             r#"
 latitude = -45.0
