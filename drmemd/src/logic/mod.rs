@@ -192,7 +192,7 @@ impl Node {
 
     // Runs the node logic. This method should never return.
 
-    async fn run(&mut self) -> Result<Infallible> {
+    async fn run(mut self) -> Result<Infallible> {
         info!("starting");
 
         // Wait for the next reading to arrive. All the incoming
@@ -240,7 +240,7 @@ impl Node {
         // Create a new instance and let it initialize itself. If an
         // error occurs, return it.
 
-        let mut node = Node::init(c_req, cfg)
+        let node = Node::init(c_req, cfg)
             .instrument(info_span!("logic-init", name = &name))
             .await?;
 
