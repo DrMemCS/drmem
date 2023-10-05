@@ -116,8 +116,8 @@ impl DeviceInfo {
     }
 
     #[graphql(description = "The engineering units of the device's value.")]
-    fn units(&self) -> &Option<String> {
-        &self.units
+    fn units(&self) -> Option<&String> {
+        self.units.as_ref()
     }
 
     #[graphql(

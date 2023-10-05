@@ -29,7 +29,7 @@ impl State {
                 ref driver_name,
                 ref dev_name,
                 ref dev_units,
-                ref max_history,
+                max_history,
                 rpy_chan,
             } => {
                 let result = self
@@ -37,7 +37,7 @@ impl State {
                     .register_read_only_device(
                         driver_name,
                         dev_name,
-                        dev_units,
+                        dev_units.as_ref(),
                         max_history,
                     )
                     .await
@@ -52,7 +52,7 @@ impl State {
                 ref driver_name,
                 ref dev_name,
                 ref dev_units,
-                ref max_history,
+                max_history,
                 rpy_chan,
             } => {
                 let result = self
@@ -60,7 +60,7 @@ impl State {
                     .register_read_write_device(
                         driver_name,
                         dev_name,
-                        dev_units,
+                        dev_units.as_ref(),
                         max_history,
                     )
                     .await
@@ -75,11 +75,11 @@ impl State {
 
     async fn handle_client_request(&mut self, req: client::Request) {
         match req {
-            client::Request::QueryDeviceInfo {
-                ref pattern,
-                rpy_chan,
-            } => {
-                let result = self.backend.get_device_info(pattern).await;
+            client::Request::QueryDeviceInfo { pattern, rpy_chan } => {
+                let result = self
+                    .backend
+                    .get_device_info(pattern.as_ref().map(|x| x.as_str()))
+                    .await;
 
                 if let Err(ref e) = result {
                     info!("get_device_info() returned '{}'", e);
