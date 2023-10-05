@@ -287,7 +287,8 @@ impl driver::API for Instance {
 			// set the output to the inactive value.
 
 			if let Some(v) = self.time_expired() {
-			    debug!("state {:?} : timeout occurred -- output {}", &self.state, v);
+			    debug!("state {:?} : timeout occurred -- output {}",
+				   &self.state, v);
 			    (devices.d_output)(v).await;
 			}
                     }
@@ -308,7 +309,8 @@ impl driver::API for Instance {
 
                         reply(Ok(b));
 
-                        debug!("state {:?} : new input -> {}", &self.state, b);
+                        debug!("state {:?} : new input -> {}",
+			       &self.state, b);
 
                         (devices.d_enable)(b).await;
 
