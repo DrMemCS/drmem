@@ -52,8 +52,8 @@ pub trait Store {
         &mut self,
         driver: &str,
         name: &types::device::Name,
-        units: &Option<String>,
-        max_history: &Option<usize>,
+        units: Option<&String>,
+        max_history: Option<usize>,
     ) -> Result<(
         driver::ReportReading<types::device::Value>,
         Option<types::device::Value>,
@@ -86,8 +86,8 @@ pub trait Store {
         &mut self,
         driver: &str,
         name: &types::device::Name,
-        units: &Option<String>,
-        max_history: &Option<usize>,
+        units: Option<&String>,
+        max_history: Option<usize>,
     ) -> Result<(
         driver::ReportReading<types::device::Value>,
         driver::RxDeviceSetting,
@@ -104,7 +104,7 @@ pub trait Store {
 
     async fn get_device_info(
         &mut self,
-        pattern: &Option<String>,
+        pattern: Option<&str>,
     ) -> Result<Vec<client::DevInfoReply>>;
 
     /// Sends a request to a driver to set its device to the specified

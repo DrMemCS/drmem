@@ -409,8 +409,8 @@ pub struct RedisStore {
 impl RedisStore {
     fn make_client(
         cfg: &config::Config,
-        name: &Option<String>,
-        pword: &Option<String>,
+        name: Option<&String>,
+        pword: Option<&String>,
     ) -> Result<redis::Client> {
         use redis::{ConnectionAddr, ConnectionInfo, RedisConnectionInfo};
 
@@ -420,8 +420,8 @@ impl RedisStore {
             addr: ConnectionAddr::Tcp(addr.ip().to_string(), addr.port()),
             redis: RedisConnectionInfo {
                 db: cfg.get_dbn(),
-                username: name.clone(),
-                password: pword.clone(),
+                username: name.cloned(),
+                password: pword.cloned(),
             },
         };
 
@@ -435,7 +435,7 @@ impl RedisStore {
         name: Option<String>,
         pword: Option<String>,
     ) -> Result<AioConnection> {
-        let client = Self::make_client(cfg, &name, &pword)?;
+        let client = Self::make_client(cfg, name.as_ref(), pword.as_ref())?;
 
         debug!("creating new redis connection");
 
@@ -452,7 +452,7 @@ impl RedisStore {
         name: Option<String>,
         pword: Option<String>,
     ) -> Result<AioMplexConnection> {
-        let client = Self::make_client(cfg, &name, &pword)?;
+        let client = Self::make_client(cfg, name.as_ref(), pword.as_ref())?;
 
         debug!("creating new, shared redis connection");
 
@@ -500,7 +500,7 @@ impl RedisStore {
     fn init_device_cmd(
         name: &str,
         driver: &str,
-        units: &Option<String>,
+        units: Option<&String>,
     ) -> redis::Pipeline {
         let hist_key = Self::hist_key(name);
         let info_key = Self::info_key(name);
@@ -543,12 +543,11 @@ impl RedisStore {
         redis::Cmd::xrevrange_count(name, "+", "-", 1usize)
     }
 
-    fn match_pattern_cmd(pattern: &Option<String>) -> redis::Cmd {
+    fn match_pattern_cmd(pattern: Option<&str>) -> redis::Cmd {
         // Take the pattern from the caller and append "#info" since
         // we only want to look at device information keys.
 
         let pattern = pattern
-            .as_ref()
             .map(|v| Self::info_key(v))
             .unwrap_or_else(|| String::from("*#info"));
 
@@ -835,7 +834,7 @@ impl RedisStore {
         &mut self,
         name: &str,
         driver: &str,
-        units: &Option<String>,
+        units: Option<&String>,
     ) -> Result<()> {
         debug!("initializing {}", name);
         Self::init_device_cmd(name, driver, units)
@@ -850,12 +849,12 @@ impl RedisStore {
     fn mk_report_func(
         &self,
         name: &str,
-        max_history: &Option<usize>,
+        max_history: Option<usize>,
     ) -> ReportReading<device::Value> {
         let db_con = self.db_con.clone();
         let name = String::from(name);
 
-        if let Some(mh) = *max_history {
+        if let Some(mh) = max_history {
             Box::new(move |v| {
                 let mut db_con = db_con.clone();
                 let hist_key = Self::hist_key(&name);
@@ -898,8 +897,8 @@ impl Store for RedisStore {
         &mut self,
         driver_name: &str,
         name: &device::Name,
-        units: &Option<String>,
-        max_history: &Option<usize>,
+        units: Option<&String>,
+        max_history: Option<usize>,
     ) -> Result<(ReportReading<device::Value>, Option<device::Value>)> {
         let name = name.to_string();
 
@@ -920,8 +919,8 @@ impl Store for RedisStore {
         &mut self,
         driver_name: &str,
         name: &device::Name,
-        units: &Option<String>,
-        max_history: &Option<usize>,
+        units: Option<&String>,
+        max_history: Option<usize>,
     ) -> Result<(
         ReportReading<device::Value>,
         RxDeviceSetting,
@@ -956,7 +955,7 @@ impl Store for RedisStore {
 
     async fn get_device_info(
         &mut self,
-        pattern: &Option<String>,
+        pattern: Option<&str>,
     ) -> Result<Vec<client::DevInfoReply>> {
         // Get a list of all the keys that match the pattern. For
         // Redis, these keys will have "#info" appended at the end.
@@ -1339,20 +1338,19 @@ mod tests {
     #[test]
     fn test_pattern_cmd() {
         assert_eq!(
-            &RedisStore::match_pattern_cmd(&None).get_packed_command(),
+            &RedisStore::match_pattern_cmd(None).get_packed_command(),
             b"*2\r
 $4\r\nKEYS\r
 $6\r\n*#info\r\n"
         );
         assert_eq!(
-            &RedisStore::match_pattern_cmd(&Some(String::from("device")))
-                .get_packed_command(),
+            &RedisStore::match_pattern_cmd(Some("device")).get_packed_command(),
             b"*2\r
 $4\r\nKEYS\r
 $11\r\ndevice#info\r\n"
         );
         assert_eq!(
-            &RedisStore::match_pattern_cmd(&Some(String::from("*weather*")))
+            &RedisStore::match_pattern_cmd(Some("*weather*"))
                 .get_packed_command(),
             b"*2\r
 $4\r\nKEYS\r
@@ -1639,7 +1637,7 @@ $10\r\nS\x00\x00\x00\x05hello\r\n"
     fn test_init_dev() {
         assert_eq!(
             String::from_utf8_lossy(
-                &RedisStore::init_device_cmd("device", "mem", &None)
+                &RedisStore::init_device_cmd("device", "mem", None)
                     .get_packed_pipeline()
             ),
             "*1\r
@@ -1673,7 +1671,7 @@ $4\r\nEXEC\r\n"
                 &RedisStore::init_device_cmd(
                     "device",
                     "pump",
-                    &Some(String::from("gpm"))
+                    Some(&String::from("gpm"))
                 )
                 .get_packed_pipeline()
             ),

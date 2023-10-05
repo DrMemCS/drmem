@@ -49,7 +49,7 @@ struct DeviceInfo {
 impl DeviceInfo {
     pub fn create(
         owner: String,
-        units: Option<String>,
+        units: Option<&String>,
         tx_setting: Option<TxDeviceSetting>,
     ) -> DeviceInfo {
         let (tx, _) = broadcast::channel(CHAN_SIZE);
@@ -58,7 +58,7 @@ impl DeviceInfo {
 
         DeviceInfo {
             owner,
-            units,
+            units: units.cloned(),
             tx_setting,
             reading: Arc::new(Mutex::new((tx, None, time::UNIX_EPOCH))),
         }
@@ -145,8 +145,8 @@ impl Store for SimpleStore {
         &mut self,
         driver: &str,
         name: &device::Name,
-        units: &Option<String>,
-        _max_history: &Option<usize>,
+        units: Option<&String>,
+        _max_history: Option<usize>,
     ) -> Result<(ReportReading<device::Value>, Option<device::Value>)> {
         // Check to see if the device name already exists.
 
@@ -203,8 +203,8 @@ impl Store for SimpleStore {
         &mut self,
         driver: &str,
         name: &device::Name,
-        units: &Option<String>,
-        _max_history: &Option<usize>,
+        units: Option<&String>,
+        _max_history: Option<usize>,
     ) -> Result<(
         ReportReading<device::Value>,
         RxDeviceSetting,
@@ -224,7 +224,7 @@ impl Store for SimpleStore {
 
                 let di = e.insert(DeviceInfo::create(
                     String::from(driver),
-                    units.clone(),
+                    units,
                     Some(tx_sets),
                 ));
 
@@ -270,7 +270,7 @@ impl Store for SimpleStore {
 
     async fn get_device_info(
         &mut self,
-        pattern: &Option<String>,
+        pattern: Option<&str>,
     ) -> Result<Vec<client::DevInfoReply>> {
         let pred: Box<dyn FnMut(&(&device::Name, &DeviceInfo)) -> bool> =
             if let Some(pattern) = pattern {
@@ -489,7 +489,7 @@ mod tests {
         let name = "test:device".parse::<device::Name>().unwrap();
 
         if let Ok((f, None)) = db
-            .register_read_only_device("test", &name, &None, &None)
+            .register_read_only_device("test", &name, None, None)
             .await
         {
             // Test that priming the history with one value returns
@@ -573,7 +573,7 @@ mod tests {
         let name = "test:device".parse::<device::Name>().unwrap();
 
         if let Ok((f, None)) = db
-            .register_read_only_device("test", &name, &None, &None)
+            .register_read_only_device("test", &name, None, None)
             .await
         {
             // Verify that monitoring device, starting now, picks up
@@ -660,7 +660,7 @@ mod tests {
         let name = "test:device".parse::<device::Name>().unwrap();
 
         if let Ok((f, None)) = db
-            .register_read_only_device("test", &name, &None, &None)
+            .register_read_only_device("test", &name, None, None)
             .await
         {
             // Verify that, if the latest point is before the starting
@@ -704,7 +704,7 @@ mod tests {
         let name = "test:device".parse::<device::Name>().unwrap();
 
         if let Ok((f, None)) = db
-            .register_read_only_device("test", &name, &None, &None)
+            .register_read_only_device("test", &name, None, None)
             .await
         {
             // Verify that, if both times are before the data, nothing
@@ -893,7 +893,7 @@ mod tests {
         // driver named "test". We don't define units for this device.
 
         if let Ok((f, None)) = db
-            .register_read_only_device("test", &name, &None, &None)
+            .register_read_only_device("test", &name, None, None)
             .await
         {
             // Make sure the device was defined and the setting
@@ -920,7 +920,7 @@ mod tests {
             // driver name results in an error.
 
             assert!(db
-                .register_read_only_device("test2", &name, &None, &None)
+                .register_read_only_device("test2", &name, None, None)
                 .await
                 .is_err());
 
@@ -928,7 +928,7 @@ mod tests {
             // driver name is successful.
 
             if let Ok((f, Some(device::Value::Int(1)))) = db
-                .register_read_only_device("test", &name, &None, &None)
+                .register_read_only_device("test", &name, None, None)
                 .await
             {
                 // Also, verify that the device update channel wasn't
@@ -954,7 +954,7 @@ mod tests {
         // driver named "test". We don't define units for this device.
 
         if let Ok((f, mut set_chan, None)) = db
-            .register_read_write_device("test", &name, &None, &None)
+            .register_read_write_device("test", &name, None, None)
             .await
         {
             // Make sure the device was defined and a setting channel
@@ -1002,7 +1002,7 @@ mod tests {
             // didn't affect the setting channel.
 
             assert!(db
-                .register_read_only_device("test2", &name, &None, &None)
+                .register_read_only_device("test2", &name, None, None)
                 .await
                 .is_err());
             assert_eq!(
@@ -1014,7 +1014,7 @@ mod tests {
             // driver name is successful.
 
             if let Ok((f, _, Some(device::Value::Int(1)))) = db
-                .register_read_write_device("test", &name, &None, &None)
+                .register_read_write_device("test", &name, None, None)
                 .await
             {
                 assert_eq!(

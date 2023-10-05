@@ -34,7 +34,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use futures::{Future, StreamExt};
+use futures::{Future, FutureExt, StreamExt};
 use std::net::SocketAddrV4;
 use std::sync::Arc;
 use std::{convert::Infallible, pin::Pin};
@@ -138,8 +138,17 @@ impl Instance {
             |e| Error::MissingPeer(e.to_string());
         let out_buf = cmd.encode();
 
-        s.write_all(&out_buf[..]).await.map_err(ERR_F)?;
-        s.flush().await.map_err(ERR_F)
+        #[rustfmt::skip]
+	tokio::select! {
+	    result = s.write_all(&out_buf[..]) => {
+		match result {
+		    Ok(_) => s.flush().await.map_err(ERR_F),
+		    Err(e) => Err(ERR_F(e))
+		}
+	    }
+	    _ = time::sleep(time::Duration::from_millis(500)) =>
+		Err(Error::TimeoutError)
+	}
     }
 
     // Performs an "RPC" call to the device; it sends the command and
@@ -155,23 +164,21 @@ impl Instance {
         R: AsyncReadExt + std::marker::Unpin,
         S: AsyncWriteExt + std::marker::Unpin,
     {
-        // Wrap the transaction in an async block and wrap the block
-        // in a future that expects it to complete in 1/2 s.
-
-        let fut = time::timeout(time::Duration::from_millis(500), async {
-            let res = tokio::try_join!(
-                Instance::send_cmd(tx, cmd),
-                self.read_reply(rx)
-            );
-
-            res.map(|(_, reply)| reply)
-        });
-
-        if let Ok(v) = fut.await {
-            v
-        } else {
-            Err(Error::TimeoutError)
-        }
+        Instance::send_cmd(tx, cmd)
+            .then(|res| async {
+                match res {
+                    Ok(()) => {
+                        #[rustfmt::skip]
+			tokio::select! {
+			    result = self.read_reply(rx) => result,
+			    _ = time::sleep(time::Duration::from_millis(500)) =>
+				Err(Error::TimeoutError)
+			}
+                    }
+                    Err(e) => Err(e),
+                }
+            })
+            .await
     }
 
     // Sets the relay state on or off, depending on the argument.
@@ -370,6 +377,10 @@ impl Instance {
                 v => v,
             };
 
+            // Send an OK reply to the client with the updated value.
+
+            reply(Ok(v));
+
             // Always log incoming settings. Let the client know there
             // was a successful setting, and include the value that
             // was used.
@@ -377,12 +388,10 @@ impl Instance {
             match self.set_brightness(s, v).await {
                 Ok(()) => {
                     report(v).await;
-                    reply(Ok(v));
                     Ok(Some(v))
                 }
                 Err(e) => {
                     error!("setting brightness : {}", &e);
-                    reply(Err(e.clone()));
                     Err(e)
                 }
             }
@@ -401,15 +410,14 @@ impl Instance {
         reply: driver::SettingReply<bool>,
         report: &'a driver::ReportReading<bool>,
     ) -> Result<()> {
+        reply(Ok(v));
         match self.led_state_rpc(s, v).await {
             Ok(()) => {
                 report(v).await;
-                reply(Ok(v));
                 Ok(())
             }
             Err(e) => {
                 error!("setting LED : {}", &e);
-                reply(Err(e.clone()));
                 Err(e)
             }
         }
@@ -618,8 +626,8 @@ impl driver::API for Instance {
         let fut = async move {
             // Lock the mutex for the life of the driver. There is no
             // other task that wants access to these device handles.
-            // An Arc<Mutex<>> is the other way I know of passing a
-            // mutable value to async tasks.
+            // An Arc<Mutex<>> is the only way I know of sharing a
+            // mutable value with async tasks.
 
             let mut devices = devices.lock().await;
 

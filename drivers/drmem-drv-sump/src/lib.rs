@@ -166,19 +166,22 @@ impl Instance {
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
 
-    fn elapsed(dur: u64) -> String {
-        match (dur + 500) / 1000 {
-            dur if dur >= 3600 * 24 => {
+    fn elapsed(millis: u64) -> String {
+        match (millis + 500) / 1000 {
+            dur if dur >= 3600 * 24 - 30 => {
+                let dur = dur + 30;
+
                 format!(
-                    "{}d{}h{}m{}s",
+                    "{}d{}h{}m",
                     dur / (3600 * 24),
                     (dur / 3600) % 24,
-                    (dur / 60) % 60,
-                    dur % 60
+                    (dur / 60) % 60
                 )
             }
-            dur if dur >= 3600 => {
-                format!("{}h{}m{}s", dur / 3600, (dur / 60) % 60, dur % 60)
+            dur if dur >= 3570 => {
+                let dur = dur + 30;
+
+                format!("{}h{}m", dur / 3600, (dur / 60) % 60)
             }
             dur if dur >= 60 => {
                 format!("{}m{}s", dur / 60, dur % 60)
@@ -496,5 +499,23 @@ mod tests {
 
         assert_eq!(state.off_event(60000, 60.0), Some((60000, 10.0, 6.0)));
         assert_eq!(state, State::Off { off_time: 60000 });
+    }
+
+    #[test]
+    fn test_elapsed() {
+        assert_eq!(Instance::elapsed(0), "0s");
+        assert_eq!(Instance::elapsed(1000), "1s");
+        assert_eq!(Instance::elapsed(59000), "59s");
+        assert_eq!(Instance::elapsed(60000), "1m0s");
+
+        assert_eq!(Instance::elapsed(3569000), "59m29s");
+        assert_eq!(Instance::elapsed(3570000), "1h0m");
+        assert_eq!(Instance::elapsed(3599000), "1h0m");
+        assert_eq!(Instance::elapsed(3600000), "1h0m");
+
+        assert_eq!(Instance::elapsed(3600000 * 24 - 31000), "23h59m");
+        assert_eq!(Instance::elapsed(3600000 * 24 - 30000), "1d0h0m");
+        assert_eq!(Instance::elapsed(3600000 * 24 - 1000), "1d0h0m");
+        assert_eq!(Instance::elapsed(3600000 * 24), "1d0h0m");
     }
 }
