@@ -180,11 +180,10 @@ impl RequestChan {
     // forwarded to the driver. Otherwise the converted value is
     // yielded.
 
-    fn create_setting_stream<
+    fn create_setting_stream<T>(rx: RxDeviceSetting) -> SettingStream<T>
+    where
         T: TryFrom<device::Value> + Into<device::Value>,
-    >(
-        rx: RxDeviceSetting,
-    ) -> SettingStream<T> {
+    {
         Box::pin(ReceiverStream::new(rx).filter_map(|(v, tx_rpy)| {
             match T::try_from(v) {
                 Ok(v) => {
@@ -220,14 +219,15 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_rw_device<
-        T: Into<device::Value> + TryFrom<device::Value>,
-    >(
+    pub async fn add_rw_device<T>(
         &self,
         name: device::Base,
         units: Option<&str>,
         max_history: Option<usize>,
-    ) -> Result<(ReportReading<T>, SettingStream<T>, Option<T>)> {
+    ) -> Result<(ReportReading<T>, SettingStream<T>, Option<T>)>
+    where
+        T: Into<device::Value> + TryFrom<device::Value>,
+    {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
