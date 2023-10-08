@@ -1,10 +1,7 @@
 //! Defines types and interfaces that drivers use to interact with the
 //! core of DrMem.
 
-use crate::types::{
-    device::{Base, Name, Path, Value},
-    Error,
-};
+use crate::types::{device, Error};
 use std::future::Future;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -12,6 +9,10 @@ use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use toml::value;
 
 use super::Result;
+
+/// Represents the type used to specify the name of a driver.
+
+pub type Name = Arc<str>;
 
 /// Represents how configuration information is given to a driver.
 /// Since each driver can have vastly different requirements, the
@@ -22,7 +23,8 @@ pub type DriverConfig = value::Table;
 
 /// This type represents the data that is transferred in the
 /// communication channel. It simplifies the next two types.
-pub type SettingRequest = (Value, oneshot::Sender<Result<Value>>);
+pub type SettingRequest =
+    (device::Value, oneshot::Sender<Result<device::Value>>);
 
 /// Used by client APIs to send setting requests to a driver.
 pub type TxDeviceSetting = mpsc::Sender<SettingRequest>;
@@ -55,12 +57,13 @@ pub enum Request {
     /// report updated values of the device. The second element, if
     /// not `None`, is the last saved value of the device.
     AddReadonlyDevice {
-        driver_name: String,
-        dev_name: Name,
+        driver_name: Name,
+        dev_name: device::Name,
         dev_units: Option<String>,
         max_history: Option<usize>,
-        rpy_chan:
-            oneshot::Sender<Result<(ReportReading<Value>, Option<Value>)>>,
+        rpy_chan: oneshot::Sender<
+            Result<(ReportReading<device::Value>, Option<device::Value>)>,
+        >,
     },
 
     /// Registers a writable device with core.
@@ -70,12 +73,16 @@ pub enum Request {
     /// stream that yileds incoming settings to the device. The last
     /// element, if not `None`, is the last saved value of the device.
     AddReadWriteDevice {
-        driver_name: String,
-        dev_name: Name,
+        driver_name: Name,
+        dev_name: device::Name,
         dev_units: Option<String>,
         max_history: Option<usize>,
         rpy_chan: oneshot::Sender<
-            Result<(ReportReading<Value>, RxDeviceSetting, Option<Value>)>,
+            Result<(
+                ReportReading<device::Value>,
+                RxDeviceSetting,
+                Option<device::Value>,
+            )>,
         >,
     },
 }
@@ -88,19 +95,19 @@ pub enum Request {
 /// methods to send requests and receive replies with the core.
 #[derive(Clone)]
 pub struct RequestChan {
-    driver_name: String,
-    prefix: Path,
+    driver_name: Name,
+    prefix: device::Path,
     req_chan: mpsc::Sender<Request>,
 }
 
 impl RequestChan {
     pub fn new(
-        driver_name: &str,
-        prefix: &Path,
+        driver_name: Name,
+        prefix: &device::Path,
         req_chan: &mpsc::Sender<Request>,
     ) -> Self {
         RequestChan {
-            driver_name: String::from(driver_name),
+            driver_name,
             prefix: prefix.clone(),
             req_chan: req_chan.clone(),
         }
@@ -122,9 +129,11 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device<T: Into<Value> + TryFrom<Value>>(
+    pub async fn add_ro_device<
+        T: Into<device::Value> + TryFrom<device::Value>,
+    >(
         &self,
-        name: Base,
+        name: device::Base,
         units: Option<&str>,
         max_history: Option<usize>,
     ) -> super::Result<(ReportReading<T>, Option<T>)> {
@@ -138,7 +147,7 @@ impl RequestChan {
             .req_chan
             .send(Request::AddReadonlyDevice {
                 driver_name: self.driver_name.clone(),
-                dev_name: Name::build(self.prefix.clone(), name),
+                dev_name: device::Name::build(self.prefix.clone(), name),
                 dev_units: units.map(String::from),
                 max_history,
                 rpy_chan: tx,
@@ -171,7 +180,9 @@ impl RequestChan {
     // forwarded to the driver. Otherwise the converted value is
     // yielded.
 
-    fn create_setting_stream<T: TryFrom<Value> + Into<Value>>(
+    fn create_setting_stream<
+        T: TryFrom<device::Value> + Into<device::Value>,
+    >(
         rx: RxDeviceSetting,
     ) -> SettingStream<T> {
         Box::pin(ReceiverStream::new(rx).filter_map(|(v, tx_rpy)| {
@@ -209,9 +220,11 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_rw_device<T: Into<Value> + TryFrom<Value>>(
+    pub async fn add_rw_device<
+        T: Into<device::Value> + TryFrom<device::Value>,
+    >(
         &self,
-        name: Base,
+        name: device::Base,
         units: Option<&str>,
         max_history: Option<usize>,
     ) -> Result<(ReportReading<T>, SettingStream<T>, Option<T>)> {
@@ -220,7 +233,7 @@ impl RequestChan {
             .req_chan
             .send(Request::AddReadWriteDevice {
                 driver_name: self.driver_name.clone(),
-                dev_name: Name::build(self.prefix.clone(), name),
+                dev_name: device::Name::build(self.prefix.clone(), name),
                 dev_units: units.map(String::from),
                 max_history,
                 rpy_chan: tx,

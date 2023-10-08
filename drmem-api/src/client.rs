@@ -58,7 +58,7 @@ pub struct DevInfoReply {
     pub first_point: Option<device::Reading>,
     pub last_point: Option<device::Reading>,
     /// The name of the driver that supports this device.
-    pub driver: String,
+    pub driver: driver::Name,
 }
 
 // Defines the requests that can be sent to core.

@@ -123,15 +123,19 @@ async fn run() -> Result<()> {
         trace!("starting driver instances");
 
         for driver in cfg.driver {
-            let driver_name = driver.name.to_string();
+            let driver_name: drmem_api::driver::Name =
+                driver.name.clone().into();
 
             // If the driver exists in the driver table, an instance
             // can be started. If it doesn't exist, report an error
             // and exit.
 
             if let Some(driver_info) = drv_tbl.get_driver(&driver_name) {
-                let chan =
-                    RequestChan::new(&driver_name, &driver.prefix, &tx_drv_req);
+                let chan = RequestChan::new(
+                    driver_name.clone(),
+                    &driver.prefix,
+                    &tx_drv_req,
+                );
 
                 // Call the function that manages instances of this
                 // driver. If it returns `Ok()`, the value is a Future
