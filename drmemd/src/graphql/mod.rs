@@ -1,5 +1,5 @@
 use chrono::prelude::*;
-use drmem_api::{client, device, Error};
+use drmem_api::{client, device, driver, Error};
 use futures::Future;
 use juniper::{
     self, executor::FieldError, graphql_subscription, graphql_value,
@@ -27,7 +27,7 @@ impl juniper::Context for ConfigDb {}
 // available in the DrMem environment (executable.)
 
 struct DriverInfo {
-    name: String,
+    name: driver::Name,
     summary: &'static str,
     description: &'static str,
 }
@@ -39,8 +39,8 @@ struct DriverInfo {
 )]
 impl DriverInfo {
     #[graphql(description = "The name of the driver.")]
-    fn name(&self) -> &str {
-        &self.name
+    fn name(&self) -> driver::Name {
+        self.name.clone()
     }
 
     #[graphql(description = "A short summary of the driver's purpose.")]
@@ -99,7 +99,7 @@ struct DeviceInfo {
     device_name: String,
     units: Option<String>,
     settable: bool,
-    driver_name: String,
+    driver_name: driver::Name,
     history: DeviceHistory,
     db: crate::driver::DriverDb,
 }

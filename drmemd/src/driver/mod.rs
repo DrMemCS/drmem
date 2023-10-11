@@ -16,7 +16,7 @@ pub type MgrTask = Fut<Infallible>;
 pub type MgrFuncRet = Fut<Result<MgrTask>>;
 
 pub type Launcher = fn(
-    String,
+    driver::Name,
     driver::DriverConfig,
     driver::RequestChan,
     Option<usize>,
@@ -28,7 +28,7 @@ pub type DriverInfo = (&'static str, &'static str, Launcher);
 // driver panics.
 
 fn mgr_body<T>(
-    name: String,
+    name: driver::Name,
     devices: T::DeviceSet,
     cfg: driver::DriverConfig,
 ) -> MgrTask
@@ -65,7 +65,7 @@ where
                         .run(devices)
                         .instrument(info_span!(
                             "driver",
-                            name = name.as_str(),
+                            name = name.as_ref(),
                             cfg = field::Empty
                         ))
                         .await
@@ -108,7 +108,7 @@ where
 // type.
 
 fn manage_instance<T>(
-    name: String,
+    name: driver::Name,
     cfg: driver::DriverConfig,
     req_chan: driver::RequestChan,
     max_history: Option<usize>,
@@ -124,32 +124,33 @@ where
         // Let the driver API register the necessary devices.
 
         let devices = T::register_devices(req_chan, &cfg, max_history)
-            .instrument(info_span!("one-time-init", name = &name))
+            .instrument(info_span!("one-time-init", name = name.as_ref()))
             .await?;
-        let drv_name = name.clone();
 
         // Create a future that manages the instance.
 
         Ok(Box::pin(async move {
+            let drv_name = name.clone();
+
             mgr_body::<T>(name, devices, cfg)
-                .instrument(info_span!("mngr", drvr = drv_name))
+                .instrument(info_span!("mngr", drvr = drv_name.as_ref()))
                 .await
         }) as MgrTask)
     }) as MgrFuncRet
 }
 
 #[derive(Clone)]
-pub struct DriverDb(Arc<HashMap<&'static str, DriverInfo>>);
+pub struct DriverDb(Arc<HashMap<driver::Name, DriverInfo>>);
 
 impl DriverDb {
     pub fn create() -> DriverDb {
-        let mut table: HashMap<&'static str, DriverInfo> = HashMap::new();
+        let mut table: HashMap<driver::Name, DriverInfo> = HashMap::new();
 
         {
             use drv_memory::Instance;
 
             table.insert(
-                Instance::NAME,
+                Instance::NAME.into(),
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
@@ -162,7 +163,7 @@ impl DriverDb {
             use drv_timer::Instance;
 
             table.insert(
-                Instance::NAME,
+                Instance::NAME.into(),
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
@@ -175,7 +176,7 @@ impl DriverDb {
             use drv_cycle::Instance;
 
             table.insert(
-                Instance::NAME,
+                Instance::NAME.into(),
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
@@ -188,7 +189,7 @@ impl DriverDb {
             use drv_tod::Instance;
 
             table.insert(
-                Instance::NAME,
+                Instance::NAME.into(),
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
@@ -204,7 +205,7 @@ impl DriverDb {
             use drmem_drv_ntp::Instance;
 
             table.insert(
-                Instance::NAME,
+                Instance::NAME.into(),
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
@@ -220,7 +221,7 @@ impl DriverDb {
             use drmem_drv_sump::Instance;
 
             table.insert(
-                Instance::NAME,
+                Instance::NAME.into(),
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
@@ -236,7 +237,7 @@ impl DriverDb {
             use drmem_drv_weather_wu::Instance;
 
             table.insert(
-                Instance::NAME,
+                Instance::NAME.into(),
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
@@ -252,7 +253,7 @@ impl DriverDb {
             use drmem_drv_tplink::Instance;
 
             table.insert(
-                Instance::NAME,
+                Instance::NAME.into(),
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
@@ -278,9 +279,9 @@ impl DriverDb {
     pub fn find(
         &self,
         key: &str,
-    ) -> Option<(String, &'static str, &'static str)> {
+    ) -> Option<(driver::Name, &'static str, &'static str)> {
         self.get_driver(key)
-            .map(|info| (key.to_string(), info.0, info.1))
+            .map(|info| (key.into(), info.0, info.1))
     }
 
     /// Similar to `.find()`, but returns all the drivers'
@@ -288,9 +289,10 @@ impl DriverDb {
 
     pub fn get_all(
         &self,
-    ) -> impl Iterator<Item = (String, &'static str, &'static str)> + '_ {
+    ) -> impl Iterator<Item = (driver::Name, &'static str, &'static str)> + '_
+    {
         self.0.iter().map(|(k, (summary, description, _))| {
-            (k.to_string(), *summary, *description)
+            (k.clone(), *summary, *description)
         })
     }
 }

@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use chrono::*;
 use drmem_api::{
     client, device,
-    driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
+    driver::{self, ReportReading, RxDeviceSetting, TxDeviceSetting},
     Error, Result, Store,
 };
 use std::collections::{hash_map, HashMap};
@@ -40,7 +40,7 @@ pub mod config;
 mod glob;
 
 struct DeviceInfo {
-    owner: String,
+    owner: driver::Name,
     units: Option<String>,
     tx_setting: Option<TxDeviceSetting>,
     reading: Arc<Mutex<ReadingState>>,
@@ -57,7 +57,7 @@ impl DeviceInfo {
         // Build the entry and insert it in the table.
 
         DeviceInfo {
-            owner,
+            owner: owner.into(),
             units: units.cloned(),
             tx_setting,
             reading: Arc::new(Mutex::new((tx, None, time::UNIX_EPOCH))),
@@ -174,7 +174,7 @@ impl Store for SimpleStore {
             hash_map::Entry::Occupied(e) => {
                 let dev_info = e.get();
 
-                if dev_info.owner == driver {
+                if dev_info.owner.as_ref() == driver {
                     let func = mk_report_func(dev_info, name);
                     let guard = dev_info.reading.lock();
 
@@ -240,7 +240,7 @@ impl Store for SimpleStore {
             hash_map::Entry::Occupied(mut e) => {
                 let dev_info = e.get_mut();
 
-                if dev_info.owner == driver {
+                if dev_info.owner.as_ref() == driver {
                     // Create a channel with which to send settings.
 
                     let (tx_sets, rx_sets) = mpsc::channel(CHAN_SIZE);
