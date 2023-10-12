@@ -133,15 +133,15 @@ impl Instance {
                 if let Ok(addr) = addr.parse::<SocketAddrV4>() {
                     Ok(addr)
                 } else {
-                    Err(Error::BadConfig(String::from(
+                    Err(Error::ConfigError(String::from(
                         "'addr' not in hostname:port format",
                     )))
                 }
             }
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'addr' config parameter should be a string",
             ))),
-            None => Err(Error::BadConfig(String::from(
+            None => Err(Error::ConfigError(String::from(
                 "missing 'addr' parameter in config",
             ))),
         }

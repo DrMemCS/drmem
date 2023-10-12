@@ -83,13 +83,15 @@ impl Instance {
                 if (50..=3_600_000).contains(millis) {
                     Ok(time::Duration::from_millis(*millis as u64))
                 } else {
-                    Err(Error::BadConfig(String::from("'millis' out of range")))
+                    Err(Error::ConfigError(String::from(
+                        "'millis' out of range",
+                    )))
                 }
             }
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'millis' config parameter should be an integer",
             ))),
-            None => Err(Error::BadConfig(String::from(
+            None => Err(Error::ConfigError(String::from(
                 "missing 'millis' parameter in config",
             ))),
         }
@@ -100,7 +102,7 @@ impl Instance {
     fn get_active_value(cfg: &DriverConfig) -> Result<device::Value> {
         match cfg.get("enabled") {
             Some(value) => value.try_into(),
-            None => Err(Error::BadConfig(String::from(
+            None => Err(Error::ConfigError(String::from(
                 "missing 'enabled' parameter in config",
             ))),
         }
@@ -111,7 +113,7 @@ impl Instance {
     fn get_inactive_value(cfg: &DriverConfig) -> Result<device::Value> {
         match cfg.get("disabled") {
             Some(value) => value.try_into(),
-            None => Err(Error::BadConfig(String::from(
+            None => Err(Error::ConfigError(String::from(
                 "missing 'disabled' parameter in config",
             ))),
         }

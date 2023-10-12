@@ -54,7 +54,7 @@ pub enum Error {
 
     /// A bad parameter was given in a configuration or a
     /// configuration was missing a required parameter.
-    BadConfig(String),
+    ConfigError(String),
 
     /// There was a problem parsing a string. The associated string
     /// will describe how the parsing failed.
@@ -85,7 +85,7 @@ impl fmt::Display for Error {
             Error::OperationError(v) => {
                 write!(f, "couldn't complete operation: {}", &v)
             }
-            Error::BadConfig(v) => write!(f, "config error: {}", &v),
+            Error::ConfigError(v) => write!(f, "config error: {}", &v),
             Error::ParseError(v) => write!(f, "parse error: {}", &v),
         }
     }
