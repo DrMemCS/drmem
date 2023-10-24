@@ -30,6 +30,9 @@ pub enum Value {
     /// system takes too much time serializing string data, it could
     /// throw other portions of DrMem out of "soft real-time".
     Str(String),
+
+    /// For devices that render color values.
+    Color(palette::LinSrgb<u8>),
 }
 
 impl fmt::Display for Value {
@@ -39,6 +42,9 @@ impl fmt::Display for Value {
             Value::Int(v) => write!(f, "{}", v),
             Value::Flt(v) => write!(f, "{}", v),
             Value::Str(v) => write!(f, "\"{}\"", v),
+            Value::Color(v) => {
+                write!(f, "\"#{:02x}{:02x}{:02x}\"", v.red, v.green, v.blue)
+            }
         }
     }
 }
@@ -152,10 +158,62 @@ impl From<String> for Value {
     }
 }
 
-impl From<&String> for Value {
-    fn from(value: &String) -> Self {
-        Value::Str(value.clone())
+// When parsing a string, we could get a string or a color value,
+// depending on the content of the string. We need to use strings to
+// hold colors because the TOML format doesn't have a good way to
+// encode it.
+
+impl From<&str> for Value {
+    fn from(value: &str) -> Self {
+        Value::Str(value.into())
     }
+}
+
+impl From<palette::LinSrgb<u8>> for Value {
+    fn from(value: palette::LinSrgb<u8>) -> Self {
+        Value::Color(value)
+    }
+}
+
+impl TryFrom<Value> for palette::LinSrgb<u8> {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        if let Value::Color(v) = value {
+            Ok(v)
+        } else {
+            Err(Error::TypeError)
+        }
+    }
+}
+
+// Parses a color from a string. The only form currently supported is
+// "#RRGGBB" where the red, green, and blue portions are two hex
+// digits. Even though this function takes a slice, it's a private
+// function and we know we only call it when the slice has exactly 6
+// hex digits so we don't have to test to see if the result exceeds
+// 0xffffff.
+
+fn parse_color(s: &[u8]) -> Option<Value> {
+    let mut result = 0u32;
+
+    for ii in s {
+        if (b'0'..=b'9').contains(ii) {
+            result = (result << 4) + (ii - b'0') as u32;
+        } else if (b'A'..=b'F').contains(ii) {
+            result = (result << 4) + (ii - b'A' + 10) as u32;
+        } else if (b'a'..=b'f').contains(ii) {
+            result = (result << 4) + (ii - b'a' + 10) as u32;
+        } else {
+            return None;
+        }
+    }
+
+    Some(Value::Color(palette::LinSrgb::new(
+        (result >> 16) as u8,
+        (result >> 8) as u8,
+        result as u8,
+    )))
 }
 
 impl TryFrom<&toml::value::Value> for Value {
@@ -168,7 +226,16 @@ impl TryFrom<&toml::value::Value> for Value {
                 .map(Value::Int)
                 .map_err(|_| Error::TypeError),
             toml::value::Value::Float(v) => Ok(Value::Flt(*v)),
-            toml::value::Value::String(v) => Ok(Value::Str(v.clone())),
+            toml::value::Value::String(v) => match v.as_bytes() {
+                tmp @ &[b'#', _, _, _, _, _, _] => {
+                    if let Some(v) = parse_color(&tmp[1..]) {
+                        Ok(v)
+                    } else {
+                        Ok(Value::Str(v.clone()))
+                    }
+                }
+                _ => Ok(Value::Str(v.clone())),
+            },
             _ => Err(Error::TypeError),
         }
     }
@@ -192,10 +259,20 @@ mod tests {
 
         assert_eq!(Value::Flt(5.0), Value::from(5.0f64));
 
-        assert_eq!(
-            Value::Str(String::from("hello")),
-            Value::from(String::from("hello"))
-        );
+        assert_eq!(Value::Str(String::from("hello")), Value::from("hello"));
+
+        // Cycle through 256 values.
+
+        for ii in 1..=255u8 {
+            let r: u8 = ii;
+            let g: u8 = ii ^ 0xa5u8;
+            let b: u8 = 255u8 - ii;
+
+            assert_eq!(
+                Value::Color(palette::LinSrgb::new(r, g, b)),
+                Value::from(palette::LinSrgb::new(r, g, b))
+            );
+        }
     }
 
     #[test]
@@ -294,6 +371,61 @@ mod tests {
             Value::try_from(&toml::value::Value::String("hello".into())),
             Ok(Value::Str("hello".into()))
         );
+
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#".into())),
+            Ok(Value::Str("#".into()))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#1".into())),
+            Ok(Value::Str("#1".into()))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#12".into())),
+            Ok(Value::Str("#12".into()))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#123".into())),
+            Ok(Value::Str("#123".into()))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#1234".into())),
+            Ok(Value::Str("#1234".into()))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#12345".into())),
+            Ok(Value::Str("#12345".into()))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#1234567".into())),
+            Ok(Value::Str("#1234567".into()))
+        );
+
+        // Cycle through 256 semi-random colors. Make sure the parsing
+        // handles upper and lower case hex digits.
+
+        for ii in 1..=255u8 {
+            let r: u8 = ii;
+            let g: u8 = ii ^ 0xa5u8;
+            let b: u8 = 255u8 - ii;
+
+            assert_eq!(
+                Value::try_from(&toml::value::Value::String(format!(
+                    "#{:02x}{:02x}{:02x}",
+                    r, g, b
+                )))
+                .unwrap(),
+                Value::Color(palette::LinSrgb::new(r, g, b))
+            );
+            assert_eq!(
+                Value::try_from(&toml::value::Value::String(format!(
+                    "#{:02X}{:02X}{:02X}",
+                    r, g, b
+                )))
+                .unwrap(),
+                Value::Color(palette::LinSrgb::new(r, g, b))
+            );
+        }
 
         assert!(Value::try_from(&toml::value::Value::Datetime(
             toml::value::Datetime {

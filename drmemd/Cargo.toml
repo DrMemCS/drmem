@@ -37,6 +37,8 @@ clap = { version = "4", features = ["cargo"] }
 
 chrono = { workspace = true, features = ["clock"] }
 
+palette.workspace = true
+
 lazy_static = "1"
 
 drmem-api = { path = "../drmem-api", version = "0.3" }
