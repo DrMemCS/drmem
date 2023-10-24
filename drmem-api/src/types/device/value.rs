@@ -247,6 +247,23 @@ mod tests {
     use std::convert::TryFrom;
 
     #[test]
+    fn test_device_values_to() {
+        assert_eq!("false", format!("{}", Value::Bool(false)));
+        assert_eq!("true", format!("{}", Value::Bool(true)));
+
+        assert_eq!("0", format!("{}", Value::Int(0)));
+        assert_eq!("1", format!("{}", Value::Int(1)));
+        assert_eq!("-1", format!("{}", Value::Int(-1)));
+        assert_eq!("-2147483648", format!("{}", Value::Int(-0x80000000)));
+        assert_eq!("2147483647", format!("{}", Value::Int(0x7fffffff)));
+
+        assert_eq!(
+            "\"#010203\"",
+            format!("{}", Value::Color(palette::LinSrgb::new(1, 2, 3)))
+        );
+    }
+
+    #[test]
     fn test_device_values_from() {
         assert_eq!(Value::Bool(true), Value::from(true));
         assert_eq!(Value::Bool(false), Value::from(false));
