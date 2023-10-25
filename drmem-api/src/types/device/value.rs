@@ -158,11 +158,6 @@ impl From<String> for Value {
     }
 }
 
-// When parsing a string, we could get a string or a color value,
-// depending on the content of the string. We need to use strings to
-// hold colors because the TOML format doesn't have a good way to
-// encode it.
-
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Value::Str(value.into())
