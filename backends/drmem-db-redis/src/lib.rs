@@ -1599,11 +1599,8 @@ $5\r\nvalue\r
 $9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
         );
         assert_eq!(
-            &RedisStore::report_new_value_cmd(
-                "key",
-                &(String::from("hello").into())
-            )
-            .get_packed_command(),
+            &RedisStore::report_new_value_cmd("key", &("hello".into()))
+                .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
 $3\r\nkey\r
@@ -1675,7 +1672,7 @@ $9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
         assert_eq!(
             &RedisStore::report_bounded_new_value_cmd(
                 "key",
-                &(String::from("hello").into()),
+                &("hello".into()),
                 4
             )
             .get_packed_command(),
