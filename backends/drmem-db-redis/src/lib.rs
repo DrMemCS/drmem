@@ -102,6 +102,19 @@ fn to_redis(val: &device::Value) -> Vec<u8> {
             buf.extend_from_slice(s);
             buf
         }
+
+        // Colors start with a 'C', followed by 3 u8 values,
+        // representing red, green, and blue intensities,
+        // respectively.
+        device::Value::Color(v) => {
+            let mut buf: Vec<u8> = Vec::with_capacity(4);
+
+            buf.push(b'C');
+            buf.push(v.red);
+            buf.push(v.green);
+            buf.push(v.blue);
+            buf
+        }
     }
 }
 
@@ -146,6 +159,16 @@ fn decode_string(buf: &[u8]) -> Result<device::Value> {
     Err(Error::TypeError)
 }
 
+fn decode_color(buf: &[u8]) -> Result<device::Value> {
+    if buf.len() >= 3 {
+        let rgb = palette::LinSrgb::new(buf[0], buf[1], buf[2]);
+
+        Ok(device::Value::Color(rgb))
+    } else {
+        Err(Error::TypeError)
+    }
+}
+
 // Returns a `device::Value` from a `redis::Value`. The only
 // enumeration we support is the `redis::Value::Data` form since
 // that's the one used to return redis data.
@@ -165,6 +188,7 @@ fn from_value(v: &redis::Value) -> Result<device::Value> {
                 'I' => decode_integer(&buf[1..]),
                 'D' => decode_float(&buf[1..]),
                 'S' => decode_string(&buf[1..]),
+                'C' => decode_color(&buf[1..]),
 
                 // Any other character in the tag field is unknown and
                 // can't be decoded as a `device::Value`.
@@ -1277,6 +1301,40 @@ mod tests {
         }
     }
 
+    const COLOR_TEST_CASES: &[((u8, u8, u8), [u8; 4])] = &[
+        ((0, 0, 0), [b'C', 0, 0, 0]),
+        ((4, 2, 1), [b'C', 4, 2, 1]),
+        ((8, 4, 2), [b'C', 8, 4, 2]),
+        ((12, 6, 3), [b'C', 12, 6, 3]),
+        ((16, 8, 4), [b'C', 16, 8, 4]),
+        ((20, 10, 5), [b'C', 20, 10, 5]),
+        ((24, 12, 6), [b'C', 24, 12, 6]),
+        ((28, 14, 7), [b'C', 28, 14, 7]),
+        ((32, 16, 8), [b'C', 32, 16, 8]),
+    ];
+
+    #[test]
+    fn test_color_encoder() {
+        for ((r, g, b), rv) in COLOR_TEST_CASES {
+            assert_eq!(
+                &rv[..],
+                to_redis(&device::Value::Color(palette::LinSrgb::new(
+                    *r, *g, *b
+                )))
+            );
+        }
+    }
+
+    #[test]
+    fn test_color_decoder() {
+        for ((r, g, b), rv) in COLOR_TEST_CASES {
+            assert_eq!(
+                from_value(&redis::Value::Data(rv.to_vec())).unwrap(),
+                device::Value::Color(palette::LinSrgb::new(*r, *g, *b))
+            );
+        }
+    }
+
     const STR_TEST_CASES: &[(&str, &[u8])] = &[
         ("", &[b'S', 0u8, 0u8, 0u8, 0u8]),
         ("ABC", &[b'S', 0u8, 0u8, 0u8, 3u8, b'A', b'B', b'C']),
@@ -1541,11 +1599,8 @@ $5\r\nvalue\r
 $9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
         );
         assert_eq!(
-            &RedisStore::report_new_value_cmd(
-                "key",
-                &(String::from("hello").into())
-            )
-            .get_packed_command(),
+            &RedisStore::report_new_value_cmd("key", &("hello".into()))
+                .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
 $3\r\nkey\r
@@ -1617,7 +1672,7 @@ $9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
         assert_eq!(
             &RedisStore::report_bounded_new_value_cmd(
                 "key",
-                &(String::from("hello").into()),
+                &("hello".into()),
                 4
             )
             .get_packed_command(),

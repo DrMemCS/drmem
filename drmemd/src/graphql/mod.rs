@@ -70,6 +70,8 @@ struct SettingData {
     f_bool: Option<bool>,
     #[graphql(name = "str", description = "Placeholder for string values.")]
     f_string: Option<String>,
+    #[graphql(name = "color", description = "Placeholder for color values.")]
+    f_color: Option<Vec<i32>>,
 }
 
 // Contains information about a device's history in the backend.
@@ -355,6 +357,7 @@ impl Control {
                 f_float: None,
                 f_bool: None,
                 f_string: None,
+                f_color: None,
             } => Err(FieldError::new("no data provided", Value::null())),
 
             SettingData {
@@ -362,6 +365,7 @@ impl Control {
                 f_float: None,
                 f_bool: None,
                 f_string: None,
+                f_color: None,
             } => {
                 Control::perform_setting(db, &name, v)
                     .await
@@ -372,6 +376,7 @@ impl Control {
                         float_value: None,
                         bool_value: None,
                         string_value: None,
+                        color_value: None,
                     })
             }
 
@@ -380,6 +385,7 @@ impl Control {
                 f_float: Some(v),
                 f_bool: None,
                 f_string: None,
+                f_color: None,
             } => {
                 Control::perform_setting(db, &name, v)
                     .await
@@ -390,6 +396,7 @@ impl Control {
                         float_value: Some(v),
                         bool_value: None,
                         string_value: None,
+                        color_value: None,
                     })
             }
 
@@ -398,6 +405,7 @@ impl Control {
                 f_float: None,
                 f_bool: Some(v),
                 f_string: None,
+                f_color: None,
             } => {
                 Control::perform_setting(db, &name, v)
                     .await
@@ -408,6 +416,7 @@ impl Control {
                         float_value: None,
                         bool_value: Some(v),
                         string_value: None,
+                        color_value: None,
                     })
             }
 
@@ -416,6 +425,7 @@ impl Control {
                 f_float: None,
                 f_bool: None,
                 f_string: Some(v),
+                f_color: None,
             } => {
                 Control::perform_setting(db, &name, v)
                     .await
@@ -426,7 +436,52 @@ impl Control {
                         float_value: None,
                         bool_value: None,
                         string_value: Some(v),
+                        color_value: None,
                     })
+            }
+
+            SettingData {
+                f_int: None,
+                f_float: None,
+                f_bool: None,
+                f_string: None,
+                f_color: Some(v),
+            } => {
+                if let &[r, g, b] = &v[..] {
+                    if let (Ok(r), Ok(g), Ok(b)) =
+                        (u8::try_from(r), u8::try_from(g), u8::try_from(b))
+                    {
+                        Control::perform_setting(
+                            db,
+                            &name,
+                            palette::LinSrgb::<u8>::new(r, g, b),
+                        )
+                        .await
+                        .map(|v| Reading {
+                            device: name,
+                            stamp: Utc::now(),
+                            int_value: None,
+                            float_value: None,
+                            bool_value: None,
+                            string_value: None,
+                            color_value: Some(vec![
+                                v.red as i32,
+                                v.green as i32,
+                                v.blue as i32,
+                            ]),
+                        })
+                    } else {
+                        Err(FieldError::new(
+                            "color component is out of range",
+                            Value::null(),
+                        ))
+                    }
+                } else {
+                    Err(FieldError::new(
+                        "color values only have three components",
+                        Value::null(),
+                    ))
+                }
             }
 
             SettingData { .. } => Err(FieldError::new(
@@ -463,6 +518,10 @@ struct Reading {
     bool_value: Option<bool>,
     #[graphql(description = "Placeholder for string values.")]
     string_value: Option<String>,
+    #[graphql(
+        description = "Placeholder for color values. Values are a 3-element array holding red, green, and blue values. Each value ranges from 0 - 255."
+    )]
+    color_value: Option<Vec<i32>>,
 }
 
 impl From<&device::Reading> for Reading {
@@ -475,6 +534,7 @@ impl From<&device::Reading> for Reading {
                 float_value: None,
                 bool_value: Some(*v),
                 string_value: None,
+                color_value: None,
             },
             device::Value::Int(v) => Reading {
                 device: "".into(),
@@ -483,6 +543,7 @@ impl From<&device::Reading> for Reading {
                 float_value: None,
                 bool_value: None,
                 string_value: None,
+                color_value: None,
             },
             device::Value::Flt(v) => Reading {
                 device: "".into(),
@@ -491,6 +552,7 @@ impl From<&device::Reading> for Reading {
                 float_value: Some(*v),
                 bool_value: None,
                 string_value: None,
+                color_value: None,
             },
             device::Value::Str(v) => Reading {
                 device: "".into(),
@@ -499,6 +561,20 @@ impl From<&device::Reading> for Reading {
                 float_value: None,
                 bool_value: None,
                 string_value: Some(v.to_string()),
+                color_value: None,
+            },
+            device::Value::Color(v) => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: None,
+                float_value: None,
+                bool_value: None,
+                string_value: None,
+                color_value: Some(vec![
+                    v.red as i32,
+                    v.green as i32,
+                    v.blue as i32,
+                ]),
             },
         }
     }
@@ -516,6 +592,7 @@ impl Subscription {
                 int_value: None,
                 float_value: None,
                 string_value: None,
+                color_value: None,
             };
 
             match e.value {
@@ -523,6 +600,10 @@ impl Subscription {
                 device::Value::Int(v) => reading.int_value = Some(v),
                 device::Value::Flt(v) => reading.float_value = Some(v),
                 device::Value::Str(v) => reading.string_value = Some(v),
+                device::Value::Color(v) => {
+                    reading.color_value =
+                        Some(vec![v.red as i32, v.green as i32, v.blue as i32])
+                }
             }
 
             Ok(reading)

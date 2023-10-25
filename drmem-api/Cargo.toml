@@ -28,3 +28,5 @@ tokio-stream.workspace = true
 
 serde.workspace = true
 serde_derive.workspace = true
+
+palette.workspace = true

@@ -25,6 +25,8 @@ serde = { version = "1.0", default-features = false }
 serde_json = { version = "1.0", default-features = false }
 serde_derive = { version = "1.0", default-features = false }
 
+palette = "0.7"
+
 # Profiles used by all binaries and packages.
 
 [profile.dev.build-override]
