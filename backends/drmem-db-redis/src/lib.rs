@@ -106,9 +106,7 @@ fn to_redis(val: &device::Value) -> Vec<u8> {
         // Colors start with a 'C', followed by 3 u8 values,
         // representing red, green, and blue intensities,
         // respectively.
-        device::Value::Color(v) => {
-            vec![b'C', v.red, v.green, v.blue]
-        }
+        device::Value::Color(v) => vec![b'C', v.red, v.green, v.blue],
     }
 }
 
