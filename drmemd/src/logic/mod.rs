@@ -1,7 +1,10 @@
 use drmem_api::{client, device, driver, Error, Result};
 use std::collections::HashMap;
 use std::convert::Infallible;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, oneshot},
+    task::JoinHandle,
+};
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -9,6 +12,7 @@ use tracing_futures::Instrument;
 use super::config;
 
 mod compile;
+pub mod tod;
 
 // These are some helpful type aliases.
 
@@ -233,6 +237,7 @@ impl Node {
 
     pub async fn start(
         c_req: client::RequestChan,
+        _rx_tod: broadcast::Receiver<tod::Info>,
         cfg: &config::Logic,
     ) -> Result<JoinHandle<Result<Infallible>>> {
         let name = cfg.name.clone();

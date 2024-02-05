@@ -9,7 +9,6 @@ use tracing_futures::Instrument;
 mod drv_cycle;
 mod drv_memory;
 mod drv_timer;
-mod drv_tod;
 
 pub type Fut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type MgrTask = Fut<Infallible>;
@@ -174,19 +173,6 @@ impl DriverDb {
 
         {
             use drv_cycle::Instance;
-
-            table.insert(
-                Instance::NAME.into(),
-                (
-                    Instance::SUMMARY,
-                    Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
-                ),
-            );
-        }
-
-        {
-            use drv_tod::Instance;
 
             table.insert(
                 Instance::NAME.into(),
