@@ -27,10 +27,12 @@ or                      "B_OR"
 /                       "DIV"
 %                       "REM"
 
+:                       "COLON"
+
 true                    "TRUE"
 false                   "FALSE"
 
-\{[a-z][0-9a-z_]*\}     "DEVICE"
+\{[a-z][0-9a-z_]*\}     "IDENTIFIER"
 
 [\t\n ]+ ;
 
