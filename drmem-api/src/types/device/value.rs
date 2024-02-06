@@ -193,7 +193,7 @@ fn parse_color(s: &[u8]) -> Option<Value> {
     let mut result = 0u32;
 
     for ii in s {
-        if (b'0'..=b'9').contains(ii) {
+        if ii.is_ascii_digit() {
             result = (result << 4) + (ii - b'0') as u32;
         } else if (b'A'..=b'F').contains(ii) {
             result = (result << 4) + (ii - b'A' + 10) as u32;

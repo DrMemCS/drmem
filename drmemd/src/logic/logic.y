@@ -155,7 +155,7 @@ Device -> Result<Expr>:
             ))?;
 	let fld = $lexer.span_str(vfld.span());
 
-	Ok(parse_builtin(cat, fld)?)
+	parse_builtin(cat, fld)
     }
     | "IDENTIFIER"
     {
@@ -244,7 +244,7 @@ fn get_utc_month(info: &Info) -> device::Value {
 }
 
 fn get_utc_year(info: &Info) -> device::Value {
-    device::Value::Int(info.0.year() as i32)
+    device::Value::Int(info.0.year())
 }
 
 fn get_utc_day_of_year(info: &Info) -> device::Value {
@@ -276,7 +276,7 @@ fn get_local_month(info: &Info) -> device::Value {
 }
 
 fn get_local_year(info: &Info) -> device::Value {
-    device::Value::Int(info.1.year() as i32)
+    device::Value::Int(info.1.year())
 }
 
 fn get_local_day_of_year(info: &Info) -> device::Value {

@@ -107,13 +107,7 @@ fn to_redis(val: &device::Value) -> Vec<u8> {
         // representing red, green, and blue intensities,
         // respectively.
         device::Value::Color(v) => {
-            let mut buf: Vec<u8> = Vec::with_capacity(4);
-
-            buf.push(b'C');
-            buf.push(v.red);
-            buf.push(v.green);
-            buf.push(v.blue);
-            buf
+            vec![b'C', v.red, v.green, v.blue]
         }
     }
 }
@@ -572,7 +566,7 @@ impl RedisStore {
         // we only want to look at device information keys.
 
         let pattern = pattern
-            .map(|v| Self::info_key(v))
+            .map(Self::info_key)
             .unwrap_or_else(|| String::from("*#info"));
 
         // Query REDIS to return all keys that match our pattern.
