@@ -24,13 +24,15 @@
 %epp DIV "/"
 %epp REM "%"
 %epp COLON ":"
+%epp LBRACE "{"
+%epp RBRACE "}"
 
 %%
 
 Logic -> Result<Program>:
-    OrExpr "CONTROL" "IDENTIFIER"
+    OrExpr "CONTROL" "LBRACE" "IDENTIFIER" "RBRACE"
     {
-	let v = $3.map_err(|_| Error::ParseError(
+	let v = $4.map_err(|_| Error::ParseError(
 	        String::from("error reading target device")
             ))?;
 	let s = $lexer.span_str(v.span());
@@ -144,22 +146,22 @@ Factor -> Result<Expr>:
     ;
 
 Device -> Result<Expr>:
-    "IDENTIFIER" "COLON" "IDENTIFIER"
+    "LBRACE" "IDENTIFIER" "COLON" "IDENTIFIER" "RBRACE"
     {
-	let vcat = $1.map_err(|_| Error::ParseError(
+	let vcat = $2.map_err(|_| Error::ParseError(
 	        String::from("error reading built-in category")
             ))?;
 	let cat = $lexer.span_str(vcat.span());
-	let vfld = $3.map_err(|_| Error::ParseError(
+	let vfld = $4.map_err(|_| Error::ParseError(
 	        String::from("error reading built-in field")
             ))?;
 	let fld = $lexer.span_str(vfld.span());
 
 	parse_builtin(cat, fld)
     }
-    | "IDENTIFIER"
+    | "LBRACE" "IDENTIFIER" "RBRACE"
     {
-	let v = $1.map_err(|_| Error::ParseError(
+	let v = $2.map_err(|_| Error::ParseError(
 	        String::from("error reading device name")
             ))?;
 	let s = $lexer.span_str(v.span());
@@ -196,9 +198,7 @@ fn parse_flt(s: &str) -> Result<Expr> {
 	))
 }
 
-fn parse_device(s: &str, env: &[String]) -> Result<usize> {
-    let name = s[1..s.len() - 1].to_string();
-
+fn parse_device(name: &str, env: &[String]) -> Result<usize> {
     for ii in env.iter().enumerate() {
         if *ii.1 == name {
 	    return Ok(ii.0);

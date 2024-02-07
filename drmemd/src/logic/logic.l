@@ -1,3 +1,4 @@
+%x VAR
 %%
 
 ->                      "CONTROL"
@@ -27,12 +28,14 @@ or                      "B_OR"
 /                       "DIV"
 %                       "REM"
 
-:                       "COLON"
-
 true                    "TRUE"
 false                   "FALSE"
 
-\{[a-z][0-9a-z_]*\}     "IDENTIFIER"
+\{                      <+VAR>"LBRACE"
+<VAR>\}                 <-VAR>"RBRACE"
+
+<VAR>[a-zA-Z][0-9a-zA-Z_]*    "IDENTIFIER"
+<VAR>:                  "COLON"
 
 [\t\n ]+ ;
 
