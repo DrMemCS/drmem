@@ -224,6 +224,7 @@ impl Node {
 		    // recalculations.
 
 		    self.inputs[idx] = Some(reading.value);
+		    debug!("updated input[{}]", idx);
 		}
 
 		// If we need the time channel, wait for the next
@@ -232,6 +233,7 @@ impl Node {
 		Ok(v) = self.time_ch.as_mut().unwrap().recv(),
 		            if self.time_ch.is_some() => {
 		    time = v;
+		    debug!("updated time");
 		}
 	    }
 
