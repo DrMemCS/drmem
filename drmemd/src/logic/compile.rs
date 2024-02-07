@@ -2180,6 +2180,22 @@ mod tests {
                 "{a} * (3 + {b}) > 4 -> {c}",
                 "4 < inp[0] * (3 + inp[1]) -> out[1]",
             ),
+            ("{utc:second} -> {c}", "{utc:second} -> out[1]"),
+            ("{utc:minute} -> {c}", "{utc:minute} -> out[1]"),
+            ("{utc:hour} -> {c}", "{utc:hour} -> out[1]"),
+            ("{utc:day} -> {c}", "{utc:day} -> out[1]"),
+            ("{utc:month} -> {c}", "{utc:month} -> out[1]"),
+            ("{utc:year} -> {c}", "{utc:year} -> out[1]"),
+            ("{utc:DOW} -> {c}", "{utc:DOW} -> out[1]"),
+            ("{utc:DOY} -> {c}", "{utc:DOY} -> out[1]"),
+            ("{local:second} -> {c}", "{local:second} -> out[1]"),
+            ("{local:minute} -> {c}", "{local:minute} -> out[1]"),
+            ("{local:hour} -> {c}", "{local:hour} -> out[1]"),
+            ("{local:day} -> {c}", "{local:day} -> out[1]"),
+            ("{local:month} -> {c}", "{local:month} -> out[1]"),
+            ("{local:year} -> {c}", "{local:year} -> out[1]"),
+            ("{local:DOW} -> {c}", "{local:DOW} -> out[1]"),
+            ("{local:DOY} -> {c}", "{local:DOY} -> out[1]"),
         ];
 
         for (in_val, out_val) in TESTS {
