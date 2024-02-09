@@ -5,7 +5,7 @@
 
 %avoid_insert "INT"
 %avoid_insert "FLT"
-%avoid_insert "DEVICE"
+%avoid_insert "IDENTIFIER"
 %avoid_insert "TRUE"
 %avoid_insert "FALSE"
 
@@ -23,13 +23,16 @@
 %epp MUL "*"
 %epp DIV "/"
 %epp REM "%"
+%epp COLON ":"
+%epp LBRACE "{"
+%epp RBRACE "}"
 
 %%
 
 Logic -> Result<Program>:
-    OrExpr "CONTROL" "DEVICE"
+    OrExpr "CONTROL" "LBRACE" "IDENTIFIER" "RBRACE"
     {
-	let v = $3.map_err(|_| Error::ParseError(
+	let v = $4.map_err(|_| Error::ParseError(
 	        String::from("error reading target device")
             ))?;
 	let s = $lexer.span_str(v.span());
@@ -143,9 +146,22 @@ Factor -> Result<Expr>:
     ;
 
 Device -> Result<Expr>:
-    "DEVICE"
+    "LBRACE" "IDENTIFIER" "COLON" "IDENTIFIER" "RBRACE"
     {
-	let v = $1.map_err(|_| Error::ParseError(
+	let vcat = $2.map_err(|_| Error::ParseError(
+	        String::from("error reading built-in category")
+            ))?;
+	let cat = $lexer.span_str(vcat.span());
+	let vfld = $4.map_err(|_| Error::ParseError(
+	        String::from("error reading built-in field")
+            ))?;
+	let fld = $lexer.span_str(vfld.span());
+
+	parse_builtin(cat, fld)
+    }
+    | "LBRACE" "IDENTIFIER" "RBRACE"
+    {
+	let v = $2.map_err(|_| Error::ParseError(
 	        String::from("error reading device name")
             ))?;
 	let s = $lexer.span_str(v.span());
@@ -161,7 +177,8 @@ Unknown -> ():
 %%
 
 use drmem_api::{Result, Error, device};
-use super::{Expr, Program};
+use chrono::{Timelike, Datelike};
+use super::{super::tod::Info, Expr, Program};
 
 // Any functions here are in scope for all the grammar actions above.
 
@@ -181,13 +198,143 @@ fn parse_flt(s: &str) -> Result<Expr> {
 	))
 }
 
-fn parse_device(s: &str, env: &[String]) -> Result<usize> {
-    let name = s[1..s.len() - 1].to_string();
-
+fn parse_device(name: &str, env: &[String]) -> Result<usize> {
     for ii in env.iter().enumerate() {
         if *ii.1 == name {
 	    return Ok(ii.0);
 	}
     }
     Err(Error::ParseError(format!("variable '{}' is not defined", &name)))
+}
+
+const CAT_UTC: &str = "utc";
+const CAT_LOCAL: &str = "local";
+
+const FLD_SECOND: &str = "second";
+const FLD_MINUTE: &str = "minute";
+const FLD_HOUR: &str = "hour";
+const FLD_DAY: &str = "day";
+const FLD_MONTH: &str = "month";
+const FLD_YEAR: &str = "year";
+const FLD_DOW: &str = "DOW";
+const FLD_DOY: &str = "DOY";
+
+fn get_utc_second(info: &Info) -> device::Value {
+    device::Value::Int(info.0.second() as i32)
+}
+
+fn get_utc_minute(info: &Info) -> device::Value {
+    device::Value::Int(info.0.minute() as i32)
+}
+
+fn get_utc_hour(info: &Info) -> device::Value {
+    device::Value::Int(info.0.hour() as i32)
+}
+
+fn get_utc_day(info: &Info) -> device::Value {
+    device::Value::Int(info.0.day() as i32)
+}
+
+fn get_utc_day_of_week(info: &Info) -> device::Value {
+    device::Value::Int(info.0.weekday().num_days_from_monday() as i32)
+}
+
+fn get_utc_month(info: &Info) -> device::Value {
+    device::Value::Int(info.0.month() as i32)
+}
+
+fn get_utc_year(info: &Info) -> device::Value {
+    device::Value::Int(info.0.year())
+}
+
+fn get_utc_day_of_year(info: &Info) -> device::Value {
+    device::Value::Int(info.0.ordinal0() as i32)
+}
+
+fn get_local_second(info: &Info) -> device::Value {
+    device::Value::Int(info.1.second() as i32)
+}
+
+fn get_local_minute(info: &Info) -> device::Value {
+    device::Value::Int(info.1.minute() as i32)
+}
+
+fn get_local_hour(info: &Info) -> device::Value {
+    device::Value::Int(info.1.hour() as i32)
+}
+
+fn get_local_day(info: &Info) -> device::Value {
+    device::Value::Int(info.1.day() as i32)
+}
+
+fn get_local_day_of_week(info: &Info) -> device::Value {
+    device::Value::Int(info.1.weekday().num_days_from_monday() as i32)
+}
+
+fn get_local_month(info: &Info) -> device::Value {
+    device::Value::Int(info.1.month() as i32)
+}
+
+fn get_local_year(info: &Info) -> device::Value {
+    device::Value::Int(info.1.year())
+}
+
+fn get_local_day_of_year(info: &Info) -> device::Value {
+    device::Value::Int(info.1.ordinal0() as i32)
+}
+
+fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
+    match (cat, fld) {
+	(CAT_UTC, FLD_SECOND) => Ok(Expr::TimeVal(
+            CAT_UTC, FLD_SECOND, get_utc_second
+        )),
+	(CAT_UTC, FLD_MINUTE) => Ok(Expr::TimeVal(
+            CAT_UTC, FLD_MINUTE, get_utc_minute
+        )),
+	(CAT_UTC, FLD_HOUR) => Ok(Expr::TimeVal(
+            CAT_UTC, FLD_HOUR, get_utc_hour
+        )),
+	(CAT_UTC, FLD_DAY) => Ok(Expr::TimeVal(
+            CAT_UTC, FLD_DAY, get_utc_day
+        )),
+	(CAT_UTC, FLD_DOW) => Ok(Expr::TimeVal(
+            CAT_UTC, FLD_DOW, get_utc_day_of_week
+        )),
+	(CAT_UTC, FLD_MONTH) => Ok(Expr::TimeVal(
+            CAT_UTC, FLD_MONTH, get_utc_month
+        )),
+	(CAT_UTC, FLD_YEAR) => Ok(Expr::TimeVal(
+            CAT_UTC, FLD_YEAR, get_utc_year
+        )),
+	(CAT_UTC, FLD_DOY) => Ok(Expr::TimeVal(
+            CAT_UTC, FLD_DOY, get_utc_day_of_year
+        )),
+	(CAT_LOCAL, FLD_SECOND) => Ok(Expr::TimeVal(
+            CAT_LOCAL, FLD_SECOND, get_local_second
+        )),
+	(CAT_LOCAL, FLD_MINUTE) => Ok(Expr::TimeVal(
+            CAT_LOCAL, FLD_MINUTE, get_local_minute
+        )),
+	(CAT_LOCAL, FLD_HOUR) => Ok(Expr::TimeVal(
+            CAT_LOCAL, FLD_HOUR, get_local_hour
+        )),
+	(CAT_LOCAL, FLD_DAY) => Ok(Expr::TimeVal(
+            CAT_LOCAL, FLD_DAY, get_local_day
+        )),
+	(CAT_LOCAL, FLD_DOW) => Ok(Expr::TimeVal(
+            CAT_LOCAL, FLD_DOW, get_local_day_of_week
+        )),
+	(CAT_LOCAL, FLD_MONTH) => Ok(Expr::TimeVal(
+            CAT_LOCAL, FLD_MONTH, get_local_month
+        )),
+	(CAT_LOCAL, FLD_YEAR) => Ok(Expr::TimeVal(
+            CAT_LOCAL, FLD_YEAR, get_local_year
+        )),
+	(CAT_LOCAL, FLD_DOY) => Ok(Expr::TimeVal(
+            CAT_LOCAL, FLD_DOY, get_local_day_of_year
+        )),
+	_ => Err(Error::ParseError(
+		 format!("unknown built-in: {}:{}", cat, fld)
+	     ))
+    }
 }

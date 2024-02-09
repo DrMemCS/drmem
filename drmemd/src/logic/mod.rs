@@ -1,7 +1,11 @@
-use drmem_api::{client, device, driver, Error, Result};
+use drmem_api::{client, device, driver, Result};
 use std::collections::HashMap;
 use std::convert::Infallible;
-use tokio::{sync::oneshot, task::JoinHandle};
+use std::sync::Arc;
+use tokio::{
+    sync::{broadcast, oneshot},
+    task::JoinHandle,
+};
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
@@ -9,6 +13,7 @@ use tracing_futures::Instrument;
 use super::config;
 
 mod compile;
+pub mod tod;
 
 // These are some helpful type aliases.
 
@@ -74,6 +79,7 @@ pub struct Node {
     inputs: Vec<Inputs>,
     outputs: Vec<Output>,
     in_stream: InputStream,
+    time_ch: Option<broadcast::Receiver<tod::Info>>,
     exprs: Vec<compile::Program>,
 }
 
@@ -149,6 +155,7 @@ impl Node {
 
     async fn init(
         c_req: client::RequestChan,
+        c_time: broadcast::Receiver<tod::Info>,
         cfg: &config::Logic,
     ) -> Result<Node> {
         debug!("compiling expressions");
@@ -179,6 +186,12 @@ impl Node {
                 Err(e) => error!("{}", &e),
             })
             .collect();
+        let exprs = exprs?;
+
+        // Look at each expression and see if it needs the time-of-day.
+
+        let needs_time =
+            exprs.iter().any(|compile::Program(e, _)| e.uses_time());
 
         // Return the initialized `Node`.
 
@@ -186,24 +199,43 @@ impl Node {
             inputs: vec![None; inputs.len()],
             outputs: out_chans,
             in_stream,
-            exprs: exprs?,
+            time_ch: if needs_time { Some(c_time) } else { None },
+            exprs,
         })
     }
 
     // Runs the node logic. This method should never return.
 
     async fn run(mut self) -> Result<Infallible> {
+        let mut time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
+
         info!("starting");
 
-        // Wait for the next reading to arrive. All the incoming
-        // streams have been combined into one and the returned value
-        // is a pair consisting of an index and the actual reading.
+        loop {
+            #[rustfmt::skip]
+	    tokio::select! {
+		// Wait for the next reading to arrive. All the
+		// incoming streams have been combined into one and
+		// the returned value is a pair consisting of an index
+		// and the actual reading.
 
-        while let Some((idx, reading)) = self.in_stream.next().await {
-            // Save the reading in our array for future
-            // recalculations.
+		Some((idx, reading)) = self.in_stream.next() => {
+		    // Save the reading in our array for future
+		    // recalculations.
 
-            self.inputs[idx] = Some(reading.value);
+		    self.inputs[idx] = Some(reading.value);
+		    debug!("updated input[{}]", idx);
+		}
+
+		// If we need the time channel, wait for the next
+		// second.
+
+		Ok(v) = self.time_ch.as_mut().unwrap().recv(),
+		            if self.time_ch.is_some() => {
+		    time = v;
+		    debug!("updated time");
+		}
+	    }
 
             // Loop through each defined expression.
 
@@ -214,25 +246,20 @@ impl Node {
                 // values are None or the expression performed a bad
                 // operation, like dividing by 0.)
 
-                if let Some(result) = compile::eval(expr, &self.inputs) {
+                if let Some(result) = compile::eval(expr, &self.inputs, &time) {
                     self.outputs[*idx].send(result).await
                 } else {
                     error!("couldn't evaluate {}", &expr)
                 }
             }
         }
-
-        // This code should never be reached. If so, report the
-        // problem and return an error.
-
-        error!("all inputs have closed ... terminating");
-        Err(Error::OperationError("no available inputs".to_owned()))
     }
 
     // Starts a new instance of a logic node.
 
     pub async fn start(
         c_req: client::RequestChan,
+        rx_tod: broadcast::Receiver<tod::Info>,
         cfg: &config::Logic,
     ) -> Result<JoinHandle<Result<Infallible>>> {
         let name = cfg.name.clone();
@@ -240,7 +267,7 @@ impl Node {
         // Create a new instance and let it initialize itself. If an
         // error occurs, return it.
 
-        let node = Node::init(c_req, cfg)
+        let node = Node::init(c_req, rx_tod, cfg)
             .instrument(info_span!("logic-init", name = &name))
             .await?;
 

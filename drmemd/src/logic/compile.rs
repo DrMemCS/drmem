@@ -10,6 +10,27 @@
 //     "TEXT"            strings
 //     {NAME}            variable named NAME (from config params)
 //
+// There are two built-in types, "utc" and "local", which can be used
+// to obtain time-of-day values. Use the {} notation to access them:
+//
+//     {utc:second}
+//     {utc:minute}
+//     {utc:hour}
+//     {utc:day}
+//     {utc:month}
+//     {utc:year}
+//     {utc:DOW}	day of week (Monday = 0, Sunday = 6)
+//     {utc:DOY}	day of year from 0 to 365
+//
+//     {local:second}
+//     {local:minute}
+//     {local:hour}
+//     {local:day}
+//     {local:month}
+//     {local:year}
+//     {local:DOW}	day of week (Monday = 0, Sunday = 6)
+//     {local:DOY}	day of year from 0 to 365
+//
 // The token "->" represents assignment. The only items that can be on
 // the right hand side of the arrow is a variable referring to a
 // settable device.
@@ -25,6 +46,7 @@
 //     +,-,*,/,%         Perform addition, substraction, multiplication,
 //                       division, and modulo operations
 
+use super::tod;
 use drmem_api::{device, Error, Result};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
@@ -40,6 +62,7 @@ lrpar_mod!("logic/logic.y");
 pub enum Expr {
     Lit(device::Value),
     Var(usize),
+    TimeVal(&'static str, &'static str, fn(&tod::Info) -> device::Value),
 
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
@@ -63,7 +86,7 @@ pub enum Expr {
 impl Expr {
     pub fn precedence(&self) -> u32 {
         match self {
-            Expr::Lit(_) | Expr::Var(_) => 10,
+            Expr::Lit(_) | Expr::Var(_) | Expr::TimeVal(..) => 10,
             Expr::Not(_) => 9,
             Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 6,
             Expr::Add(_, _) | Expr::Sub(_, _) => 5,
@@ -71,6 +94,27 @@ impl Expr {
             Expr::Eq(_, _) => 3,
             Expr::And(_, _) => 2,
             Expr::Or(_, _) => 1,
+        }
+    }
+
+    // Traverses an expression and returns `true` if it uses any
+    // `TimeVal()` variants.
+
+    pub fn uses_time(&self) -> bool {
+        match self {
+            Expr::TimeVal(..) => true,
+            Expr::Lit(_) | Expr::Var(_) => false,
+            Expr::Not(e) => e.uses_time(),
+            Expr::Mul(a, b)
+            | Expr::Div(a, b)
+            | Expr::Rem(a, b)
+            | Expr::Add(a, b)
+            | Expr::Sub(a, b)
+            | Expr::Lt(a, b)
+            | Expr::LtEq(a, b)
+            | Expr::Eq(a, b)
+            | Expr::And(a, b)
+            | Expr::Or(a, b) => a.uses_time() || b.uses_time(),
         }
     }
 
@@ -90,6 +134,8 @@ impl fmt::Display for Expr {
         match self {
             Expr::Lit(v) => write!(f, "{}", &v),
             Expr::Var(v) => write!(f, "inp[{}]", &v),
+
+            Expr::TimeVal(cat, fld, _) => write!(f, "{{{}:{}}}", cat, fld),
 
             Expr::Not(e) => {
                 write!(f, "not ")?;
@@ -205,34 +251,40 @@ impl fmt::Display for Program {
 // it won't get computed ever again. The log will have a message
 // indicating what the error was.
 
-pub fn eval(e: &Expr, inp: &[Option<device::Value>]) -> Option<device::Value> {
+pub fn eval(
+    e: &Expr,
+    inp: &[Option<device::Value>],
+    time: &tod::Info,
+) -> Option<device::Value> {
     match e {
         // Literals hold actual `device::Values`, so simply return it.
         Expr::Lit(v) => Some(v.clone()),
 
         Expr::Var(n) => eval_as_var(*n, inp),
 
-        Expr::Not(ref e) => eval_as_not_expr(e, inp),
+        Expr::TimeVal(_, _, f) => Some(f(time)),
 
-        Expr::Or(ref a, ref b) => eval_as_or_expr(a, b, inp),
+        Expr::Not(ref e) => eval_as_not_expr(e, inp, time),
 
-        Expr::And(ref a, ref b) => eval_as_and_expr(a, b, inp),
+        Expr::Or(ref a, ref b) => eval_as_or_expr(a, b, inp, time),
 
-        Expr::Eq(ref a, ref b) => eval_as_eq_expr(a, b, inp),
+        Expr::And(ref a, ref b) => eval_as_and_expr(a, b, inp, time),
 
-        Expr::Lt(ref a, ref b) => eval_as_lt_expr(a, b, inp),
+        Expr::Eq(ref a, ref b) => eval_as_eq_expr(a, b, inp, time),
 
-        Expr::LtEq(ref a, ref b) => eval_as_lteq_expr(a, b, inp),
+        Expr::Lt(ref a, ref b) => eval_as_lt_expr(a, b, inp, time),
 
-        Expr::Add(ref a, ref b) => eval_as_add_expr(a, b, inp),
+        Expr::LtEq(ref a, ref b) => eval_as_lteq_expr(a, b, inp, time),
 
-        Expr::Sub(ref a, ref b) => eval_as_sub_expr(a, b, inp),
+        Expr::Add(ref a, ref b) => eval_as_add_expr(a, b, inp, time),
 
-        Expr::Mul(ref a, ref b) => eval_as_mul_expr(a, b, inp),
+        Expr::Sub(ref a, ref b) => eval_as_sub_expr(a, b, inp, time),
 
-        Expr::Div(ref a, ref b) => eval_as_div_expr(a, b, inp),
+        Expr::Mul(ref a, ref b) => eval_as_mul_expr(a, b, inp, time),
 
-        Expr::Rem(ref a, ref b) => eval_as_rem_expr(a, b, inp),
+        Expr::Div(ref a, ref b) => eval_as_div_expr(a, b, inp, time),
+
+        Expr::Rem(ref a, ref b) => eval_as_rem_expr(a, b, inp, time),
     }
 }
 
@@ -251,8 +303,9 @@ fn eval_as_var(
 fn eval_as_not_expr(
     e: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match eval(e, inp) {
+    match eval(e, inp, time) {
         Some(device::Value::Bool(v)) => Some(device::Value::Bool(!v)),
         Some(v) => {
             error!("NOT expression contains non-boolean value : {}", &v);
@@ -268,10 +321,11 @@ fn eval_as_or_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match eval(a, inp) {
+    match eval(a, inp, time) {
         v @ Some(device::Value::Bool(true)) => v,
-        Some(device::Value::Bool(false)) => match eval(b, inp) {
+        Some(device::Value::Bool(false)) => match eval(b, inp, time) {
             v @ Some(device::Value::Bool(_)) => v,
             Some(v) => {
                 error!("OR expression contains non-boolean argument: {}", &v);
@@ -293,10 +347,11 @@ fn eval_as_and_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match eval(a, inp) {
+    match eval(a, inp, time) {
         v @ Some(device::Value::Bool(false)) => v,
-        Some(device::Value::Bool(true)) => match eval(b, inp) {
+        Some(device::Value::Bool(true)) => match eval(b, inp, time) {
             v @ Some(device::Value::Bool(_)) => v,
             Some(v) => {
                 error!("AND expression contains non-boolean argument: {}", &v);
@@ -317,8 +372,9 @@ fn eval_as_eq_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match (eval(a, inp), eval(b, inp)) {
+    match (eval(a, inp, time), eval(b, inp, time)) {
         (Some(device::Value::Bool(a)), Some(device::Value::Bool(b))) => {
             Some(device::Value::Bool(a == b))
         }
@@ -350,8 +406,9 @@ fn eval_as_lt_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match (eval(a, inp), eval(b, inp)) {
+    match (eval(a, inp, time), eval(b, inp, time)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Bool(a < b))
         }
@@ -380,8 +437,9 @@ fn eval_as_lteq_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match (eval(a, inp), eval(b, inp)) {
+    match (eval(a, inp, time), eval(b, inp, time)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Bool(a <= b))
         }
@@ -410,8 +468,9 @@ fn eval_as_add_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match (eval(a, inp), eval(b, inp)) {
+    match (eval(a, inp, time), eval(b, inp, time)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Int(a + b))
         }
@@ -449,8 +508,9 @@ fn eval_as_sub_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match (eval(a, inp), eval(b, inp)) {
+    match (eval(a, inp, time), eval(b, inp, time)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Int(a - b))
         }
@@ -488,8 +548,9 @@ fn eval_as_mul_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match (eval(a, inp), eval(b, inp)) {
+    match (eval(a, inp, time), eval(b, inp, time)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Int(a * b))
         }
@@ -527,8 +588,9 @@ fn eval_as_div_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match (eval(a, inp), eval(b, inp)) {
+    match (eval(a, inp, time), eval(b, inp, time)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b)))
             if b != 0 =>
         {
@@ -562,8 +624,9 @@ fn eval_as_rem_expr(
     a: &Expr,
     b: &Expr,
     inp: &[Option<device::Value>],
+    time: &tod::Info,
 ) -> Option<device::Value> {
-    match (eval(a, inp), eval(b, inp)) {
+    match (eval(a, inp, time), eval(b, inp, time)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) if b > 0 => {
             Some(device::Value::Int(a % b))
         }
@@ -648,6 +711,7 @@ pub fn optimize(e: Expr) -> Expr {
 mod tests {
     use super::*;
     use drmem_api::device;
+    use std::sync::Arc;
 
     #[test]
     fn test_parser() {
@@ -777,17 +841,22 @@ mod tests {
     fn test_eval_not_expr() {
         const TRUE: device::Value = device::Value::Bool(true);
         const FALSE: device::Value = device::Value::Bool(false);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
-            eval(&Expr::Not(Box::new(Expr::Lit(FALSE))), &[]),
+            eval(&Expr::Not(Box::new(Expr::Lit(FALSE))), &[], &time),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Not(Box::new(Expr::Lit(TRUE))), &[]),
+            eval(&Expr::Not(Box::new(Expr::Lit(TRUE))), &[], &time),
             Some(FALSE)
         );
         assert_eq!(
-            eval(&Expr::Not(Box::new(Expr::Lit(device::Value::Int(1)))), &[]),
+            eval(
+                &Expr::Not(Box::new(Expr::Lit(device::Value::Int(1)))),
+                &[],
+                &time
+            ),
             None
         );
     }
@@ -797,6 +866,7 @@ mod tests {
         const TRUE: device::Value = device::Value::Bool(true);
         const FALSE: device::Value = device::Value::Bool(false);
         const ONE: device::Value = device::Value::Int(1);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
@@ -804,7 +874,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -814,7 +885,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -824,28 +896,32 @@ mod tests {
                     Box::new(Expr::Lit(FALSE)),
                     Box::new(Expr::Lit(TRUE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
         assert_eq!(
             eval(
                 &Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(TRUE))),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
         assert_eq!(
             eval(
                 &Expr::Or(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TRUE))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
         assert_eq!(
             eval(
                 &Expr::Or(Box::new(Expr::Lit(FALSE)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -856,7 +932,8 @@ mod tests {
         assert_eq!(
             eval(
                 &Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -867,6 +944,7 @@ mod tests {
         const TRUE: device::Value = device::Value::Bool(true);
         const FALSE: device::Value = device::Value::Bool(false);
         const ONE: device::Value = device::Value::Int(1);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
@@ -874,7 +952,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -884,7 +963,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -894,7 +974,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE)),
                     Box::new(Expr::Lit(TRUE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -904,14 +985,16 @@ mod tests {
                     Box::new(Expr::Lit(TRUE)),
                     Box::new(Expr::Lit(TRUE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
         assert_eq!(
             eval(
                 &Expr::And(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TRUE))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -925,14 +1008,16 @@ mod tests {
                     Box::new(Expr::Lit(FALSE)),
                     Box::new(Expr::Lit(ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
         assert_eq!(
             eval(
                 &Expr::And(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -945,18 +1030,21 @@ mod tests {
         const ONE: device::Value = device::Value::Int(1);
         const TWO: device::Value = device::Value::Int(2);
         const FP_ONE: device::Value = device::Value::Flt(1.0);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
                 &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
         assert_eq!(
             eval(
                 &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -966,7 +1054,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -976,14 +1065,16 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
         assert_eq!(
             eval(
                 &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -997,7 +1088,8 @@ mod tests {
                         "same"
                     ))))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -1011,7 +1103,8 @@ mod tests {
                         "not same"
                     ))))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -1024,32 +1117,37 @@ mod tests {
         const ONE: device::Value = device::Value::Int(1);
         const TWO: device::Value = device::Value::Int(2);
         const FP_ONE: device::Value = device::Value::Flt(1.0);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
                 &Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
         assert_eq!(
             eval(
                 &Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
         assert_eq!(
             eval(
                 &Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
         assert_eq!(
             eval(
                 &Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1059,7 +1157,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -1069,7 +1168,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -1079,7 +1179,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(TWO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -1093,7 +1194,8 @@ mod tests {
                         "abc"
                     ))))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -1107,7 +1209,8 @@ mod tests {
                         "abcd"
                     ))))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -1120,25 +1223,29 @@ mod tests {
         const ONE: device::Value = device::Value::Int(1);
         const TWO: device::Value = device::Value::Int(2);
         const FP_ONE: device::Value = device::Value::Flt(1.0);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
                 &Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
         assert_eq!(
             eval(
                 &Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
         assert_eq!(
             eval(
                 &Expr::LtEq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -1148,7 +1255,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1158,7 +1266,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -1168,7 +1277,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -1178,7 +1288,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(TWO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -1192,7 +1303,8 @@ mod tests {
                         "abc"
                     ))))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(FALSE)
         );
@@ -1206,7 +1318,8 @@ mod tests {
                         "abc"
                     ))))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -1220,7 +1333,8 @@ mod tests {
                         "abcd"
                     ))))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(TRUE)
         );
@@ -1234,18 +1348,21 @@ mod tests {
         const TWO: device::Value = device::Value::Int(2);
         const FP_ONE: device::Value = device::Value::Flt(1.0);
         const FP_TWO: device::Value = device::Value::Flt(2.0);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
                 &Expr::Add(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(3))
         );
         assert_eq!(
             eval(
                 &Expr::Add(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(2))
         );
@@ -1255,7 +1372,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(1))
         );
@@ -1265,7 +1383,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(3.0))
         );
@@ -1275,7 +1394,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1285,7 +1405,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1295,7 +1416,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(3.0))
         );
@@ -1305,7 +1427,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(3.0))
         );
@@ -1319,18 +1442,21 @@ mod tests {
         const TWO: device::Value = device::Value::Int(2);
         const FP_ONE: device::Value = device::Value::Flt(1.0);
         const FP_TWO: device::Value = device::Value::Flt(2.0);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
                 &Expr::Sub(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
             eval(
                 &Expr::Sub(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(0))
         );
@@ -1340,7 +1466,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(1))
         );
@@ -1350,7 +1477,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1360,7 +1488,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(0.0))
         );
@@ -1370,7 +1499,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1380,7 +1510,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1390,7 +1521,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1404,18 +1536,21 @@ mod tests {
         const TWO: device::Value = device::Value::Int(2);
         const FP_ONE: device::Value = device::Value::Flt(1.0);
         const FP_TWO: device::Value = device::Value::Flt(2.0);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
                 &Expr::Mul(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(2))
         );
         assert_eq!(
             eval(
                 &Expr::Mul(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(1))
         );
@@ -1425,7 +1560,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(0))
         );
@@ -1435,7 +1571,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1445,7 +1582,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1455,7 +1593,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(0.0))
         );
@@ -1465,7 +1604,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1475,7 +1615,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1491,18 +1632,21 @@ mod tests {
         const FP_ZERO: device::Value = device::Value::Flt(0.0);
         const FP_ONE: device::Value = device::Value::Flt(1.0);
         const FP_TWO: device::Value = device::Value::Flt(2.0);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
                 &Expr::Div(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(2))
         );
         assert_eq!(
             eval(
                 &Expr::Div(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1512,7 +1656,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1522,7 +1667,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1532,7 +1678,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1542,7 +1689,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1552,7 +1700,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1562,14 +1711,16 @@ mod tests {
                     Box::new(Expr::Lit(TWO)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
             eval(
                 &Expr::Div(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ZERO))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1579,7 +1730,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO)),
                     Box::new(Expr::Lit(FP_ZERO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1589,7 +1741,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(ZERO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1599,7 +1752,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(FP_ZERO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1616,18 +1770,21 @@ mod tests {
         const FP_ZERO: device::Value = device::Value::Flt(0.0);
         const FP_ONE: device::Value = device::Value::Flt(1.0);
         const FP_TWO: device::Value = device::Value::Flt(2.0);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
             eval(
                 &Expr::Rem(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
             eval(
                 &Expr::Rem(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1637,7 +1794,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1647,7 +1805,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(FP_TWO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1657,7 +1816,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE)),
                     Box::new(Expr::Lit(FP_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1667,7 +1827,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(FALSE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1677,7 +1838,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE)),
                     Box::new(Expr::Lit(TWO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1687,14 +1849,16 @@ mod tests {
                     Box::new(Expr::Lit(ONE)),
                     Box::new(Expr::Lit(FP_TWO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
             eval(
                 &Expr::Rem(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ZERO))),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1704,7 +1868,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO)),
                     Box::new(Expr::Lit(FP_ZERO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1714,7 +1879,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(ZERO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1724,7 +1890,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO)),
                     Box::new(Expr::Lit(FP_ZERO))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1734,7 +1901,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO)),
                     Box::new(Expr::Lit(NEG_ONE))
                 ),
-                &[]
+                &[],
+                &time
             ),
             None
         );
@@ -1743,8 +1911,9 @@ mod tests {
     #[test]
     fn test_eval() {
         const FALSE: device::Value = device::Value::Bool(false);
+        let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
-        assert_eq!(eval(&Expr::Lit(FALSE), &[]), Some(FALSE));
+        assert_eq!(eval(&Expr::Lit(FALSE), &[], &time), Some(FALSE));
     }
 
     // This function tests the optimizations that can be done on an
@@ -2011,6 +2180,22 @@ mod tests {
                 "{a} * (3 + {b}) > 4 -> {c}",
                 "4 < inp[0] * (3 + inp[1]) -> out[1]",
             ),
+            ("{utc:second} -> {c}", "{utc:second} -> out[1]"),
+            ("{utc:minute} -> {c}", "{utc:minute} -> out[1]"),
+            ("{utc:hour} -> {c}", "{utc:hour} -> out[1]"),
+            ("{utc:day} -> {c}", "{utc:day} -> out[1]"),
+            ("{utc:month} -> {c}", "{utc:month} -> out[1]"),
+            ("{utc:year} -> {c}", "{utc:year} -> out[1]"),
+            ("{utc:DOW} -> {c}", "{utc:DOW} -> out[1]"),
+            ("{utc:DOY} -> {c}", "{utc:DOY} -> out[1]"),
+            ("{local:second} -> {c}", "{local:second} -> out[1]"),
+            ("{local:minute} -> {c}", "{local:minute} -> out[1]"),
+            ("{local:hour} -> {c}", "{local:hour} -> out[1]"),
+            ("{local:day} -> {c}", "{local:day} -> out[1]"),
+            ("{local:month} -> {c}", "{local:month} -> out[1]"),
+            ("{local:year} -> {c}", "{local:year} -> out[1]"),
+            ("{local:DOW} -> {c}", "{local:DOW} -> out[1]"),
+            ("{local:DOY} -> {c}", "{local:DOY} -> out[1]"),
         ];
 
         for (in_val, out_val) in TESTS {
@@ -2023,33 +2208,96 @@ mod tests {
         }
     }
 
-    fn evaluate(expr: &str) -> Option<device::Value> {
+    fn evaluate(expr: &str, time: &tod::Info) -> Option<device::Value> {
         let env: Env = (&[], &[String::from("a")]);
         let expr = format!("{} -> {{a}}", expr);
         let prog = Program::compile(&expr, &env).unwrap();
 
-        eval(&prog.0, &[])
+        eval(&prog.0, &[], &time)
     }
 
     #[test]
     fn test_evaluations() {
-        assert_eq!(evaluate("1 / 0"), None);
-        assert_eq!(evaluate("5 > true"), None);
+        use chrono::TimeZone;
 
-        assert_eq!(evaluate("1 + 2 * 3"), Some(device::Value::Int(7)));
-        assert_eq!(evaluate("(1 + 2) * 3"), Some(device::Value::Int(9)));
-        assert_eq!(evaluate("1 + (2 * 3)"), Some(device::Value::Int(7)));
+        let time = Arc::new((
+            chrono::Utc
+                .with_ymd_and_hms(2000, 1, 2, 3, 4, 5)
+                .single()
+                .unwrap(),
+            chrono::Local
+                .with_ymd_and_hms(2001, 6, 7, 8, 9, 10)
+                .single()
+                .unwrap(),
+        ));
 
-        assert_eq!(evaluate("1 + 2 < 1 + 3"), Some(device::Value::Bool(true)));
-        assert_eq!(evaluate("1 + 2 < 1 + 1"), Some(device::Value::Bool(false)));
+        assert_eq!(evaluate("1 / 0", &time), None);
+        assert_eq!(evaluate("5 > true", &time), None);
+
+        assert_eq!(evaluate("1 + 2 * 3", &time), Some(device::Value::Int(7)));
+        assert_eq!(evaluate("(1 + 2) * 3", &time), Some(device::Value::Int(9)));
+        assert_eq!(evaluate("1 + (2 * 3)", &time), Some(device::Value::Int(7)));
 
         assert_eq!(
-            evaluate("1 > 2 or 5 < 3"),
+            evaluate("1 + 2 < 1 + 3", &time),
+            Some(device::Value::Bool(true))
+        );
+        assert_eq!(
+            evaluate("1 + 2 < 1 + 1", &time),
+            Some(device::Value::Bool(false))
+        );
+
+        assert_eq!(
+            evaluate("1 > 2 or 5 < 3", &time),
             Some(device::Value::Bool(false))
         );
         assert_eq!(
-            evaluate("1 > 2 or 5 >= 3"),
+            evaluate("1 > 2 or 5 >= 3", &time),
             Some(device::Value::Bool(true))
+        );
+
+        assert_eq!(
+            evaluate("{utc:second}", &time),
+            Some(device::Value::Int(5))
+        );
+        assert_eq!(
+            evaluate("{utc:minute}", &time),
+            Some(device::Value::Int(4))
+        );
+        assert_eq!(evaluate("{utc:hour}", &time), Some(device::Value::Int(3)));
+        assert_eq!(evaluate("{utc:day}", &time), Some(device::Value::Int(2)));
+        assert_eq!(evaluate("{utc:month}", &time), Some(device::Value::Int(1)));
+        assert_eq!(
+            evaluate("{utc:year}", &time),
+            Some(device::Value::Int(2000))
+        );
+        assert_eq!(evaluate("{utc:DOW}", &time), Some(device::Value::Int(6)));
+        assert_eq!(evaluate("{utc:DOY}", &time), Some(device::Value::Int(1)));
+        assert_eq!(
+            evaluate("{local:second}", &time),
+            Some(device::Value::Int(10))
+        );
+        assert_eq!(
+            evaluate("{local:minute}", &time),
+            Some(device::Value::Int(9))
+        );
+        assert_eq!(
+            evaluate("{local:hour}", &time),
+            Some(device::Value::Int(8))
+        );
+        assert_eq!(evaluate("{local:day}", &time), Some(device::Value::Int(7)));
+        assert_eq!(
+            evaluate("{local:month}", &time),
+            Some(device::Value::Int(6))
+        );
+        assert_eq!(
+            evaluate("{local:year}", &time),
+            Some(device::Value::Int(2001))
+        );
+        assert_eq!(evaluate("{local:DOW}", &time), Some(device::Value::Int(3)));
+        assert_eq!(
+            evaluate("{local:DOY}", &time),
+            Some(device::Value::Int(157))
         );
     }
 }

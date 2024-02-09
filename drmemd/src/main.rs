@@ -160,14 +160,33 @@ async fn run() -> Result<()> {
             }
         }
 
+        // Start the time-of-day task. This needs to be done *before*
+        // any logic blocks are started because logic blocks *may*
+        // have an expression that uses the time-of-day.
+
+        let (tx_tod, rx_tod) = logic::tod::create_task();
+
         // Iterate through the [[logic]] sections of the config.
 
         for logic in cfg.logic {
-            match logic::Node::start(tx_clnt_req.clone(), &logic).await {
+            match logic::Node::start(
+                tx_clnt_req.clone(),
+                tx_tod.subscribe(),
+                &logic,
+            )
+            .await
+            {
                 Ok(instance) => tasks.push(wrap_task(instance)),
                 Err(_) => error!("logic node '{}' is not running", &logic.name),
             }
         }
+
+        // Now that we've given all the logic blocks a receive handle
+        // for the time-of-day, we can free up our copy. If we freed
+        // up our copy *before* creating new subscriptions, the tod
+        // task may have briefly seen no clients and would exit.
+
+        std::mem::drop(rx_tod);
 
         // Now run all the tasks.
 

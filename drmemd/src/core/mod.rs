@@ -76,10 +76,8 @@ impl State {
     async fn handle_client_request(&mut self, req: client::Request) {
         match req {
             client::Request::QueryDeviceInfo { pattern, rpy_chan } => {
-                let result = self
-                    .backend
-                    .get_device_info(pattern.as_ref().map(|x| x.as_str()))
-                    .await;
+                let result =
+                    self.backend.get_device_info(pattern.as_deref()).await;
 
                 if let Err(ref e) = result {
                     info!("get_device_info() returned '{}'", e);

@@ -1,3 +1,4 @@
+%x VAR
 %%
 
 ->                      "CONTROL"
@@ -12,11 +13,11 @@ and                     "B_AND"
 or                      "B_OR"
 
 =                       "EQ"
-\<>                      "NE"
-\<=                      "LT_EQ"
+\<>                     "NE"
+\<=                     "LT_EQ"
 >=                      "GT_EQ"
 >                       "GT"
-\<                       "LT"
+\<                      "LT"
 
 -?[0-9]+\.[0-9]*([eE]-?[0-9]+)? "FLT"
 -?[0-9]+                "INT"
@@ -30,7 +31,11 @@ or                      "B_OR"
 true                    "TRUE"
 false                   "FALSE"
 
-\{[a-z][0-9a-z_]*\}     "DEVICE"
+\{                      <+VAR>"LBRACE"
+<VAR>\}                 <-VAR>"RBRACE"
+
+<VAR>[a-zA-Z][0-9a-zA-Z_]*    "IDENTIFIER"
+<VAR>:                  "COLON"
 
 [\t\n ]+ ;
 

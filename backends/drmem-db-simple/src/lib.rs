@@ -158,7 +158,7 @@ impl Store for SimpleStore {
 
                 let di = e.insert(DeviceInfo::create(
                     String::from(driver),
-                    units.clone(),
+                    units,
                     None,
                 ));
 
