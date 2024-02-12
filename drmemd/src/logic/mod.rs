@@ -45,33 +45,44 @@ impl Output {
 
     // Attempts to set the associated device to a new value.
 
-    pub async fn send(&mut self, value: device::Value) {
-        // Only attempt the setting if the device isn't set to the
-        // value.
+    pub async fn send(&mut self, value: device::Value) -> bool {
+        // Only attempt the setting if it is different than the
+        // previous setting we sent.
 
-        if self.prev.as_ref() != Some(&value) {
-            let (tx_rpy, rx_rpy) = oneshot::channel();
-
-            if let Ok(()) = self.chan.send((value.clone(), tx_rpy)).await {
-                match rx_rpy.await {
-                    Ok(Ok(v)) => {
-                        // Save the value returned by the driver. This
-                        // should, hopefully, be the same that we
-                        // sent. If it isn't, add a warning to the
-                        // log.
-
-                        self.prev = Some(v.clone());
-                        if v != value {
-                            warn!("setting was adjusted")
-                        }
-                    }
-                    Ok(Err(e)) => error!("driver rejected setting : {}", &e),
-                    Err(e) => error!("setting failed : {}", &e),
-                }
-            } else {
-                error!("driver not accepting settings")
+        if let Some(prev) = self.prev.as_ref() {
+            if *prev == value {
+                return true;
             }
         }
+
+        // Create the reply channel.
+
+        let (tx_rpy, rx_rpy) = oneshot::channel();
+
+        // Send the setting to the driver.
+
+        if let Ok(()) = self.chan.send((value.clone(), tx_rpy)).await {
+            match rx_rpy.await {
+                Ok(Ok(v)) => {
+                    // If the driver adjusted our setting, add a
+                    // warning to the log.
+
+                    if v != value {
+                        warn!(
+                            "driver adjusted setting from {} to {}",
+                            &value, &v
+                        )
+                    }
+                    self.prev = Some(value);
+                    return true;
+                }
+                Ok(Err(e)) => error!("driver rejected setting : {}", &e),
+                Err(e) => error!("setting failed : {}", &e),
+            }
+        } else {
+            error!("driver not accepting settings")
+        }
+        false
     }
 }
 
@@ -247,7 +258,7 @@ impl Node {
                 // operation, like dividing by 0.)
 
                 if let Some(result) = compile::eval(expr, &self.inputs, &time) {
-                    self.outputs[*idx].send(result).await
+                    let _ = self.outputs[*idx].send(result).await;
                 } else {
                     error!("couldn't evaluate {}", &expr)
                 }
@@ -276,5 +287,34 @@ impl Node {
         Ok(tokio::spawn(async move {
             node.run().instrument(info_span!("logic", name)).await
         }))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use drmem_api::device;
+    use tokio::{sync::mpsc, task};
+
+    #[tokio::test]
+    async fn test_send() {
+        let (tx, mut rx) = mpsc::channel(10);
+        let mut o = super::Output::create(tx);
+        let h = task::spawn(async move {
+            assert_eq!(o.send(device::Value::Bool(true)).await, true);
+            assert_eq!(o.send(device::Value::Bool(true)).await, true);
+            assert_eq!(o.send(device::Value::Bool(false)).await, true);
+        });
+
+        let (v, tx) = rx.recv().await.unwrap();
+
+        assert_eq!(v, device::Value::Bool(true));
+        assert!(tx.send(Ok(v)).is_ok());
+
+        let (v, tx) = rx.recv().await.unwrap();
+
+        assert_eq!(v, device::Value::Bool(false));
+        assert!(tx.send(Ok(v)).is_ok());
+
+        h.await.unwrap();
     }
 }
