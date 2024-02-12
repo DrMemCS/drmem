@@ -35,15 +35,15 @@ impl Instance {
                 if let v @ Ok(_) = name.parse::<device::Base>() {
                     v
                 } else {
-                    Err(Error::BadConfig(String::from(
+                    Err(Error::ConfigError(String::from(
                         "'name' isn't a proper, base name for a device",
                     )))
                 }
             }
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'name' config parameter should be a string",
             ))),
-            None => Err(Error::BadConfig(String::from(
+            None => Err(Error::ConfigError(String::from(
                 "missing 'name' parameter in config",
             ))),
         }

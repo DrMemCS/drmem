@@ -39,9 +39,11 @@ debug = 1
 debug = 1
 
 [profile.release]
-opt-level = 3
+opt-level = 'z'
 debug = false
-lto = false
+lto = true
+codegen-units = 1
 debug-assertions = false
-strip = "debuginfo"
+strip = "symbols"
 incremental = false
+panic = "abort"

@@ -52,10 +52,10 @@ impl Instance {
             Some(toml::value::Value::String(station)) => {
                 Ok(station.to_string())
             }
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'station' config parameter should be a string",
             ))),
-            None => Err(Error::BadConfig(String::from(
+            None => Err(Error::ConfigError(String::from(
                 "missing 'station' parameter in config",
             ))),
         }
@@ -66,7 +66,7 @@ impl Instance {
             Some(toml::value::Value::Integer(val)) => {
                 Ok(std::cmp::max(*val as u64, 1))
             }
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'interval' config parameter should be a positive integer",
             ))),
             None => Ok(DEFAULT_INTERVAL),
@@ -76,7 +76,7 @@ impl Instance {
     fn get_cfg_key(cfg: &DriverConfig) -> Result<Option<String>> {
         match cfg.get("key") {
             Some(toml::value::Value::String(val)) => Ok(Some(val.to_string())),
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'key' config parameter should be a string",
             ))),
             None => Ok(None),
@@ -111,11 +111,11 @@ impl Instance {
             Some(toml::value::Value::String(val)) => match val.as_str() {
                 "metric" => Ok(wu::Unit::Metric),
                 "imperial" => Ok(wu::Unit::English),
-                _ => Err(Error::BadConfig(String::from(
+                _ => Err(Error::ConfigError(String::from(
                     "'units' parameter should be \"imperial\" or \"metric\"",
                 ))),
             },
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'units' parameter should be a string",
             ))),
             None => Ok(wu::Unit::Metric),
@@ -424,7 +424,7 @@ impl driver::API for Instance {
                         interval,
                     }))
                 }
-                Err(e) => Err(Error::BadConfig(format!(
+                Err(e) => Err(Error::ConfigError(format!(
                     "couldn't build client connection -- {}",
                     &e
                 ))),

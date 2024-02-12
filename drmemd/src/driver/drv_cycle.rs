@@ -75,13 +75,15 @@ impl Instance {
                 if (50..=3_600_000).contains(millis) {
                     Ok(time::Duration::from_millis(*millis as u64))
                 } else {
-                    Err(Error::BadConfig(String::from("'millis' out of range")))
+                    Err(Error::ConfigError(String::from(
+                        "'millis' out of range",
+                    )))
                 }
             }
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'millis' config parameter should be an integer",
             ))),
-            None => Err(Error::BadConfig(String::from(
+            None => Err(Error::ConfigError(String::from(
                 "missing 'millis' parameter in config",
             ))),
         }
@@ -92,7 +94,7 @@ impl Instance {
     fn get_cfg_enabled(cfg: &DriverConfig) -> Result<bool> {
         match cfg.get("enabled_at_boot") {
             Some(toml::value::Value::Boolean(level)) => Ok(*level),
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'enabled_at_boot' config parameter should be a boolean",
             ))),
             None => Ok(false),
@@ -104,7 +106,7 @@ impl Instance {
     fn get_inactive_value(cfg: &DriverConfig) -> Result<device::Value> {
         match cfg.get("disabled") {
             Some(value) => value.try_into(),
-            None => Err(Error::BadConfig(String::from(
+            None => Err(Error::ConfigError(String::from(
                 "missing 'disabled' parameter in config",
             ))),
         }
@@ -116,15 +118,15 @@ impl Instance {
                 if value.len() > 1 {
                     value.iter().map(|v| v.try_into()).collect()
                 } else {
-                    Err(Error::BadConfig(String::from(
+                    Err(Error::ConfigError(String::from(
                         "'enabled' array should have at least 2 values",
                     )))
                 }
             }
-            Some(_) => Err(Error::BadConfig(String::from(
+            Some(_) => Err(Error::ConfigError(String::from(
                 "'enabled' parameter should be an array of values",
             ))),
-            None => Err(Error::BadConfig(String::from(
+            None => Err(Error::ConfigError(String::from(
                 "missing 'enabled' parameter in config",
             ))),
         }
