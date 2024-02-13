@@ -725,6 +725,42 @@ mod tests {
         assert!(Program::compile("{switch -> {bulb}", &env).is_err());
         assert!(Program::compile("switch} -> {bulb}", &env).is_err());
 
+        // Test for defined categories and fields.
+
+        assert!(Program::compile("{utc:second} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:minute} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:hour} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:day} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:month} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:year} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:DOW} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:DOY} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:second} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:minute} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:hour} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:day} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:month} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:year} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:DOW} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:DOY} -> {bulb}", &env).is_ok());
+
+        // Don't allow bad categories or fields.
+
+        assert!(Program::compile("{bad:second} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{utc:bad} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{local:bad} -> {bulb}", &env).is_err());
+
+        // Don't allow whitespace.
+
+        assert!(Program::compile("{ switch} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{switch } -> {bulb}", &env).is_err());
+        assert!(Program::compile("{ utc:second} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{utc :second} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{utc: second} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{utc:second } -> {bulb}", &env).is_err());
+
+        // Test proper compilations.
+
         assert_eq!(
             Program::compile("{switch} -> {bulb}", &env),
             Ok(Program(Expr::Var(0), 0))
