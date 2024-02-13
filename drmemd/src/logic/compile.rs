@@ -9,6 +9,8 @@
 //     #.##              floating point numbers
 //     "TEXT"            strings
 //     {NAME}            variable named NAME (from config params)
+//     #rrggbb or
+//     #name		 RGB color values
 //
 // There are two built-in types, "utc" and "local", which can be used
 // to obtain time-of-day values. Use the {} notation to access them:
