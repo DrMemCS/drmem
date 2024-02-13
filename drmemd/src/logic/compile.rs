@@ -9,6 +9,8 @@
 //     #.##              floating point numbers
 //     "TEXT"            strings
 //     {NAME}            variable named NAME (from config params)
+//     #rrggbb or
+//     #name		 RGB color values
 //
 // There are two built-in types, "utc" and "local", which can be used
 // to obtain time-of-day values. Use the {} notation to access them:
@@ -711,6 +713,7 @@ pub fn optimize(e: Expr) -> Expr {
 mod tests {
     use super::*;
     use drmem_api::device;
+    use palette::LinSrgb;
     use std::sync::Arc;
 
     #[test]
@@ -723,6 +726,42 @@ mod tests {
         assert!(Program::compile("", &env).is_err());
         assert!(Program::compile("{switch -> {bulb}", &env).is_err());
         assert!(Program::compile("switch} -> {bulb}", &env).is_err());
+
+        // Test for defined categories and fields.
+
+        assert!(Program::compile("{utc:second} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:minute} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:hour} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:day} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:month} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:year} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:DOW} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:DOY} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:second} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:minute} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:hour} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:day} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:month} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:year} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:DOW} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:DOY} -> {bulb}", &env).is_ok());
+
+        // Don't allow bad categories or fields.
+
+        assert!(Program::compile("{bad:second} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{utc:bad} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{local:bad} -> {bulb}", &env).is_err());
+
+        // Don't allow whitespace.
+
+        assert!(Program::compile("{ switch} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{switch } -> {bulb}", &env).is_err());
+        assert!(Program::compile("{ utc:second} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{utc :second} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{utc: second} -> {bulb}", &env).is_err());
+        assert!(Program::compile("{utc:second } -> {bulb}", &env).is_err());
+
+        // Test proper compilations.
 
         assert_eq!(
             Program::compile("{switch} -> {bulb}", &env),
@@ -769,6 +808,35 @@ mod tests {
         assert_eq!(
             Program::compile("(((10))) -> {bulb}", &env),
             Ok(Program(Expr::Lit(device::Value::Int(10)), 0))
+        );
+
+        assert_eq!(
+            Program::compile("#000 -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgb::new(0, 0, 0))),
+                0
+            ))
+        );
+        assert_eq!(
+            Program::compile("#7f8081 -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgb::new(127, 128, 129))),
+                0
+            ))
+        );
+        assert_eq!(
+            Program::compile("#7F80A0 -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgb::new(127, 128, 160))),
+                0
+            ))
+        );
+        assert_eq!(
+            Program::compile("#black -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgb::new(0, 0, 0))),
+                0
+            ))
         );
 
         assert_eq!(

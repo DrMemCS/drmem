@@ -1,4 +1,4 @@
-%x VAR
+%x VAR COLOR
 %%
 
 ->                      "CONTROL"
@@ -33,10 +33,12 @@ false                   "FALSE"
 
 \{                      <+VAR>"LBRACE"
 <VAR>\}                 <-VAR>"RBRACE"
-
 <VAR>[a-zA-Z][0-9a-zA-Z_]*    "IDENTIFIER"
 <VAR>:                  "COLON"
 
-[\t\n ]+ ;
+\#			<+COLOR>;
+<COLOR>[0-9a-zA-Z]+	<-COLOR>"COLOR"
+
+[\t\n\r ]+ ;
 
 .                       "UNKNOWN"
