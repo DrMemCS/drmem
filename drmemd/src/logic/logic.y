@@ -142,6 +142,28 @@ Factor -> Result<Expr>:
 
 	Ok(Expr::Lit(device::Value::Str(s[1..s.len() - 1].to_string())))
     }
+    | "COLOR"
+    {
+	let v = $1.map_err(|_| Error::ParseError(
+	        String::from("error reading literal color")
+            ))?;
+	let s = $lexer.span_str(v.span());
+
+	match LinSrgb::<u8>::from_str(s) {
+	    Ok(v) => Ok(Expr::Lit(device::Value::Color(v))),
+	    Err(_) =>
+		match named::from_str(s) {
+		    Some(v) => Ok(Expr::Lit(device::Value::Color(
+		        Srgb::<f32>::from_format(v)
+			    .into_linear()
+			    .into_format()
+		    ))),
+		    None => Err(Error::ParseError(
+			format!("invalid color '{}'", s)
+		    ))
+		}
+	}
+    }
     | Device { $1 }
     ;
 
@@ -178,7 +200,9 @@ Unknown -> ():
 
 use drmem_api::{Result, Error, device};
 use chrono::{Timelike, Datelike};
+use palette::{LinSrgb, Srgb, named};
 use super::{super::tod::Info, Expr, Program};
+use std::str::FromStr;
 
 // Any functions here are in scope for all the grammar actions above.
 
