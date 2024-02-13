@@ -711,6 +711,7 @@ pub fn optimize(e: Expr) -> Expr {
 mod tests {
     use super::*;
     use drmem_api::device;
+    use palette::LinSrgb;
     use std::sync::Arc;
 
     #[test]
@@ -769,6 +770,28 @@ mod tests {
         assert_eq!(
             Program::compile("(((10))) -> {bulb}", &env),
             Ok(Program(Expr::Lit(device::Value::Int(10)), 0))
+        );
+
+        assert_eq!(
+            Program::compile("#000 -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgb::new(0, 0, 0))),
+                0
+            ))
+        );
+        assert_eq!(
+            Program::compile("#7f8081 -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgb::new(127, 128, 129))),
+                0
+            ))
+        );
+        assert_eq!(
+            Program::compile("#black -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgb::new(0, 0, 0))),
+                0
+            ))
         );
 
         assert_eq!(
