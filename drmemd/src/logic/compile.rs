@@ -825,6 +825,13 @@ mod tests {
             ))
         );
         assert_eq!(
+            Program::compile("#7F80A0 -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgb::new(127, 128, 160))),
+                0
+            ))
+        );
+        assert_eq!(
             Program::compile("#black -> {bulb}", &env),
             Ok(Program(
                 Expr::Lit(device::Value::Color(LinSrgb::new(0, 0, 0))),

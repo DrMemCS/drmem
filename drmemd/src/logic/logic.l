@@ -37,7 +37,7 @@ false                   "FALSE"
 <VAR>:                  "COLON"
 
 \#			<+COLOR>;
-<COLOR>[0-9a-z]+	<-COLOR>"COLOR"
+<COLOR>[0-9a-zA-Z]+	<-COLOR>"COLOR"
 
 [\t\n\r ]+ ;
 
