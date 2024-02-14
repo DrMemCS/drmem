@@ -30,7 +30,7 @@
 %%
 
 Logic -> Result<Program>:
-    OrExpr "CONTROL" "LBRACE" "IDENTIFIER" "RBRACE"
+    BoolExpr "CONTROL" "LBRACE" "IDENTIFIER" "RBRACE"
     {
 	let v = $4.map_err(|_| Error::ParseError(
 	        String::from("error reading target device")
@@ -39,6 +39,10 @@ Logic -> Result<Program>:
 
 	Ok(Program($1?, parse_device(s, p.1)?))
     }
+    ;
+
+BoolExpr -> Result<Expr>:
+    OrExpr { $1 }
     ;
 
 OrExpr -> Result<Expr>:
@@ -58,41 +62,45 @@ AndExpr -> Result<Expr>:
     ;
 
 CmpExpr -> Result<Expr>:
-      AddSubExpr "EQ" AddSubExpr { Ok(Expr::Eq(
-			    Box::new($1?),
-			    Box::new($3?)
-			  )) }
-
-    | AddSubExpr "NE" AddSubExpr { Ok(Expr::Not(
-		            Box::new(
-			      Expr::Eq(
+      NumExpr "EQ" NumExpr { Ok(Expr::Eq(
 			        Box::new($1?),
 			        Box::new($3?)
-			      )
-			    )
-		          )) }
-
-    | AddSubExpr "GT" AddSubExpr { Ok(Expr::Lt(
-			        Box::new($3?),
-			        Box::new($1?)
-			      )) }
-
-    | AddSubExpr "GT_EQ" AddSubExpr { Ok(Expr::LtEq(
-			        Box::new($3?),
-			        Box::new($1?)
-			      )) }
-
-    | AddSubExpr "LT" AddSubExpr { Ok(Expr::Lt(
-			    Box::new($1?),
-			    Box::new($3?)
-			  )) }
-
-    | AddSubExpr "LT_EQ" AddSubExpr { Ok(Expr::LtEq(
-			       Box::new($1?),
-			       Box::new($3?)
 			     )) }
 
-    | AddSubExpr { $1 }
+    | NumExpr "NE" NumExpr { Ok(Expr::Not(
+		                Box::new(
+			           Expr::Eq(
+			              Box::new($1?),
+			              Box::new($3?)
+			           )
+			        )
+		             )) }
+
+    | NumExpr "GT" NumExpr { Ok(Expr::Lt(
+			        Box::new($3?),
+			        Box::new($1?)
+			     )) }
+
+    | NumExpr "GT_EQ" NumExpr { Ok(Expr::LtEq(
+			           Box::new($3?),
+			           Box::new($1?)
+			        )) }
+
+    | NumExpr "LT" NumExpr { Ok(Expr::Lt(
+			        Box::new($1?),
+			        Box::new($3?)
+			     )) }
+
+    | NumExpr "LT_EQ" NumExpr { Ok(Expr::LtEq(
+			           Box::new($1?),
+			           Box::new($3?)
+			        )) }
+
+    | NumExpr { $1 }
+    ;
+
+NumExpr -> Result<Expr>:
+    AddSubExpr { $1 }
     ;
 
 AddSubExpr -> Result<Expr>:
@@ -114,7 +122,7 @@ Expr -> Result<Expr>:
 
 Factor -> Result<Expr>:
       "B_NOT" Factor { Ok(Expr::Not(Box::new($2?))) }
-    | "(" OrExpr ")" { $2 }
+    | "(" BoolExpr ")" { $2 }
     | "TRUE" { Ok(Expr::Lit(device::Value::Bool(true))) }
     | "FALSE" { Ok(Expr::Lit(device::Value::Bool(false))) }
     | "INT"
