@@ -2412,12 +2412,16 @@ mod tests {
         ];
 
         for (in_val, out_val) in TESTS {
-            assert_eq!(
-                Program::compile(in_val, &env).unwrap().to_string(),
-                *out_val,
-                "failed on: {}",
-                in_val
-            )
+	    match Program::compile(in_val, &env) {
+		Ok(prog) =>
+		    assert_eq!(
+			prog.to_string(),
+			*out_val,
+			"failed on: {}",
+			in_val
+		    ),
+		Err(e) => panic!("{}", &e)
+	    }
         }
     }
 
