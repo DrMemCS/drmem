@@ -267,7 +267,7 @@ impl Program {
 
         res.unwrap_or_else(|| {
             let res = errs.iter().fold(
-                format!("expression '{}' couldn't compile", s),
+		s.to_owned(),
                 |mut acc, e| {
                     acc.push_str(&format!("\n    {}", &e));
                     acc
