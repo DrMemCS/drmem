@@ -127,35 +127,25 @@ Factor -> Result<Expr>:
     | "FALSE" { Ok(Expr::Lit(device::Value::Bool(false))) }
     | "INT"
       {
-          let v = $1.map_err(|_| Error::ParseError(
-	        String::from("error reading literal integer value")
-            ))?;
+	  let s = get_str("literal integer", $1, $lexer)?;
 
-          parse_int($lexer.span_str(v.span()))
+          parse_int(s)
       }
     | "FLT"
       {
-          let v = $1.map_err(|_| Error::ParseError(
-	        String::from("error reading literal floating point")
-            ))?;
+	  let s = get_str("literal floating point", $1, $lexer)?;
 
-	  parse_flt($lexer.span_str(v.span()))
+	  parse_flt(s)
       }
     | "STRING"
     {
-	let v = $1.map_err(|_| Error::ParseError(
-	        String::from("error reading literal string")
-            ))?;
-	let s = $lexer.span_str(v.span());
+	let s = get_str("literal string", $1, $lexer)?;
 
 	Ok(Expr::Lit(device::Value::Str(s[1..s.len() - 1].to_string())))
     }
     | "COLOR"
     {
-	let v = $1.map_err(|_| Error::ParseError(
-	        String::from("error reading literal color")
-            ))?;
-	let s = $lexer.span_str(v.span());
+	let s = get_str("literal color", $1, $lexer)?;
 
 	match LinSrgb::<u8>::from_str(s) {
 	    Ok(v) => Ok(Expr::Lit(device::Value::Color(v))),
@@ -178,23 +168,15 @@ Factor -> Result<Expr>:
 Device -> Result<Expr>:
     "LBRACE" "IDENTIFIER" "COLON" "IDENTIFIER" "RBRACE"
     {
-	let vcat = $2.map_err(|_| Error::ParseError(
-	        String::from("error reading built-in category")
-            ))?;
-	let cat = $lexer.span_str(vcat.span());
-	let vfld = $4.map_err(|_| Error::ParseError(
-	        String::from("error reading built-in field")
-            ))?;
-	let fld = $lexer.span_str(vfld.span());
+	let lexer = $lexer;
+	let cat = get_str("built-in category", $2, lexer)?;
+	let fld = get_str("built-in field", $4, lexer)?;
 
 	parse_builtin(cat, fld)
     }
     | "LBRACE" "IDENTIFIER" "RBRACE"
     {
-	let v = $2.map_err(|_| Error::ParseError(
-	        String::from("error reading device name")
-            ))?;
-	let s = $lexer.span_str(v.span());
+	let s = get_str("device name", $2, $lexer)?;
 
 	Ok(Expr::Var(parse_device(s, p.0)?))
     }
@@ -211,6 +193,25 @@ use chrono::{Timelike, Datelike};
 use palette::{LinSrgb, Srgb, named};
 use super::{super::tod, super::solar, Expr, Program};
 use std::str::FromStr;
+
+use lrlex::{DefaultLexeme, DefaultLexerTypes};
+use lrpar::NonStreamingLexer;
+
+// This complicated beast is an attempt to remove the boilerplate code
+// used when processing the terminal tokens (i.e. the leaf values of
+// the expression tree.)
+
+fn get_str<'a, 'input>(
+    label: &'a str,
+    lexeme: std::result::Result<DefaultLexeme, DefaultLexeme>,
+    lexer: &'a (dyn NonStreamingLexer<'input, DefaultLexerTypes> + 'a)
+) -> Result<&'input str> {
+    let lexeme = lexeme.map_err(|_| Error::ParseError(
+        format!("error reading {}", label)
+    ))?;
+
+    Ok(lexer.span_str(lexeme.span()))
+}
 
 // Any functions here are in scope for all the grammar actions above.
 
