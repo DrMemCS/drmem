@@ -31,8 +31,6 @@ fn get_solar_position(
     long: f64,
     time: &chrono::DateTime<chrono::Utc>,
 ) -> Arc<SolarInfo> {
-    let now = time::Instant::now();
-
     // Convert time-of-day to a floating point value in the range 0.0
     // through 23.999.
 
@@ -100,8 +98,11 @@ fn get_solar_position(
         (f64::atan2(-sx, -sy).to_degrees() + 180.0).rem_euclid(360.0);
 
     info!(
-        "calculations took {} microseconds",
-        now.elapsed().as_micros()
+        "alt: {:.2}, az: {:.2}, ra: {:.2}, dec: {:.2}",
+        round(elevation, 0.02),
+        round(azimuth, 0.1),
+        round(alpha, 0.1),
+        round(delta, 0.1)
     );
 
     Arc::new(SolarInfo {
@@ -135,8 +136,12 @@ pub fn create_task(
     long: f64,
 ) -> (broadcast::Sender<Info>, broadcast::Receiver<Info>) {
     let (tx, rx) = broadcast::channel(1);
+    let tx_copy = tx.clone();
 
-    tokio::spawn(run(tx.clone(), lat, long)).instrument(info_span!("solar"));
+    tokio::spawn(
+        async move { run(tx_copy, lat, long).await }
+            .instrument(info_span!("solar")),
+    );
 
     (tx, rx)
 }
@@ -161,7 +166,6 @@ mod tests {
         long: f64,
         elev: f64,
         az: f64,
-        ra: f64,
         decl: f64,
     }
 
@@ -185,7 +189,6 @@ mod tests {
                 long: 0.0,
                 elev: 22.0,
                 az: 179.18,
-                ra: 0.0,
                 decl: -23.03,
             },
             TestData {
@@ -199,7 +202,6 @@ mod tests {
                 long: 0.0,
                 elev: 66.96,
                 az: 178.06,
-                ra: 0.0,
                 decl: -23.03,
             },
             TestData {
@@ -213,7 +215,6 @@ mod tests {
                 long: 0.0,
                 elev: 68.03,
                 az: 2.03,
-                ra: 0.0,
                 decl: -23.03,
             },
             TestData {
@@ -227,7 +228,6 @@ mod tests {
                 long: -90.0,
                 elev: 22.02,
                 az: 179.15,
-                ra: 0.0,
                 decl: -23.01,
             },
             TestData {
@@ -241,7 +241,6 @@ mod tests {
                 long: -90.0,
                 elev: 66.98,
                 az: 177.99,
-                ra: 0.0,
                 decl: -23.01,
             },
             TestData {
@@ -255,7 +254,6 @@ mod tests {
                 long: -90.0,
                 elev: 68.01,
                 az: 2.1,
-                ra: 0.0,
                 decl: -23.01,
             },
             TestData {
@@ -269,7 +267,6 @@ mod tests {
                 long: -180.0,
                 elev: 21.96,
                 az: 179.24,
-                ra: 0.0,
                 decl: -23.07,
             },
             TestData {
@@ -283,7 +280,6 @@ mod tests {
                 long: -180.0,
                 elev: 66.92,
                 az: 178.2,
-                ra: 0.0,
                 decl: -23.07,
             },
             TestData {
@@ -297,7 +293,6 @@ mod tests {
                 long: -180.0,
                 elev: 68.07,
                 az: 1.89,
-                ra: 0.0,
                 decl: -23.07,
             },
             TestData {
@@ -311,7 +306,6 @@ mod tests {
                 long: 90.0,
                 elev: 21.98,
                 az: 179.21,
-                ra: 0.0,
                 decl: -23.05,
             },
             TestData {
@@ -325,7 +319,6 @@ mod tests {
                 long: 90.0,
                 elev: 66.94,
                 az: 178.13,
-                ra: 0.0,
                 decl: -23.05,
             },
             TestData {
@@ -339,7 +332,6 @@ mod tests {
                 long: 90.0,
                 elev: 68.05,
                 az: 1.96,
-                ra: 0.0,
                 decl: -23.05,
             },
             // This next set tests two hours before and after noon for
@@ -355,7 +347,6 @@ mod tests {
                 long: 0.0,
                 elev: 56.65,
                 az: 120.65,
-                ra: 0.0,
                 decl: 23.1,
             },
             TestData {
@@ -369,7 +360,6 @@ mod tests {
                 long: 0.0,
                 elev: 52.09,
                 az: 50.33,
-                ra: 0.0,
                 decl: 23.1,
             },
             TestData {
@@ -383,7 +373,6 @@ mod tests {
                 long: 0.0,
                 elev: 16.34,
                 az: 29.53,
-                ra: 0.0,
                 decl: 23.1,
             },
             TestData {
@@ -397,7 +386,6 @@ mod tests {
                 long: 0.0,
                 elev: 57.79,
                 az: 236.87,
-                ra: 0.0,
                 decl: 23.09,
             },
             TestData {
@@ -411,7 +399,6 @@ mod tests {
                 long: 0.0,
                 elev: 53.55,
                 az: 311.29,
-                ra: 0.0,
                 decl: 23.09,
             },
             TestData {
@@ -425,7 +412,6 @@ mod tests {
                 long: 0.0,
                 elev: 17.0,
                 az: 332.18,
-                ra: 0.0,
                 decl: 23.09,
             },
         ];
@@ -456,12 +442,6 @@ mod tests {
                 pos.azimuth,
                 data.az
             );
-            // assert!(
-            //     close_enough(pos.right_ascension, data.ra, 0.1),
-            //     "right ascension: {} <> {}",
-            //     pos.right_ascension,
-            //     data.ra
-            // );
             assert!(
                 close_enough(pos.declination, data.decl, 0.2),
                 "declination: {} <> {}",

@@ -92,6 +92,7 @@ pub struct Node {
     outputs: Vec<Output>,
     in_stream: InputStream,
     time_ch: Option<broadcast::Receiver<tod::Info>>,
+    solar_ch: Option<broadcast::Receiver<solar::Info>>,
     exprs: Vec<compile::Program>,
 }
 
@@ -168,6 +169,7 @@ impl Node {
     async fn init(
         c_req: client::RequestChan,
         c_time: broadcast::Receiver<tod::Info>,
+        c_solar: broadcast::Receiver<solar::Info>,
         cfg: &config::Logic,
     ) -> Result<Node> {
         debug!("compiling expressions");
@@ -205,6 +207,9 @@ impl Node {
         let needs_time =
             exprs.iter().any(|compile::Program(e, _)| e.uses_time());
 
+        let needs_solar =
+            exprs.iter().any(|compile::Program(e, _)| e.uses_solar());
+
         // Return the initialized `Node`.
 
         Ok(Node {
@@ -212,6 +217,7 @@ impl Node {
             outputs: out_chans,
             in_stream,
             time_ch: if needs_time { Some(c_time) } else { None },
+            solar_ch: if needs_solar { Some(c_solar) } else { None },
             exprs,
         })
     }
@@ -220,6 +226,7 @@ impl Node {
 
     async fn run(mut self) -> Result<Infallible> {
         let mut time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
+        let mut solar = None;
 
         info!("starting");
 
@@ -247,6 +254,15 @@ impl Node {
 		    time = v;
 		    debug!("updated time");
 		}
+
+		// If we need the solar channel, wait for the next
+		// update.
+
+		Ok(v) = self.solar_ch.as_mut().unwrap().recv(),
+		            if self.solar_ch.is_some() => {
+		    solar = Some(v);
+		    debug!("updated solar position");
+		}
 	    }
 
             // Loop through each defined expression.
@@ -258,7 +274,9 @@ impl Node {
                 // values are None or the expression performed a bad
                 // operation, like dividing by 0.)
 
-                if let Some(result) = compile::eval(expr, &self.inputs, &time) {
+                if let Some(result) =
+                    compile::eval(expr, &self.inputs, &time, solar.as_ref())
+                {
                     let _ = self.outputs[*idx].send(result).await;
                 } else {
                     error!("couldn't evaluate {}", &expr)
@@ -272,6 +290,7 @@ impl Node {
     pub async fn start(
         c_req: client::RequestChan,
         rx_tod: broadcast::Receiver<tod::Info>,
+        rx_solar: broadcast::Receiver<solar::Info>,
         cfg: &config::Logic,
     ) -> Result<JoinHandle<Result<Infallible>>> {
         let name = cfg.name.clone();
@@ -279,7 +298,7 @@ impl Node {
         // Create a new instance and let it initialize itself. If an
         // error occurs, return it.
 
-        let node = Node::init(c_req, rx_tod, cfg)
+        let node = Node::init(c_req, rx_tod, rx_solar, cfg)
             .instrument(info_span!("logic-init", name = &name))
             .await?;
 
