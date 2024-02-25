@@ -34,8 +34,11 @@ async fn run(tx: broadcast::Sender<Info>) {
 
 pub fn create_task() -> (broadcast::Sender<Info>, broadcast::Receiver<Info>) {
     let (tx, rx) = broadcast::channel(1);
+    let tx_copy = tx.clone();
 
-    tokio::spawn(run(tx.clone())).instrument(info_span!("tod"));
+    tokio::spawn(
+        async move { run(tx_copy).await }.instrument(info_span!("tod")),
+    );
 
     (tx, rx)
 }
