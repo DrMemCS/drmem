@@ -13,6 +13,7 @@ use tracing_futures::Instrument;
 use super::config;
 
 mod compile;
+pub mod solar;
 pub mod tod;
 
 // These are some helpful type aliases.
