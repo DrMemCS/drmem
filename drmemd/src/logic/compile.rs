@@ -33,6 +33,11 @@
 //     {local:DOW}	day of week (Monday = 0, Sunday = 6)
 //     {local:DOY}	day of year from 0 to 365
 //
+//     {solar:alt}	altitude of sun (0 is sunrise and sunset)
+//     {solar:az}	azimuth of sun
+//     {solar:ra}	right ascension of sun
+//     {solar:dec}	declination of sun
+//
 // The token "->" represents assignment. The only items that can be on
 // the right hand side of the arrow is a variable referring to a
 // settable device.
@@ -48,6 +53,7 @@
 //     +,-,*,/,%         Perform addition, substraction, multiplication,
 //                       division, and modulo operations
 
+use super::solar;
 use super::tod;
 use drmem_api::{device, Error, Result};
 use lrlex::lrlex_mod;
@@ -65,6 +71,7 @@ pub enum Expr {
     Lit(device::Value),
     Var(usize),
     TimeVal(&'static str, &'static str, fn(&tod::Info) -> device::Value),
+    SolarVal(&'static str, fn(&solar::Info) -> device::Value),
 
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
@@ -88,7 +95,10 @@ pub enum Expr {
 impl Expr {
     pub fn precedence(&self) -> u32 {
         match self {
-            Expr::Lit(_) | Expr::Var(_) | Expr::TimeVal(..) => 10,
+            Expr::Lit(_)
+            | Expr::Var(_)
+            | Expr::TimeVal(..)
+            | Expr::SolarVal(..) => 10,
             Expr::Not(_) => 9,
             Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 6,
             Expr::Add(_, _) | Expr::Sub(_, _) => 5,
@@ -105,7 +115,28 @@ impl Expr {
     pub fn uses_time(&self) -> bool {
         match self {
             Expr::TimeVal(..) => true,
-            Expr::Lit(_) | Expr::Var(_) => false,
+            Expr::SolarVal(..) | Expr::Lit(_) | Expr::Var(_) => false,
+            Expr::Not(e) => e.uses_time(),
+            Expr::Mul(a, b)
+            | Expr::Div(a, b)
+            | Expr::Rem(a, b)
+            | Expr::Add(a, b)
+            | Expr::Sub(a, b)
+            | Expr::Lt(a, b)
+            | Expr::LtEq(a, b)
+            | Expr::Eq(a, b)
+            | Expr::And(a, b)
+            | Expr::Or(a, b) => a.uses_time() || b.uses_time(),
+        }
+    }
+
+    // Traverses an expression and returns `true` if it uses any
+    // `SolarVal()` variants.
+
+    pub fn uses_solar(&self) -> bool {
+        match self {
+            Expr::SolarVal(..) => true,
+            Expr::TimeVal(..) | Expr::Lit(_) | Expr::Var(_) => false,
             Expr::Not(e) => e.uses_time(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
@@ -138,6 +169,8 @@ impl fmt::Display for Expr {
             Expr::Var(v) => write!(f, "inp[{}]", &v),
 
             Expr::TimeVal(cat, fld, _) => write!(f, "{{{}:{}}}", cat, fld),
+
+            Expr::SolarVal(fld, _) => write!(f, "{{solar:{}}}", fld),
 
             Expr::Not(e) => {
                 write!(f, "not ")?;
@@ -257,6 +290,7 @@ pub fn eval(
     e: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
     match e {
         // Literals hold actual `device::Values`, so simply return it.
@@ -266,27 +300,29 @@ pub fn eval(
 
         Expr::TimeVal(_, _, f) => Some(f(time)),
 
-        Expr::Not(ref e) => eval_as_not_expr(e, inp, time),
+        Expr::SolarVal(_, f) => solar.map(f),
 
-        Expr::Or(ref a, ref b) => eval_as_or_expr(a, b, inp, time),
+        Expr::Not(ref e) => eval_as_not_expr(e, inp, time, solar),
 
-        Expr::And(ref a, ref b) => eval_as_and_expr(a, b, inp, time),
+        Expr::Or(ref a, ref b) => eval_as_or_expr(a, b, inp, time, solar),
 
-        Expr::Eq(ref a, ref b) => eval_as_eq_expr(a, b, inp, time),
+        Expr::And(ref a, ref b) => eval_as_and_expr(a, b, inp, time, solar),
 
-        Expr::Lt(ref a, ref b) => eval_as_lt_expr(a, b, inp, time),
+        Expr::Eq(ref a, ref b) => eval_as_eq_expr(a, b, inp, time, solar),
 
-        Expr::LtEq(ref a, ref b) => eval_as_lteq_expr(a, b, inp, time),
+        Expr::Lt(ref a, ref b) => eval_as_lt_expr(a, b, inp, time, solar),
 
-        Expr::Add(ref a, ref b) => eval_as_add_expr(a, b, inp, time),
+        Expr::LtEq(ref a, ref b) => eval_as_lteq_expr(a, b, inp, time, solar),
 
-        Expr::Sub(ref a, ref b) => eval_as_sub_expr(a, b, inp, time),
+        Expr::Add(ref a, ref b) => eval_as_add_expr(a, b, inp, time, solar),
 
-        Expr::Mul(ref a, ref b) => eval_as_mul_expr(a, b, inp, time),
+        Expr::Sub(ref a, ref b) => eval_as_sub_expr(a, b, inp, time, solar),
 
-        Expr::Div(ref a, ref b) => eval_as_div_expr(a, b, inp, time),
+        Expr::Mul(ref a, ref b) => eval_as_mul_expr(a, b, inp, time, solar),
 
-        Expr::Rem(ref a, ref b) => eval_as_rem_expr(a, b, inp, time),
+        Expr::Div(ref a, ref b) => eval_as_div_expr(a, b, inp, time, solar),
+
+        Expr::Rem(ref a, ref b) => eval_as_rem_expr(a, b, inp, time, solar),
     }
 }
 
@@ -306,8 +342,9 @@ fn eval_as_not_expr(
     e: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match eval(e, inp, time) {
+    match eval(e, inp, time, solar) {
         Some(device::Value::Bool(v)) => Some(device::Value::Bool(!v)),
         Some(v) => {
             error!("NOT expression contains non-boolean value : {}", &v);
@@ -324,10 +361,11 @@ fn eval_as_or_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match eval(a, inp, time) {
+    match eval(a, inp, time, solar) {
         v @ Some(device::Value::Bool(true)) => v,
-        Some(device::Value::Bool(false)) => match eval(b, inp, time) {
+        Some(device::Value::Bool(false)) => match eval(b, inp, time, solar) {
             v @ Some(device::Value::Bool(_)) => v,
             Some(v) => {
                 error!("OR expression contains non-boolean argument: {}", &v);
@@ -350,10 +388,11 @@ fn eval_as_and_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match eval(a, inp, time) {
+    match eval(a, inp, time, solar) {
         v @ Some(device::Value::Bool(false)) => v,
-        Some(device::Value::Bool(true)) => match eval(b, inp, time) {
+        Some(device::Value::Bool(true)) => match eval(b, inp, time, solar) {
             v @ Some(device::Value::Bool(_)) => v,
             Some(v) => {
                 error!("AND expression contains non-boolean argument: {}", &v);
@@ -375,8 +414,9 @@ fn eval_as_eq_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match (eval(a, inp, time), eval(b, inp, time)) {
+    match (eval(a, inp, time, solar), eval(b, inp, time, solar)) {
         (Some(device::Value::Bool(a)), Some(device::Value::Bool(b))) => {
             Some(device::Value::Bool(a == b))
         }
@@ -409,8 +449,9 @@ fn eval_as_lt_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match (eval(a, inp, time), eval(b, inp, time)) {
+    match (eval(a, inp, time, solar), eval(b, inp, time, solar)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Bool(a < b))
         }
@@ -440,8 +481,9 @@ fn eval_as_lteq_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match (eval(a, inp, time), eval(b, inp, time)) {
+    match (eval(a, inp, time, solar), eval(b, inp, time, solar)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Bool(a <= b))
         }
@@ -471,8 +513,9 @@ fn eval_as_add_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match (eval(a, inp, time), eval(b, inp, time)) {
+    match (eval(a, inp, time, solar), eval(b, inp, time, solar)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Int(a + b))
         }
@@ -511,8 +554,9 @@ fn eval_as_sub_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match (eval(a, inp, time), eval(b, inp, time)) {
+    match (eval(a, inp, time, solar), eval(b, inp, time, solar)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Int(a - b))
         }
@@ -551,8 +595,9 @@ fn eval_as_mul_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match (eval(a, inp, time), eval(b, inp, time)) {
+    match (eval(a, inp, time, solar), eval(b, inp, time, solar)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) => {
             Some(device::Value::Int(a * b))
         }
@@ -591,8 +636,9 @@ fn eval_as_div_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match (eval(a, inp, time), eval(b, inp, time)) {
+    match (eval(a, inp, time, solar), eval(b, inp, time, solar)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b)))
             if b != 0 =>
         {
@@ -627,8 +673,9 @@ fn eval_as_rem_expr(
     b: &Expr,
     inp: &[Option<device::Value>],
     time: &tod::Info,
+    solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
-    match (eval(a, inp, time), eval(b, inp, time)) {
+    match (eval(a, inp, time, solar), eval(b, inp, time, solar)) {
         (Some(device::Value::Int(a)), Some(device::Value::Int(b))) if b > 0 => {
             Some(device::Value::Int(a % b))
         }
@@ -912,18 +959,19 @@ mod tests {
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
         assert_eq!(
-            eval(&Expr::Not(Box::new(Expr::Lit(FALSE))), &[], &time),
+            eval(&Expr::Not(Box::new(Expr::Lit(FALSE))), &[], &time, None),
             Some(TRUE)
         );
         assert_eq!(
-            eval(&Expr::Not(Box::new(Expr::Lit(TRUE))), &[], &time),
+            eval(&Expr::Not(Box::new(Expr::Lit(TRUE))), &[], &time, None),
             Some(FALSE)
         );
         assert_eq!(
             eval(
                 &Expr::Not(Box::new(Expr::Lit(device::Value::Int(1)))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -943,7 +991,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -954,7 +1003,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -965,7 +1015,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -973,7 +1024,8 @@ mod tests {
             eval(
                 &Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(TRUE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -981,7 +1033,8 @@ mod tests {
             eval(
                 &Expr::Or(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TRUE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -989,7 +1042,8 @@ mod tests {
             eval(
                 &Expr::Or(Box::new(Expr::Lit(FALSE)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1001,7 +1055,8 @@ mod tests {
             eval(
                 &Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1021,7 +1076,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1032,7 +1088,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1043,7 +1100,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1054,7 +1112,8 @@ mod tests {
                     Box::new(Expr::Lit(TRUE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1062,7 +1121,8 @@ mod tests {
             eval(
                 &Expr::And(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TRUE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1077,7 +1137,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1085,7 +1146,8 @@ mod tests {
             eval(
                 &Expr::And(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1104,7 +1166,8 @@ mod tests {
             eval(
                 &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1112,7 +1175,8 @@ mod tests {
             eval(
                 &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1123,7 +1187,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1134,7 +1199,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1142,7 +1208,8 @@ mod tests {
             eval(
                 &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1157,7 +1224,8 @@ mod tests {
                     ))))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1172,7 +1240,8 @@ mod tests {
                     ))))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1191,7 +1260,8 @@ mod tests {
             eval(
                 &Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1199,7 +1269,8 @@ mod tests {
             eval(
                 &Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1207,7 +1278,8 @@ mod tests {
             eval(
                 &Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1215,7 +1287,8 @@ mod tests {
             eval(
                 &Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1226,7 +1299,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1237,7 +1311,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1248,7 +1323,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1263,7 +1339,8 @@ mod tests {
                     ))))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1278,7 +1355,8 @@ mod tests {
                     ))))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1297,7 +1375,8 @@ mod tests {
             eval(
                 &Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1305,7 +1384,8 @@ mod tests {
             eval(
                 &Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1313,7 +1393,8 @@ mod tests {
             eval(
                 &Expr::LtEq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1324,7 +1405,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1335,7 +1417,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1346,7 +1429,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1357,7 +1441,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1372,7 +1457,8 @@ mod tests {
                     ))))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(FALSE)
         );
@@ -1387,7 +1473,8 @@ mod tests {
                     ))))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1402,7 +1489,8 @@ mod tests {
                     ))))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(TRUE)
         );
@@ -1422,7 +1510,8 @@ mod tests {
             eval(
                 &Expr::Add(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(3))
         );
@@ -1430,7 +1519,8 @@ mod tests {
             eval(
                 &Expr::Add(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(2))
         );
@@ -1441,7 +1531,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(1))
         );
@@ -1452,7 +1543,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(3.0))
         );
@@ -1463,7 +1555,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1474,7 +1567,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1485,7 +1579,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(3.0))
         );
@@ -1496,7 +1591,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(3.0))
         );
@@ -1516,7 +1612,8 @@ mod tests {
             eval(
                 &Expr::Sub(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(1))
         );
@@ -1524,7 +1621,8 @@ mod tests {
             eval(
                 &Expr::Sub(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(0))
         );
@@ -1535,7 +1633,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(1))
         );
@@ -1546,7 +1645,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1557,7 +1657,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(0.0))
         );
@@ -1568,7 +1669,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1579,7 +1681,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1590,7 +1693,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1610,7 +1714,8 @@ mod tests {
             eval(
                 &Expr::Mul(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(2))
         );
@@ -1618,7 +1723,8 @@ mod tests {
             eval(
                 &Expr::Mul(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(1))
         );
@@ -1629,7 +1735,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(0))
         );
@@ -1640,7 +1747,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1651,7 +1759,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1662,7 +1771,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(0.0))
         );
@@ -1673,7 +1783,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1684,7 +1795,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1706,7 +1818,8 @@ mod tests {
             eval(
                 &Expr::Div(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(2))
         );
@@ -1714,7 +1827,8 @@ mod tests {
             eval(
                 &Expr::Div(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1725,7 +1839,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1736,7 +1851,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1747,7 +1863,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1758,7 +1875,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1769,7 +1887,8 @@ mod tests {
                     Box::new(Expr::Lit(ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1780,7 +1899,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(2.0))
         );
@@ -1788,7 +1908,8 @@ mod tests {
             eval(
                 &Expr::Div(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ZERO))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1799,7 +1920,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ZERO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1810,7 +1932,8 @@ mod tests {
                     Box::new(Expr::Lit(ZERO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1821,7 +1944,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ZERO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1844,7 +1968,8 @@ mod tests {
             eval(
                 &Expr::Rem(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Int(1))
         );
@@ -1852,7 +1977,8 @@ mod tests {
             eval(
                 &Expr::Rem(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1863,7 +1989,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1874,7 +2001,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1885,7 +2013,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1896,7 +2025,8 @@ mod tests {
                     Box::new(Expr::Lit(FALSE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1907,7 +2037,8 @@ mod tests {
                     Box::new(Expr::Lit(TWO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1918,7 +2049,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_TWO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             Some(device::Value::Flt(1.0))
         );
@@ -1926,7 +2058,8 @@ mod tests {
             eval(
                 &Expr::Rem(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ZERO))),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1937,7 +2070,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ZERO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1948,7 +2082,8 @@ mod tests {
                     Box::new(Expr::Lit(ZERO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1959,7 +2094,8 @@ mod tests {
                     Box::new(Expr::Lit(FP_ZERO))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1970,7 +2106,8 @@ mod tests {
                     Box::new(Expr::Lit(NEG_ONE))
                 ),
                 &[],
-                &time
+                &time,
+                None
             ),
             None
         );
@@ -1981,7 +2118,7 @@ mod tests {
         const FALSE: device::Value = device::Value::Bool(false);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
-        assert_eq!(eval(&Expr::Lit(FALSE), &[], &time), Some(FALSE));
+        assert_eq!(eval(&Expr::Lit(FALSE), &[], &time, None), Some(FALSE));
     }
 
     // This function tests the optimizations that can be done on an
@@ -2281,7 +2418,7 @@ mod tests {
         let expr = format!("{} -> {{a}}", expr);
         let prog = Program::compile(&expr, &env).unwrap();
 
-        eval(&prog.0, &[], &time)
+        eval(&prog.0, &[], &time, None)
     }
 
     #[test]
