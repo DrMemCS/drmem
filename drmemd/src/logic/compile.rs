@@ -796,6 +796,10 @@ mod tests {
         assert!(Program::compile("{local:year} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:DOW} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:DOY} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{solar:alt} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{solar:az} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{solar:ra} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{solar:dec} -> {bulb}", &env).is_ok());
 
         // Don't allow bad categories or fields.
 
@@ -2417,12 +2421,16 @@ mod tests {
         }
     }
 
-    fn evaluate(expr: &str, time: &tod::Info) -> Option<device::Value> {
+    fn evaluate(
+        expr: &str,
+        time: &tod::Info,
+        solar: Option<&solar::Info>,
+    ) -> Option<device::Value> {
         let env: Env = (&[], &[String::from("a")]);
         let expr = format!("{} -> {{a}}", expr);
         let prog = Program::compile(&expr, &env).unwrap();
 
-        eval(&prog.0, &[], &time, None)
+        eval(&prog.0, &[], &time, solar)
     }
 
     #[test]
@@ -2440,73 +2448,133 @@ mod tests {
                 .unwrap(),
         ));
 
-        assert_eq!(evaluate("1 / 0", &time), None);
-        assert_eq!(evaluate("5 > true", &time), None);
+        let solar = Arc::new(solar::SolarInfo {
+            elevation: 1.0,
+            azimuth: 2.0,
+            right_ascension: 3.0,
+            declination: 4.0,
+        });
 
-        assert_eq!(evaluate("1 + 2 * 3", &time), Some(device::Value::Int(7)));
-        assert_eq!(evaluate("(1 + 2) * 3", &time), Some(device::Value::Int(9)));
-        assert_eq!(evaluate("1 + (2 * 3)", &time), Some(device::Value::Int(7)));
-
-        assert_eq!(
-            evaluate("1 + 2 < 1 + 3", &time),
-            Some(device::Value::Bool(true))
-        );
-        assert_eq!(
-            evaluate("1 + 2 < 1 + 1", &time),
-            Some(device::Value::Bool(false))
-        );
+        assert_eq!(evaluate("1 / 0", &time, None), None);
+        assert_eq!(evaluate("5 > true", &time, None), None);
 
         assert_eq!(
-            evaluate("1 > 2 or 5 < 3", &time),
-            Some(device::Value::Bool(false))
+            evaluate("1 + 2 * 3", &time, None),
+            Some(device::Value::Int(7))
         );
         assert_eq!(
-            evaluate("1 > 2 or 5 >= 3", &time),
-            Some(device::Value::Bool(true))
-        );
-
-        assert_eq!(
-            evaluate("{utc:second}", &time),
-            Some(device::Value::Int(5))
-        );
-        assert_eq!(
-            evaluate("{utc:minute}", &time),
-            Some(device::Value::Int(4))
-        );
-        assert_eq!(evaluate("{utc:hour}", &time), Some(device::Value::Int(3)));
-        assert_eq!(evaluate("{utc:day}", &time), Some(device::Value::Int(2)));
-        assert_eq!(evaluate("{utc:month}", &time), Some(device::Value::Int(1)));
-        assert_eq!(
-            evaluate("{utc:year}", &time),
-            Some(device::Value::Int(2000))
-        );
-        assert_eq!(evaluate("{utc:DOW}", &time), Some(device::Value::Int(6)));
-        assert_eq!(evaluate("{utc:DOY}", &time), Some(device::Value::Int(1)));
-        assert_eq!(
-            evaluate("{local:second}", &time),
-            Some(device::Value::Int(10))
-        );
-        assert_eq!(
-            evaluate("{local:minute}", &time),
+            evaluate("(1 + 2) * 3", &time, None),
             Some(device::Value::Int(9))
         );
         assert_eq!(
-            evaluate("{local:hour}", &time),
-            Some(device::Value::Int(8))
+            evaluate("1 + (2 * 3)", &time, None),
+            Some(device::Value::Int(7))
         );
-        assert_eq!(evaluate("{local:day}", &time), Some(device::Value::Int(7)));
+
         assert_eq!(
-            evaluate("{local:month}", &time),
+            evaluate("1 + 2 < 1 + 3", &time, None),
+            Some(device::Value::Bool(true))
+        );
+        assert_eq!(
+            evaluate("1 + 2 < 1 + 1", &time, None),
+            Some(device::Value::Bool(false))
+        );
+
+        assert_eq!(
+            evaluate("1 > 2 or 5 < 3", &time, None),
+            Some(device::Value::Bool(false))
+        );
+        assert_eq!(
+            evaluate("1 > 2 or 5 >= 3", &time, None),
+            Some(device::Value::Bool(true))
+        );
+
+        assert_eq!(
+            evaluate("{utc:second}", &time, None),
+            Some(device::Value::Int(5))
+        );
+        assert_eq!(
+            evaluate("{utc:minute}", &time, None),
+            Some(device::Value::Int(4))
+        );
+        assert_eq!(
+            evaluate("{utc:hour}", &time, None),
+            Some(device::Value::Int(3))
+        );
+        assert_eq!(
+            evaluate("{utc:day}", &time, None),
+            Some(device::Value::Int(2))
+        );
+        assert_eq!(
+            evaluate("{utc:month}", &time, None),
+            Some(device::Value::Int(1))
+        );
+        assert_eq!(
+            evaluate("{utc:year}", &time, None),
+            Some(device::Value::Int(2000))
+        );
+        assert_eq!(
+            evaluate("{utc:DOW}", &time, None),
             Some(device::Value::Int(6))
         );
         assert_eq!(
-            evaluate("{local:year}", &time),
+            evaluate("{utc:DOY}", &time, None),
+            Some(device::Value::Int(1))
+        );
+        assert_eq!(
+            evaluate("{local:second}", &time, None),
+            Some(device::Value::Int(10))
+        );
+        assert_eq!(
+            evaluate("{local:minute}", &time, None),
+            Some(device::Value::Int(9))
+        );
+        assert_eq!(
+            evaluate("{local:hour}", &time, None),
+            Some(device::Value::Int(8))
+        );
+        assert_eq!(
+            evaluate("{local:day}", &time, None),
+            Some(device::Value::Int(7))
+        );
+        assert_eq!(
+            evaluate("{local:month}", &time, None),
+            Some(device::Value::Int(6))
+        );
+        assert_eq!(
+            evaluate("{local:year}", &time, None),
             Some(device::Value::Int(2001))
         );
-        assert_eq!(evaluate("{local:DOW}", &time), Some(device::Value::Int(3)));
         assert_eq!(
-            evaluate("{local:DOY}", &time),
+            evaluate("{local:DOW}", &time, None),
+            Some(device::Value::Int(3))
+        );
+        assert_eq!(
+            evaluate("{local:DOY}", &time, None),
             Some(device::Value::Int(157))
+        );
+
+	// Verify the solar variable are working correctly.
+
+        assert_eq!(evaluate("{solar:alt}", &time, None), None);
+        assert_eq!(evaluate("{solar:az}", &time, None), None);
+        assert_eq!(evaluate("{solar:ra}", &time, None), None);
+        assert_eq!(evaluate("{solar:dec}", &time, None), None);
+        assert_eq!(
+            evaluate("{solar:alt}", &time, Some(&solar)),
+            Some(device::Value::Flt(1.0))
+        );
+        assert_eq!(
+            evaluate("{solar:az}", &time, Some(&solar)),
+            Some(device::Value::Flt(2.0))
+        );
+        assert_eq!(
+            evaluate("{solar:ra}", &time, Some(&solar)),
+            Some(device::Value::Flt(3.0))
+        );
+        assert_eq!(
+            evaluate("{solar:dec}", &time, Some(&solar)),
+            Some(device::Value::Flt(4.0))
         );
     }
 }
