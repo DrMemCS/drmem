@@ -33,14 +33,18 @@
 //     {local:DOW}	day of week (Monday = 0, Sunday = 6)
 //     {local:DOY}	day of year from 0 to 365
 //
-//     {solar:alt}	altitude of sun (0 is sunrise and sunset)
+// There is a built-in type, "solar", that provides solar position in
+// the sky.
+//
+//     {solar:alt}	altitude of sun (< 0 is below horizon, > 0 is above)
 //     {solar:az}	azimuth of sun
 //     {solar:ra}	right ascension of sun
 //     {solar:dec}	declination of sun
 //
-// The token "->" represents assignment. The only items that can be on
+// The token "->" represents assignment. The only item that can be on
 // the right hand side of the arrow is a variable referring to a
-// settable device.
+// settable device (for logic blocks, output devices are specified in
+// the `output` map of the configuration).
 //
 // Parentheses can be used to group subexpressions.
 //
@@ -50,7 +54,7 @@
 //
 //     =,<>,<,<=,>,>=    Perform the comparison and return a boolean
 //
-//     +,-,*,/,%         Perform addition, substraction, multiplication,
+//     +,-,*,/,%         Perform addition, subtraction, multiplication,
 //                       division, and modulo operations
 
 use super::solar;
