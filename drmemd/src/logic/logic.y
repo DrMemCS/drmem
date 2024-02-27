@@ -201,7 +201,7 @@ Unknown -> ():
 use drmem_api::{Result, Error, device};
 use chrono::{Timelike, Datelike};
 use palette::{LinSrgb, Srgb, named};
-use super::{super::tod::Info, Expr, Program};
+use super::{super::tod, super::solar, Expr, Program};
 use std::str::FromStr;
 
 // Any functions here are in scope for all the grammar actions above.
@@ -233,6 +233,7 @@ fn parse_device(name: &str, env: &[String]) -> Result<usize> {
 
 const CAT_UTC: &str = "utc";
 const CAT_LOCAL: &str = "local";
+const CAT_SOLAR: &str = "solar";
 
 const FLD_SECOND: &str = "second";
 const FLD_MINUTE: &str = "minute";
@@ -242,69 +243,89 @@ const FLD_MONTH: &str = "month";
 const FLD_YEAR: &str = "year";
 const FLD_DOW: &str = "DOW";
 const FLD_DOY: &str = "DOY";
+const FLD_ALT: &str = "alt";
+const FLD_AZ: &str = "az";
+const FLD_RA: &str = "ra";
+const FLD_DEC: &str = "dec";
 
-fn get_utc_second(info: &Info) -> device::Value {
+fn get_utc_second(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.second() as i32)
 }
 
-fn get_utc_minute(info: &Info) -> device::Value {
+fn get_utc_minute(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.minute() as i32)
 }
 
-fn get_utc_hour(info: &Info) -> device::Value {
+fn get_utc_hour(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.hour() as i32)
 }
 
-fn get_utc_day(info: &Info) -> device::Value {
+fn get_utc_day(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.day() as i32)
 }
 
-fn get_utc_day_of_week(info: &Info) -> device::Value {
+fn get_utc_day_of_week(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.weekday().num_days_from_monday() as i32)
 }
 
-fn get_utc_month(info: &Info) -> device::Value {
+fn get_utc_month(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.month() as i32)
 }
 
-fn get_utc_year(info: &Info) -> device::Value {
+fn get_utc_year(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.year())
 }
 
-fn get_utc_day_of_year(info: &Info) -> device::Value {
+fn get_utc_day_of_year(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.ordinal0() as i32)
 }
 
-fn get_local_second(info: &Info) -> device::Value {
+fn get_local_second(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.second() as i32)
 }
 
-fn get_local_minute(info: &Info) -> device::Value {
+fn get_local_minute(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.minute() as i32)
 }
 
-fn get_local_hour(info: &Info) -> device::Value {
+fn get_local_hour(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.hour() as i32)
 }
 
-fn get_local_day(info: &Info) -> device::Value {
+fn get_local_day(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.day() as i32)
 }
 
-fn get_local_day_of_week(info: &Info) -> device::Value {
+fn get_local_day_of_week(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.weekday().num_days_from_monday() as i32)
 }
 
-fn get_local_month(info: &Info) -> device::Value {
+fn get_local_month(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.month() as i32)
 }
 
-fn get_local_year(info: &Info) -> device::Value {
+fn get_local_year(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.year())
 }
 
-fn get_local_day_of_year(info: &Info) -> device::Value {
+fn get_local_day_of_year(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.ordinal0() as i32)
+}
+
+fn get_solar_altitude(info: &solar::Info) -> device::Value {
+    device::Value::Flt(info.elevation)
+}
+
+fn get_solar_azimuth(info: &solar::Info) -> device::Value {
+    device::Value::Flt(info.azimuth)
+}
+
+fn get_solar_right_ascension(info: &solar::Info) -> device::Value {
+    device::Value::Flt(info.right_ascension)
+}
+
+fn get_solar_declination(info: &solar::Info) -> device::Value {
+    device::Value::Flt(info.declination)
 }
 
 fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
@@ -356,6 +377,18 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
         )),
 	(CAT_LOCAL, FLD_DOY) => Ok(Expr::TimeVal(
             CAT_LOCAL, FLD_DOY, get_local_day_of_year
+        )),
+	(CAT_SOLAR, FLD_ALT) => Ok(Expr::SolarVal(
+            FLD_ALT, get_solar_altitude
+        )),
+	(CAT_SOLAR, FLD_AZ) => Ok(Expr::SolarVal(
+            FLD_AZ, get_solar_azimuth
+        )),
+	(CAT_SOLAR, FLD_RA) => Ok(Expr::SolarVal(
+            FLD_RA, get_solar_right_ascension
+        )),
+	(CAT_SOLAR, FLD_DEC) => Ok(Expr::SolarVal(
+            FLD_DEC, get_solar_declination
         )),
 	_ => Err(Error::ParseError(
 		 format!("unknown built-in: {}:{}", cat, fld)

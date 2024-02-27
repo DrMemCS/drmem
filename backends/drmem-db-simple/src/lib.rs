@@ -498,7 +498,7 @@ mod tests {
             {
                 let data = vec![1, 2, 3];
 
-                f(device::Value::Int(data[0]));
+                f(device::Value::Int(data[0])).await;
 
                 let s = db
                     .monitor_device(name.clone(), None, None)
@@ -509,7 +509,7 @@ mod tests {
                 tokio::pin!(s);
 
                 for ii in &data[1..] {
-                    f(device::Value::Int(*ii));
+                    f(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -533,8 +533,8 @@ mod tests {
             {
                 let data = vec![1, 2, 3, 4];
 
-                f(device::Value::Int(data[0]));
-                f(device::Value::Int(data[1]));
+                f(device::Value::Int(data[0])).await;
+                f(device::Value::Int(data[1])).await;
 
                 let s = db
                     .monitor_device(name.clone(), None, None)
@@ -545,7 +545,7 @@ mod tests {
                 tokio::pin!(s);
 
                 for ii in &data[2..] {
-                    f(device::Value::Int(*ii));
+                    f(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -597,7 +597,7 @@ mod tests {
                 assert!(s.try_next().await.is_err());
 
                 for ii in data {
-                    f(device::Value::Int(ii));
+                    f(device::Value::Int(ii)).await;
                 }
 
                 assert_eq!(
@@ -621,7 +621,7 @@ mod tests {
             {
                 let data = vec![1, 2, 3];
 
-                f(device::Value::Int(data[0]));
+                f(device::Value::Int(data[0])).await;
 
                 let s = db
                     .monitor_device(
@@ -636,7 +636,7 @@ mod tests {
                 tokio::pin!(s);
 
                 for ii in &data[1..] {
-                    f(device::Value::Int(*ii));
+                    f(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -669,7 +669,7 @@ mod tests {
             {
                 let data = vec![1, 2, 3];
 
-                f(device::Value::Int(data[0]));
+                f(device::Value::Int(data[0])).await;
 
                 let s = db
                     .monitor_device(
@@ -684,7 +684,7 @@ mod tests {
                 tokio::pin!(s);
 
                 for ii in &data[1..] {
-                    f(device::Value::Int(*ii));
+                    f(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -738,7 +738,7 @@ mod tests {
 
                 for ii in data {
                     interval.tick().await;
-                    f(device::Value::Int(ii));
+                    f(device::Value::Int(ii)).await;
                 }
 
                 assert_eq!(s.try_next().await.unwrap(), None);
@@ -750,7 +750,7 @@ mod tests {
             {
                 let data = vec![1, 2, 3, 4, 5];
 
-                f(device::Value::Int(data[0]));
+                f(device::Value::Int(data[0])).await;
                 let mut interval = interval(time::Duration::from_millis(100));
 
                 let now = time::SystemTime::now();
@@ -772,7 +772,7 @@ mod tests {
 
                 for ii in &data[1..] {
                     interval.tick().await;
-                    f(device::Value::Int(*ii));
+                    f(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -817,7 +817,7 @@ mod tests {
 
                 for ii in data {
                     interval.tick().await;
-                    f(device::Value::Int(ii));
+                    f(device::Value::Int(ii)).await;
                 }
 
                 assert_eq!(
@@ -866,7 +866,7 @@ mod tests {
 
                 for ii in data {
                     interval.tick().await;
-                    f(device::Value::Int(ii));
+                    f(device::Value::Int(ii)).await;
                 }
 
                 assert_eq!(

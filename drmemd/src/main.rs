@@ -166,12 +166,19 @@ async fn run() -> Result<()> {
 
         let (tx_tod, rx_tod) = logic::tod::create_task();
 
+        // Start the solar task. This, too, needs to be done before
+        // any logic blocks are started.
+
+        let (tx_solar, rx_solar) =
+            logic::solar::create_task(cfg.latitude, cfg.longitude);
+
         // Iterate through the [[logic]] sections of the config.
 
         for logic in cfg.logic {
             match logic::Node::start(
                 tx_clnt_req.clone(),
                 tx_tod.subscribe(),
+                tx_solar.subscribe(),
                 &logic,
             )
             .await
@@ -181,12 +188,14 @@ async fn run() -> Result<()> {
             }
         }
 
-        // Now that we've given all the logic blocks a receive handle
-        // for the time-of-day, we can free up our copy. If we freed
-        // up our copy *before* creating new subscriptions, the tod
-        // task may have briefly seen no clients and would exit.
+        // Now that we've given all the logic blocks receive handles
+        // for the time-of-day and solar tasks, we can free up our
+        // copy. If we freed up our copy *before* creating new
+        // subscriptions, the tod or solar task may have briefly seen
+        // no clients and would exit.
 
         std::mem::drop(rx_tod);
+        std::mem::drop(rx_solar);
 
         // Now run all the tasks.
 

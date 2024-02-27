@@ -16,8 +16,8 @@ fn def_log_level() -> String {
 pub struct Config {
     #[serde(default = "def_log_level")]
     log_level: String,
-    latitude: f64,
-    longitude: f64,
+    pub latitude: f64,
+    pub longitude: f64,
     #[cfg(feature = "graphql")]
     #[serde(default)]
     pub graphql: super::graphql::config::Config,
