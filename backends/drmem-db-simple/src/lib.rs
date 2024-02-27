@@ -621,7 +621,7 @@ mod tests {
             {
                 let data = vec![1, 2, 3];
 
-                f(device::Value::Int(data[0]));
+                f(device::Value::Int(data[0])).await;
 
                 let s = db
                     .monitor_device(
