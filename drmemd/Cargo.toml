@@ -33,7 +33,7 @@ tracing-subscriber = { workspace = true, features = ["ansi"] }
 serde.workspace = true
 serde_derive.workspace = true
 
-clap = { version = "4", features = ["cargo"] }
+clap = { version = "~4.4", features = ["cargo"] }
 
 chrono = { workspace = true, features = ["clock"] }
 
