@@ -2554,7 +2554,7 @@ mod tests {
             Some(device::Value::Int(157))
         );
 
-	// Verify the solar variable are working correctly.
+        // Verify the solar variable are working correctly.
 
         assert_eq!(evaluate("{solar:alt}", &time, None), None);
         assert_eq!(evaluate("{solar:az}", &time, None), None);
