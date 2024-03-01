@@ -46,4 +46,3 @@ codegen-units = 1
 debug-assertions = false
 strip = "symbols"
 incremental = false
-panic = "abort"
