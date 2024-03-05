@@ -276,13 +276,10 @@ impl Program {
         let (res, errs) = logic_y::parse(&lexer, env);
 
         res.unwrap_or_else(|| {
-            let res = errs.iter().fold(
-		s.to_owned(),
-                |mut acc, e| {
-                    acc.push_str(&format!("\n    {}", &e));
-                    acc
-                },
-            );
+            let res = errs.iter().fold(s.to_owned(), |mut acc, e| {
+                acc.push_str(&format!("\n    {}", &e));
+                acc
+            });
 
             Err(Error::ParseError(res))
         })
@@ -2422,16 +2419,15 @@ mod tests {
         ];
 
         for (in_val, out_val) in TESTS {
-	    match Program::compile(in_val, &env) {
-		Ok(prog) =>
-		    assert_eq!(
-			prog.to_string(),
-			*out_val,
-			"failed on: {}",
-			in_val
-		    ),
-		Err(e) => panic!("{}", &e)
-	    }
+            match Program::compile(in_val, &env) {
+                Ok(prog) => assert_eq!(
+                    prog.to_string(),
+                    *out_val,
+                    "failed on: {}",
+                    in_val
+                ),
+                Err(e) => panic!("{}", &e),
+            }
         }
     }
 
