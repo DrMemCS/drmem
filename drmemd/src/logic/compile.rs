@@ -116,10 +116,20 @@ impl Expr {
     // Traverses an expression and returns `true` if it uses any
     // `TimeVal()` variants.
 
-    pub fn uses_time(&self) -> bool {
+    pub fn uses_time(&self) -> tod::TimeField {
         match self {
-            Expr::TimeVal(..) => true,
-            Expr::SolarVal(..) | Expr::Lit(_) | Expr::Var(_) => false,
+            Expr::TimeVal(_, "second", _) => tod::TimeField::Second,
+            Expr::TimeVal(_, "minute", _) => tod::TimeField::Minute,
+            Expr::TimeVal(_, "hour", _) => tod::TimeField::Hour,
+            Expr::TimeVal(_, "day", _)
+            | Expr::TimeVal(_, "DOW", _)
+            | Expr::TimeVal(_, "DOY", _) => tod::TimeField::Day,
+            Expr::TimeVal(_, "month", _) => tod::TimeField::Month,
+            Expr::TimeVal(_, "year", _) => tod::TimeField::Year,
+            Expr::TimeVal(_, _, _)
+            | Expr::SolarVal(..)
+            | Expr::Lit(_)
+            | Expr::Var(_) => tod::TimeField::Forever,
             Expr::Not(e) => e.uses_time(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
@@ -130,7 +140,7 @@ impl Expr {
             | Expr::LtEq(a, b)
             | Expr::Eq(a, b)
             | Expr::And(a, b)
-            | Expr::Or(a, b) => a.uses_time() || b.uses_time(),
+            | Expr::Or(a, b) => a.uses_time().min(b.uses_time()),
         }
     }
 

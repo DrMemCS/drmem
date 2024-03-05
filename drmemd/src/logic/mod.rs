@@ -6,7 +6,7 @@ use tokio::{
     sync::{broadcast, oneshot},
     task::JoinHandle,
 };
-use tokio_stream::{StreamExt, StreamMap};
+use tokio_stream::{wrappers::BroadcastStream, StreamExt, StreamMap};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
@@ -91,7 +91,7 @@ pub struct Node {
     inputs: Vec<Inputs>,
     outputs: Vec<Output>,
     in_stream: InputStream,
-    time_ch: Option<broadcast::Receiver<tod::Info>>,
+    time_ch: Option<tod::TimeFilter>,
     solar_ch: Option<broadcast::Receiver<solar::Info>>,
     exprs: Vec<compile::Program>,
 }
@@ -204,8 +204,10 @@ impl Node {
 
         // Look at each expression and see if it needs the time-of-day.
 
-        let needs_time =
-            exprs.iter().any(|compile::Program(e, _)| e.uses_time());
+        let needs_time = exprs
+            .iter()
+            .map(|compile::Program(e, _)| e.uses_time())
+            .min();
 
         let needs_solar =
             exprs.iter().any(|compile::Program(e, _)| e.uses_solar());
@@ -216,7 +218,12 @@ impl Node {
             inputs: vec![None; inputs.len()],
             outputs: out_chans,
             in_stream,
-            time_ch: if needs_time { Some(c_time) } else { None },
+            time_ch: match needs_time {
+                None | Some(tod::TimeField::Forever) => None,
+                Some(tf) => {
+                    Some(tod::time_filter(BroadcastStream::new(c_time), tf))
+                }
+            },
             solar_ch: if needs_solar { Some(c_solar) } else { None },
             exprs,
         })
@@ -249,7 +256,7 @@ impl Node {
 		// If we need the time channel, wait for the next
 		// second.
 
-		Ok(v) = self.time_ch.as_mut().unwrap().recv(),
+		Some(v) = self.time_ch.as_mut().unwrap().next(),
 		            if self.time_ch.is_some() => {
 		    time = v;
 		    debug!("updated time");
