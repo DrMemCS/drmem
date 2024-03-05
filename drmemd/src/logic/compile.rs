@@ -141,7 +141,7 @@ impl Expr {
         match self {
             Expr::SolarVal(..) => true,
             Expr::TimeVal(..) | Expr::Lit(_) | Expr::Var(_) => false,
-            Expr::Not(e) => e.uses_time(),
+            Expr::Not(e) => e.uses_solar(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
             | Expr::Rem(a, b)
@@ -151,7 +151,7 @@ impl Expr {
             | Expr::LtEq(a, b)
             | Expr::Eq(a, b)
             | Expr::And(a, b)
-            | Expr::Or(a, b) => a.uses_time() || b.uses_time(),
+            | Expr::Or(a, b) => a.uses_solar() || b.uses_solar(),
         }
     }
 
