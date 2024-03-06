@@ -206,7 +206,7 @@ impl Node {
 
         let needs_time = exprs
             .iter()
-            .map(|compile::Program(e, _)| e.uses_time())
+            .filter_map(|compile::Program(e, _)| e.uses_time())
             .min();
 
         let needs_solar =
@@ -219,7 +219,7 @@ impl Node {
             outputs: out_chans,
             in_stream,
             time_ch: match needs_time {
-                None | Some(tod::TimeField::Forever) => None,
+                None => None,
                 Some(tf) => {
                     Some(tod::time_filter(BroadcastStream::new(c_time), tf))
                 }

@@ -33,7 +33,6 @@ pub enum TimeField {
     Day,
     Month,
     Year,
-    Forever,
 }
 
 pub struct TimeFilter {
@@ -67,7 +66,6 @@ impl TimeFilter {
                 TimeField::Year => {
                     v.0.year() != curr.0.year() || v.1.year() != curr.1.year()
                 }
-                TimeField::Forever => false,
             }
         } else {
             true
