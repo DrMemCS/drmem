@@ -7,7 +7,7 @@
 use chrono::{Datelike, Timelike};
 use std::sync::Arc;
 use tokio::{sync::broadcast, time};
-use tracing::{info, info_span, warn};
+use tracing::{debug, info, info_span, warn};
 use tracing_futures::Instrument;
 
 pub struct SolarInfo {
@@ -97,7 +97,7 @@ fn get_solar_position(
     let azimuth: f64 =
         (f64::atan2(-sx, -sy).to_degrees() + 180.0).rem_euclid(360.0);
 
-    info!(
+    debug!(
         "alt: {:.2}, az: {:.2}, ra: {:.2}, dec: {:.2}",
         round(elevation, 0.02),
         round(azimuth, 0.1),

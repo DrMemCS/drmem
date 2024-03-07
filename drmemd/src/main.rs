@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 #[cfg(feature = "graphql")]
 #[macro_use]
 extern crate lazy_static;

@@ -116,10 +116,20 @@ impl Expr {
     // Traverses an expression and returns `true` if it uses any
     // `TimeVal()` variants.
 
-    pub fn uses_time(&self) -> bool {
+    pub fn uses_time(&self) -> Option<tod::TimeField> {
         match self {
-            Expr::TimeVal(..) => true,
-            Expr::SolarVal(..) | Expr::Lit(_) | Expr::Var(_) => false,
+            Expr::TimeVal(_, "second", _) => Some(tod::TimeField::Second),
+            Expr::TimeVal(_, "minute", _) => Some(tod::TimeField::Minute),
+            Expr::TimeVal(_, "hour", _) => Some(tod::TimeField::Hour),
+            Expr::TimeVal(_, "day", _)
+            | Expr::TimeVal(_, "DOW", _)
+            | Expr::TimeVal(_, "DOY", _) => Some(tod::TimeField::Day),
+            Expr::TimeVal(_, "month", _) => Some(tod::TimeField::Month),
+            Expr::TimeVal(_, "year", _) => Some(tod::TimeField::Year),
+            Expr::TimeVal(_, _, _)
+            | Expr::SolarVal(..)
+            | Expr::Lit(_)
+            | Expr::Var(_) => None,
             Expr::Not(e) => e.uses_time(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
@@ -130,7 +140,12 @@ impl Expr {
             | Expr::LtEq(a, b)
             | Expr::Eq(a, b)
             | Expr::And(a, b)
-            | Expr::Or(a, b) => a.uses_time() || b.uses_time(),
+            | Expr::Or(a, b) => match (a.uses_time(), b.uses_time()) {
+                (None, None) => None,
+                (a, None) => a,
+                (None, b) => b,
+                (Some(a), Some(b)) => Some(a.min(b)),
+            },
         }
     }
 
@@ -141,7 +156,7 @@ impl Expr {
         match self {
             Expr::SolarVal(..) => true,
             Expr::TimeVal(..) | Expr::Lit(_) | Expr::Var(_) => false,
-            Expr::Not(e) => e.uses_time(),
+            Expr::Not(e) => e.uses_solar(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
             | Expr::Rem(a, b)
@@ -151,7 +166,7 @@ impl Expr {
             | Expr::LtEq(a, b)
             | Expr::Eq(a, b)
             | Expr::And(a, b)
-            | Expr::Or(a, b) => a.uses_time() || b.uses_time(),
+            | Expr::Or(a, b) => a.uses_solar() || b.uses_solar(),
         }
     }
 
@@ -266,13 +281,10 @@ impl Program {
         let (res, errs) = logic_y::parse(&lexer, env);
 
         res.unwrap_or_else(|| {
-            let res = errs.iter().fold(
-                format!("expression '{}' couldn't compile", s),
-                |mut acc, e| {
-                    acc.push_str(&format!("\n    {}", &e));
-                    acc
-                },
-            );
+            let res = errs.iter().fold(s.to_owned(), |mut acc, e| {
+                acc.push_str(&format!("\n    {}", &e));
+                acc
+            });
 
             Err(Error::ParseError(res))
         })
@@ -766,6 +778,18 @@ mod tests {
     use drmem_api::device;
     use palette::LinSrgb;
     use std::sync::Arc;
+
+    fn to_expr(expr: &str) -> Expr {
+        let env: Env = (
+            &[String::from("a"), String::from("b")],
+            &[String::from("c")],
+        );
+
+        match Program::compile(&format!("{} -> {{c}}", expr), &env) {
+            Ok(Program(expr, _)) => expr,
+            Err(_) => panic!("couldn't parse {}", expr),
+        }
+    }
 
     #[test]
     fn test_parser() {
@@ -2412,12 +2436,15 @@ mod tests {
         ];
 
         for (in_val, out_val) in TESTS {
-            assert_eq!(
-                Program::compile(in_val, &env).unwrap().to_string(),
-                *out_val,
-                "failed on: {}",
-                in_val
-            )
+            match Program::compile(in_val, &env) {
+                Ok(prog) => assert_eq!(
+                    prog.to_string(),
+                    *out_val,
+                    "failed on: {}",
+                    in_val
+                ),
+                Err(e) => panic!("{}", &e),
+            }
         }
     }
 
@@ -2576,5 +2603,54 @@ mod tests {
             evaluate("{solar:dec}", &time, Some(&solar)),
             Some(device::Value::Flt(4.0))
         );
+    }
+
+    #[test]
+    fn test_time_usage() {
+        const DATA: &[(&str, Option<tod::TimeField>)] = &[
+            // Make sure literals, variables, and solar values don't
+            // return a field.
+            ("{a}", None),
+            ("1", None),
+            ("1.0", None),
+            ("true", None),
+            ("#green", None),
+            ("\"test\"", None),
+            ("{solar:alt}", None),
+            // Make sure the time values return the proper field.
+            ("{utc:second}", Some(tod::TimeField::Second)),
+            ("{utc:minute}", Some(tod::TimeField::Minute)),
+            ("{utc:hour}", Some(tod::TimeField::Hour)),
+            ("{utc:day}", Some(tod::TimeField::Day)),
+            ("{utc:DOW}", Some(tod::TimeField::Day)),
+            ("{utc:DOY}", Some(tod::TimeField::Day)),
+            ("{utc:month}", Some(tod::TimeField::Month)),
+            ("{utc:year}", Some(tod::TimeField::Year)),
+            ("{local:second}", Some(tod::TimeField::Second)),
+            ("{local:minute}", Some(tod::TimeField::Minute)),
+            ("{local:hour}", Some(tod::TimeField::Hour)),
+            ("{local:day}", Some(tod::TimeField::Day)),
+            ("{local:DOW}", Some(tod::TimeField::Day)),
+            ("{local:DOY}", Some(tod::TimeField::Day)),
+            ("{local:month}", Some(tod::TimeField::Month)),
+            ("{local:year}", Some(tod::TimeField::Year)),
+            // Now test more complicated expressions to make sure each
+            // subtree is correctly compared.
+            ("not (2 > 3)", None),
+            ("2 + 2", None),
+            ("{utc:second} + 2", Some(tod::TimeField::Second)),
+            ("2 + {utc:second}", Some(tod::TimeField::Second)),
+            ("{local:hour} + {utc:minute}", Some(tod::TimeField::Minute)),
+            ("{local:minute} + {utc:day}", Some(tod::TimeField::Minute)),
+        ];
+
+        for (expr, result) in DATA {
+            assert_eq!(
+                &to_expr(expr).uses_time(),
+                result,
+                "error using {}",
+                expr
+            );
+        }
     }
 }

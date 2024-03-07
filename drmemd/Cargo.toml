@@ -25,7 +25,7 @@ toml = { workspace = true, features = ["parse"] }
 
 tokio = { workspace = true, features = ["rt-multi-thread", "time",
 "fs", "macros"] }
-tokio-stream = { workspace = true, features = ["net"] }
+tokio-stream = { workspace = true, features = ["net", "sync"] }
 tracing.workspace = true
 tracing-futures = { workspace = true, features = ["std-future", "std"] }
 tracing-subscriber = { workspace = true, features = ["ansi"] }
