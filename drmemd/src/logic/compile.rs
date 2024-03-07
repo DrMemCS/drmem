@@ -779,6 +779,18 @@ mod tests {
     use palette::LinSrgb;
     use std::sync::Arc;
 
+    fn to_expr(expr: &str) -> Expr {
+        let env: Env = (
+            &[String::from("a"), String::from("b")],
+            &[String::from("c")],
+        );
+
+        match Program::compile(&format!("{} -> {{c}}", expr), &env) {
+            Ok(Program(expr, _)) => expr,
+            Err(_) => panic!("couldn't parse {}", expr),
+        }
+    }
+
     #[test]
     fn test_parser() {
         let env: Env = (
@@ -2591,5 +2603,54 @@ mod tests {
             evaluate("{solar:dec}", &time, Some(&solar)),
             Some(device::Value::Flt(4.0))
         );
+    }
+
+    #[test]
+    fn test_time_usage() {
+        const DATA: &[(&str, Option<tod::TimeField>)] = &[
+            // Make sure literals, variables, and solar values don't
+            // return a field.
+            ("{a}", None),
+            ("1", None),
+            ("1.0", None),
+            ("true", None),
+            ("#green", None),
+            ("\"test\"", None),
+            ("{solar:alt}", None),
+            // Make sure the time values return the proper field.
+            ("{utc:second}", Some(tod::TimeField::Second)),
+            ("{utc:minute}", Some(tod::TimeField::Minute)),
+            ("{utc:hour}", Some(tod::TimeField::Hour)),
+            ("{utc:day}", Some(tod::TimeField::Day)),
+            ("{utc:DOW}", Some(tod::TimeField::Day)),
+            ("{utc:DOY}", Some(tod::TimeField::Day)),
+            ("{utc:month}", Some(tod::TimeField::Month)),
+            ("{utc:year}", Some(tod::TimeField::Year)),
+            ("{local:second}", Some(tod::TimeField::Second)),
+            ("{local:minute}", Some(tod::TimeField::Minute)),
+            ("{local:hour}", Some(tod::TimeField::Hour)),
+            ("{local:day}", Some(tod::TimeField::Day)),
+            ("{local:DOW}", Some(tod::TimeField::Day)),
+            ("{local:DOY}", Some(tod::TimeField::Day)),
+            ("{local:month}", Some(tod::TimeField::Month)),
+            ("{local:year}", Some(tod::TimeField::Year)),
+            // Now test more complicated expressions to make sure each
+            // subtree is correctly compared.
+            ("not (2 > 3)", None),
+            ("2 + 2", None),
+            ("{utc:second} + 2", Some(tod::TimeField::Second)),
+            ("2 + {utc:second}", Some(tod::TimeField::Second)),
+            ("{local:hour} + {utc:minute}", Some(tod::TimeField::Minute)),
+            ("{local:minute} + {utc:day}", Some(tod::TimeField::Minute)),
+        ];
+
+        for (expr, result) in DATA {
+            assert_eq!(
+                &to_expr(expr).uses_time(),
+                result,
+                "error using {}",
+                expr
+            );
+        }
     }
 }
