@@ -25,7 +25,7 @@ pub type Info = Arc<(
 // from recalculating all its expressions every second when it really
 // only needed to do it once an hour.
 
-#[derive(Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum TimeField {
     Second,
     Minute,
@@ -157,6 +157,152 @@ pub fn create_task() -> (broadcast::Sender<Info>, broadcast::Receiver<Info>) {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test_tod() {}
+    use super::{time_filter, Info, TimeField};
+    use chrono::{Local, TimeZone, Utc};
+    use core::pin::Pin;
+    use futures::future::poll_fn;
+    use std::sync::Arc;
+    use tokio::sync::broadcast;
+    use tokio_stream::{wrappers::BroadcastStream, Stream};
+
+    fn mk_info(yr: i32, mo: u32, da: u32, hr: u32, mn: u32, se: u32) -> Info {
+        Arc::new((
+            Utc::with_ymd_and_hms(&Utc, yr, mo, da, hr, mn, se)
+                .single()
+                .unwrap(),
+            Local::with_ymd_and_hms(&Local, yr, mo, da, hr, mn, se)
+                .single()
+                .unwrap(),
+        ))
+    }
+
+    async fn test_one_filter(
+        inputs: &[Info],
+        outputs: &[Option<Info>],
+        field: TimeField,
+    ) {
+        let (tx, rx) = broadcast::channel::<Info>(inputs.len());
+        let mut strm = time_filter(BroadcastStream::new(rx), field.clone());
+
+        for input in inputs {
+            assert!(tx.send(input.clone()).is_ok());
+        }
+
+        for output in outputs {
+            let fut = poll_fn(|cx| Pin::new(&mut strm).poll_next(cx));
+
+            assert_eq!(fut.await, *output, "error in {:?} test", field);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stream() {
+        // This checks that all changes in the seconds field results
+        // in a value returned from the stream.
+
+        {
+            let t1: Info = mk_info(2000, 1, 1, 0, 0, 1);
+            let t2: Info = mk_info(2001, 2, 2, 1, 1, 1);
+            let t3: Info = mk_info(2000, 1, 1, 0, 0, 2);
+
+            test_one_filter(
+                &[t1.clone(), t2.clone(), t3.clone()],
+                &[Some(t1.clone()), Some(t3.clone())],
+                TimeField::Second,
+            )
+            .await
+        }
+
+        // This checks that all changes in the minutes field results
+        // in a value returned from the stream.
+
+        {
+            let t1: Info = mk_info(2000, 1, 1, 0, 0, 1);
+            let t2: Info = mk_info(2000, 1, 1, 0, 0, 2);
+            let t3: Info = mk_info(2000, 1, 1, 0, 1, 0);
+            let t4: Info = mk_info(2001, 2, 2, 1, 1, 1);
+            let t5: Info = mk_info(2000, 1, 1, 0, 2, 0);
+
+            test_one_filter(
+                &[t1.clone(), t2.clone(), t3.clone(), t4.clone(), t5.clone()],
+                &[Some(t1.clone()), Some(t3.clone()), Some(t5.clone())],
+                TimeField::Minute,
+            )
+            .await
+        }
+
+        // This checks that all changes in the hours field results in
+        // a value returned from the stream.
+
+        {
+            let t1: Info = mk_info(2000, 1, 1, 0, 0, 1);
+            let t2: Info = mk_info(2000, 1, 1, 0, 0, 2);
+            let t3: Info = mk_info(2000, 1, 1, 0, 1, 0);
+            let t4: Info = mk_info(2000, 1, 1, 1, 0, 0);
+            let t5: Info = mk_info(2001, 2, 3, 1, 2, 0);
+            let t6: Info = mk_info(2000, 1, 1, 2, 2, 0);
+
+            test_one_filter(
+                &[
+                    t1.clone(),
+                    t2.clone(),
+                    t3.clone(),
+                    t4.clone(),
+                    t5.clone(),
+                    t6.clone(),
+                ],
+                &[Some(t1.clone()), Some(t4.clone()), Some(t6.clone())],
+                TimeField::Hour,
+            )
+            .await
+        }
+
+        // This checks that all changes in the days field results in a
+        // value returned from the stream.
+
+        {
+            let t1: Info = mk_info(2000, 1, 1, 0, 0, 1);
+            let t2: Info = mk_info(2002, 2, 1, 2, 2, 2);
+            let t3: Info = mk_info(2000, 1, 2, 0, 1, 0);
+
+            test_one_filter(
+                &[t1.clone(), t2.clone(), t3.clone()],
+                &[Some(t1.clone()), Some(t3.clone())],
+                TimeField::Day,
+            )
+            .await
+        }
+
+        // This checks that all changes in the months field results in
+        // a value returned from the stream.
+
+        {
+            let t1: Info = mk_info(2000, 1, 1, 0, 0, 1);
+            let t2: Info = mk_info(2002, 1, 2, 2, 2, 2);
+            let t3: Info = mk_info(2000, 2, 2, 0, 1, 0);
+
+            test_one_filter(
+                &[t1.clone(), t2.clone(), t3.clone()],
+                &[Some(t1.clone()), Some(t3.clone())],
+                TimeField::Month,
+            )
+            .await
+        }
+
+        // This checks that all changes in the years field results in
+        // a value returned from the stream.
+
+        {
+            let t1: Info = mk_info(2000, 1, 1, 0, 0, 1);
+            let t2: Info = mk_info(2000, 2, 2, 2, 2, 2);
+            let t3: Info = mk_info(2002, 2, 2, 0, 1, 0);
+
+            test_one_filter(
+                &[t1.clone(), t2.clone(), t3.clone()],
+                &[Some(t1.clone()), Some(t3.clone())],
+                TimeField::Year,
+            )
+            .await
+        }
+    }
 }
