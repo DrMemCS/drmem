@@ -209,7 +209,7 @@ fn parse_color(s: &[u8]) -> Option<Value> {
     }
 
     if s.len() == 6 {
-        result <<= 8;
+        result = (result << 8) + 255;
     }
 
     Some(Value::Color(palette::LinSrgba::new(
@@ -264,7 +264,11 @@ mod tests {
 
         assert_eq!(
             "\"#010203\"",
-            format!("{}", Value::Color(palette::LinSrgb::new(1, 2, 3)))
+            format!("{}", Value::Color(palette::LinSrgba::new(1, 2, 3, 255)))
+        );
+        assert_eq!(
+            "\"#01020304\"",
+            format!("{}", Value::Color(palette::LinSrgba::new(1, 2, 3, 4)))
         );
     }
 
@@ -289,10 +293,11 @@ mod tests {
             let r: u8 = ii;
             let g: u8 = ii ^ 0xa5u8;
             let b: u8 = 255u8 - ii;
+            let a: u8 = ii ^ 0x81u8;
 
             assert_eq!(
-                Value::Color(palette::LinSrgb::new(r, g, b)),
-                Value::from(palette::LinSrgb::new(r, g, b))
+                Value::Color(palette::LinSrgba::new(r, g, b, a)),
+                Value::from(palette::LinSrgba::new(r, g, b, a))
             );
         }
     }
@@ -437,7 +442,7 @@ mod tests {
                     r, g, b
                 )))
                 .unwrap(),
-                Value::Color(palette::LinSrgb::new(r, g, b))
+                Value::Color(palette::LinSrgba::new(r, g, b, 255))
             );
             assert_eq!(
                 Value::try_from(&toml::value::Value::String(format!(
@@ -445,7 +450,7 @@ mod tests {
                     r, g, b
                 )))
                 .unwrap(),
-                Value::Color(palette::LinSrgb::new(r, g, b))
+                Value::Color(palette::LinSrgba::new(r, g, b, 255))
             );
         }
 
