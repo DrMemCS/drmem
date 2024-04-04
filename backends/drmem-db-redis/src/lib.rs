@@ -1299,25 +1299,25 @@ mod tests {
         }
     }
 
-    const COLOR_TEST_CASES: &[((u8, u8, u8), [u8; 4])] = &[
-        ((0, 0, 0), [b'C', 0, 0, 0]),
-        ((4, 2, 1), [b'C', 4, 2, 1]),
-        ((8, 4, 2), [b'C', 8, 4, 2]),
-        ((12, 6, 3), [b'C', 12, 6, 3]),
-        ((16, 8, 4), [b'C', 16, 8, 4]),
-        ((20, 10, 5), [b'C', 20, 10, 5]),
-        ((24, 12, 6), [b'C', 24, 12, 6]),
-        ((28, 14, 7), [b'C', 28, 14, 7]),
-        ((32, 16, 8), [b'C', 32, 16, 8]),
+    const COLOR_TEST_CASES: &[((u8, u8, u8, u8), [u8; 5])] = &[
+        ((0, 0, 0, 0), [b'C', 0, 0, 0, 0]),
+        ((4, 2, 1, 100), [b'C', 4, 2, 1, 100]),
+        ((8, 4, 2, 200), [b'C', 8, 4, 2, 200]),
+        ((12, 6, 3, 30), [b'C', 12, 6, 3, 30]),
+        ((16, 8, 4, 255), [b'C', 16, 8, 4, 255]),
+        ((20, 10, 5, 255), [b'C', 20, 10, 5, 255]),
+        ((24, 12, 6, 80), [b'C', 24, 12, 6, 80]),
+        ((28, 14, 7, 90), [b'C', 28, 14, 7, 90]),
+        ((32, 16, 8, 0), [b'C', 32, 16, 8, 0]),
     ];
 
     #[test]
     fn test_color_encoder() {
-        for ((r, g, b), rv) in COLOR_TEST_CASES {
+        for ((r, g, b, a), rv) in COLOR_TEST_CASES {
             assert_eq!(
                 &rv[..],
-                to_redis(&device::Value::Color(palette::LinSrgb::new(
-                    *r, *g, *b
+                to_redis(&device::Value::Color(palette::LinSrgba::new(
+                    *r, *g, *b, *a
                 )))
             );
         }
@@ -1325,10 +1325,10 @@ mod tests {
 
     #[test]
     fn test_color_decoder() {
-        for ((r, g, b), rv) in COLOR_TEST_CASES {
+        for ((r, g, b, a), rv) in COLOR_TEST_CASES {
             assert_eq!(
                 from_value(&redis::Value::Data(rv.to_vec())).unwrap(),
-                device::Value::Color(palette::LinSrgb::new(*r, *g, *b))
+                device::Value::Color(palette::LinSrgba::new(*r, *g, *b, *a))
             );
         }
     }
