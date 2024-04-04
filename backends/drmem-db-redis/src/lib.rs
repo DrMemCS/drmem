@@ -103,10 +103,10 @@ fn to_redis(val: &device::Value) -> Vec<u8> {
             buf
         }
 
-        // Colors start with a 'C', followed by 3 u8 values,
-        // representing red, green, and blue intensities,
+        // Colors start with a 'C', followed by 4 u8 values,
+        // representing red, green, blue, and alpha intensities,
         // respectively.
-        device::Value::Color(v) => vec![b'C', v.red, v.green, v.blue],
+        device::Value::Color(v) => vec![b'C', v.red, v.green, v.blue, v.alpha],
     }
 }
 
@@ -152,12 +152,18 @@ fn decode_string(buf: &[u8]) -> Result<device::Value> {
 }
 
 fn decode_color(buf: &[u8]) -> Result<device::Value> {
-    if buf.len() >= 3 {
-        let rgb = palette::LinSrgb::new(buf[0], buf[1], buf[2]);
+    match buf {
+        &[r, g, b] => {
+            let rgb = palette::LinSrgba::new(r, b, g, 255);
 
-        Ok(device::Value::Color(rgb))
-    } else {
-        Err(Error::TypeError)
+            Ok(device::Value::Color(rgb))
+        }
+        &[r, g, b, a] => {
+            let rgb = palette::LinSrgba::new(r, b, g, a);
+
+            Ok(device::Value::Color(rgb))
+        }
+        _ => Err(Error::TypeError),
     }
 }
 

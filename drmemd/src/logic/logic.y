@@ -147,19 +147,25 @@ Factor -> Result<Expr>:
     {
 	let s = get_str("literal color", $1, $lexer)?;
 
-	match LinSrgb::<u8>::from_str(s) {
+	match LinSrgba::<u8>::from_str(s) {
 	    Ok(v) => Ok(Expr::Lit(device::Value::Color(v))),
 	    Err(_) =>
-		match named::from_str(s) {
-		    Some(v) => Ok(Expr::Lit(device::Value::Color(
-		        Srgb::<f32>::from_format(v)
-			    .into_linear()
-			    .into_format()
-		    ))),
-		    None => Err(Error::ParseError(
-			format!("invalid color '{}'", s)
-		    ))
-		}
+		match LinSrgb::<u8>::from_str(s) {
+		    Ok(v) =>
+		        Ok(Expr::Lit(device::Value::Color(v.with_alpha(255u8)))),
+		    Err(_) =>
+		        match named::from_str(s) {
+		            Some(v) => Ok(Expr::Lit(device::Value::Color(
+		                Srgb::<f32>::from_format(v)
+			            .into_linear()
+			            .into_format::<u8>()
+			            .with_alpha(255u8)
+		            ))),
+		            None => Err(Error::ParseError(
+			        format!("invalid color '{}'", s)
+		            ))
+		        }
+	        }
 	}
     }
     | Device { $1 }
@@ -190,7 +196,7 @@ Unknown -> ():
 
 use drmem_api::{Result, Error, device};
 use chrono::{Timelike, Datelike};
-use palette::{LinSrgb, Srgb, named};
+use palette::{LinSrgba, LinSrgb, Srgb, named, WithAlpha};
 use super::{super::tod, super::solar, Expr, Program};
 use std::str::FromStr;
 
