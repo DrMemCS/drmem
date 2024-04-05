@@ -427,6 +427,14 @@ mod tests {
             Value::try_from(&toml::value::Value::String("#1234567".into())),
             Ok(Value::Str("#1234567".into()))
         );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#123456789".into())),
+            Ok(Value::Str("#123456789".into()))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#1234567z".into())),
+            Ok(Value::Str("#1234567z".into()))
+        );
 
         // Cycle through 256 semi-random colors. Make sure the parsing
         // handles upper and lower case hex digits.
@@ -435,6 +443,7 @@ mod tests {
             let r: u8 = ii;
             let g: u8 = ii ^ 0xa5u8;
             let b: u8 = 255u8 - ii;
+            let a: u8 = ii ^ 0xc3u8;
 
             assert_eq!(
                 Value::try_from(&toml::value::Value::String(format!(
@@ -451,6 +460,22 @@ mod tests {
                 )))
                 .unwrap(),
                 Value::Color(palette::LinSrgba::new(r, g, b, 255))
+            );
+            assert_eq!(
+                Value::try_from(&toml::value::Value::String(format!(
+                    "#{:02x}{:02x}{:02x}{:02x}",
+                    r, g, b, a
+                )))
+                .unwrap(),
+                Value::Color(palette::LinSrgba::new(r, g, b, a))
+            );
+            assert_eq!(
+                Value::try_from(&toml::value::Value::String(format!(
+                    "#{:02X}{:02X}{:02X}{:02X}",
+                    r, g, b, a
+                )))
+                .unwrap(),
+                Value::Color(palette::LinSrgba::new(r, g, b, a))
             );
         }
 
