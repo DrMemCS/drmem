@@ -776,7 +776,7 @@ pub fn optimize(e: Expr) -> Expr {
 mod tests {
     use super::*;
     use drmem_api::device;
-    use palette::LinSrgb;
+    use palette::LinSrgba;
     use std::sync::Arc;
 
     fn to_expr(expr: &str) -> Expr {
@@ -889,31 +889,58 @@ mod tests {
             Ok(Program(Expr::Lit(device::Value::Int(10)), 0))
         );
 
+        assert!(Program::compile("#1 -> {bulb}", &env).is_err());
+        assert!(Program::compile("#12 -> {bulb}", &env).is_err());
+        assert!(Program::compile("#12345 -> {bulb}", &env).is_err());
         assert_eq!(
-            Program::compile("#000 -> {bulb}", &env),
+            Program::compile("#123 -> {bulb}", &env),
             Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgb::new(0, 0, 0))),
+                Expr::Lit(device::Value::Color(LinSrgba::new(
+                    0x11, 0x22, 0x33, 255
+                ))),
+                0
+            ))
+        );
+        assert_eq!(
+            Program::compile("#1234 -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgba::new(
+                    0x11, 0x22, 0x33, 0x44
+                ))),
                 0
             ))
         );
         assert_eq!(
             Program::compile("#7f8081 -> {bulb}", &env),
             Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgb::new(127, 128, 129))),
+                Expr::Lit(device::Value::Color(LinSrgba::new(
+                    127, 128, 129, 255
+                ))),
+                0
+            ))
+        );
+        assert_eq!(
+            Program::compile("#7f808182 -> {bulb}", &env),
+            Ok(Program(
+                Expr::Lit(device::Value::Color(LinSrgba::new(
+                    127, 128, 129, 130
+                ))),
                 0
             ))
         );
         assert_eq!(
             Program::compile("#7F80A0 -> {bulb}", &env),
             Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgb::new(127, 128, 160))),
+                Expr::Lit(device::Value::Color(LinSrgba::new(
+                    127, 128, 160, 255
+                ))),
                 0
             ))
         );
         assert_eq!(
             Program::compile("#black -> {bulb}", &env),
             Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgb::new(0, 0, 0))),
+                Expr::Lit(device::Value::Color(LinSrgba::new(0, 0, 0, 255))),
                 0
             ))
         );

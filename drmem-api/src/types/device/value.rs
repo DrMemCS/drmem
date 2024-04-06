@@ -32,7 +32,7 @@ pub enum Value {
     Str(String),
 
     /// For devices that render color values.
-    Color(palette::LinSrgb<u8>),
+    Color(palette::LinSrgba<u8>),
 }
 
 impl fmt::Display for Value {
@@ -43,7 +43,11 @@ impl fmt::Display for Value {
             Value::Flt(v) => write!(f, "{}", v),
             Value::Str(v) => write!(f, "\"{}\"", v),
             Value::Color(v) => {
-                write!(f, "\"#{:02x}{:02x}{:02x}\"", v.red, v.green, v.blue)
+                write!(f, "\"#{:02x}{:02x}{:02x}", v.red, v.green, v.blue)?;
+                if v.alpha < 255 {
+                    write!(f, "{:02x}", v.alpha)?;
+                }
+                write!(f, "\"")
             }
         }
     }
@@ -164,13 +168,13 @@ impl From<&str> for Value {
     }
 }
 
-impl From<palette::LinSrgb<u8>> for Value {
-    fn from(value: palette::LinSrgb<u8>) -> Self {
+impl From<palette::LinSrgba<u8>> for Value {
+    fn from(value: palette::LinSrgba<u8>) -> Self {
         Value::Color(value)
     }
 }
 
-impl TryFrom<Value> for palette::LinSrgb<u8> {
+impl TryFrom<Value> for palette::LinSrgba<u8> {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
@@ -182,12 +186,12 @@ impl TryFrom<Value> for palette::LinSrgb<u8> {
     }
 }
 
-// Parses a color from a string. The only form currently supported is
-// "#RRGGBB" where the red, green, and blue portions are two hex
-// digits. Even though this function takes a slice, it's a private
-// function and we know we only call it when the slice has exactly 6
-// hex digits so we don't have to test to see if the result exceeds
-// 0xffffff.
+// Parses a color from a string. The only forms currently supported
+// are "#RRGGBB" and "#RRGGBBAA" where the red, green, blue, and alpha
+// portions are two hex digits. Even though this function takes a
+// slice, it's a private function and we know we only call it when the
+// slice has exactly 6 or 8 hex digits so we don't have to test to see
+// if the result exceeds 0xffffff.
 
 fn parse_color(s: &[u8]) -> Option<Value> {
     let mut result = 0u32;
@@ -204,7 +208,12 @@ fn parse_color(s: &[u8]) -> Option<Value> {
         }
     }
 
-    Some(Value::Color(palette::LinSrgb::new(
+    if s.len() == 6 {
+        result = (result << 8) + 255;
+    }
+
+    Some(Value::Color(palette::LinSrgba::new(
+        (result >> 24) as u8,
         (result >> 16) as u8,
         (result >> 8) as u8,
         result as u8,
@@ -222,7 +231,8 @@ impl TryFrom<&toml::value::Value> for Value {
                 .map_err(|_| Error::TypeError),
             toml::value::Value::Float(v) => Ok(Value::Flt(*v)),
             toml::value::Value::String(v) => match v.as_bytes() {
-                tmp @ &[b'#', _, _, _, _, _, _] => {
+                tmp @ &[b'#', _, _, _, _, _, _]
+                | tmp @ &[b'#', _, _, _, _, _, _, _, _] => {
                     if let Some(v) = parse_color(&tmp[1..]) {
                         Ok(v)
                     } else {
@@ -254,7 +264,11 @@ mod tests {
 
         assert_eq!(
             "\"#010203\"",
-            format!("{}", Value::Color(palette::LinSrgb::new(1, 2, 3)))
+            format!("{}", Value::Color(palette::LinSrgba::new(1, 2, 3, 255)))
+        );
+        assert_eq!(
+            "\"#01020304\"",
+            format!("{}", Value::Color(palette::LinSrgba::new(1, 2, 3, 4)))
         );
     }
 
@@ -279,10 +293,11 @@ mod tests {
             let r: u8 = ii;
             let g: u8 = ii ^ 0xa5u8;
             let b: u8 = 255u8 - ii;
+            let a: u8 = ii ^ 0x81u8;
 
             assert_eq!(
-                Value::Color(palette::LinSrgb::new(r, g, b)),
-                Value::from(palette::LinSrgb::new(r, g, b))
+                Value::Color(palette::LinSrgba::new(r, g, b, a)),
+                Value::from(palette::LinSrgba::new(r, g, b, a))
             );
         }
     }
@@ -412,6 +427,14 @@ mod tests {
             Value::try_from(&toml::value::Value::String("#1234567".into())),
             Ok(Value::Str("#1234567".into()))
         );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#123456789".into())),
+            Ok(Value::Str("#123456789".into()))
+        );
+        assert_eq!(
+            Value::try_from(&toml::value::Value::String("#1234567z".into())),
+            Ok(Value::Str("#1234567z".into()))
+        );
 
         // Cycle through 256 semi-random colors. Make sure the parsing
         // handles upper and lower case hex digits.
@@ -420,6 +443,7 @@ mod tests {
             let r: u8 = ii;
             let g: u8 = ii ^ 0xa5u8;
             let b: u8 = 255u8 - ii;
+            let a: u8 = ii ^ 0xc3u8;
 
             assert_eq!(
                 Value::try_from(&toml::value::Value::String(format!(
@@ -427,7 +451,7 @@ mod tests {
                     r, g, b
                 )))
                 .unwrap(),
-                Value::Color(palette::LinSrgb::new(r, g, b))
+                Value::Color(palette::LinSrgba::new(r, g, b, 255))
             );
             assert_eq!(
                 Value::try_from(&toml::value::Value::String(format!(
@@ -435,7 +459,23 @@ mod tests {
                     r, g, b
                 )))
                 .unwrap(),
-                Value::Color(palette::LinSrgb::new(r, g, b))
+                Value::Color(palette::LinSrgba::new(r, g, b, 255))
+            );
+            assert_eq!(
+                Value::try_from(&toml::value::Value::String(format!(
+                    "#{:02x}{:02x}{:02x}{:02x}",
+                    r, g, b, a
+                )))
+                .unwrap(),
+                Value::Color(palette::LinSrgba::new(r, g, b, a))
+            );
+            assert_eq!(
+                Value::try_from(&toml::value::Value::String(format!(
+                    "#{:02X}{:02X}{:02X}{:02X}",
+                    r, g, b, a
+                )))
+                .unwrap(),
+                Value::Color(palette::LinSrgba::new(r, g, b, a))
             );
         }
 

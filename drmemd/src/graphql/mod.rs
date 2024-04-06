@@ -332,6 +332,92 @@ impl Control {
             Err(FieldError::new("badly formed device name", Value::null()))
         }
     }
+
+    // Helper function which returns a closure that converts a
+    // boolean value to a `Reading` type.
+
+    fn bool_to_reading(name: String) -> impl FnOnce(bool) -> Reading {
+        |v| Reading {
+            device: name,
+            stamp: Utc::now(),
+            int_value: None,
+            float_value: None,
+            bool_value: Some(v),
+            string_value: None,
+            color_value: None,
+        }
+    }
+
+    // Helper function which returns a closure that converts an
+    // integer to a `Reading` type.
+
+    fn int_to_reading(name: String) -> impl FnOnce(i32) -> Reading {
+        |v| Reading {
+            device: name,
+            stamp: Utc::now(),
+            int_value: Some(v),
+            float_value: None,
+            bool_value: None,
+            string_value: None,
+            color_value: None,
+        }
+    }
+
+    // Helper function which returns a closure that converts a
+    // floating point value to a `Reading` type.
+
+    fn flt_to_reading(name: String) -> impl FnOnce(f64) -> Reading {
+        |v| Reading {
+            device: name,
+            stamp: Utc::now(),
+            int_value: None,
+            float_value: Some(v),
+            bool_value: None,
+            string_value: None,
+            color_value: None,
+        }
+    }
+
+    // Helper function which returns a closure that converts a
+    // string value to a `Reading` type.
+
+    fn str_to_reading(name: String) -> impl FnOnce(String) -> Reading {
+        |v| Reading {
+            device: name,
+            stamp: Utc::now(),
+            int_value: None,
+            float_value: None,
+            bool_value: None,
+            string_value: Some(v),
+            color_value: None,
+        }
+    }
+
+    // Helper function which returns a closure that converts a color
+    // value to a `Reading` type.
+
+    fn color_to_reading(
+        name: String,
+    ) -> impl FnOnce(palette::LinSrgba<u8>) -> Reading {
+        |v| Reading {
+            device: name,
+            stamp: Utc::now(),
+            int_value: None,
+            float_value: None,
+            bool_value: None,
+            string_value: None,
+            color_value: Some(if v.alpha == 255 {
+                vec![v.red as i32, v.green as i32, v.blue as i32]
+            } else {
+                vec![
+                    v.red as i32,
+                    v.green as i32,
+                    v.blue as i32,
+                    v.alpha as i32,
+                ]
+            }),
+        }
+    }
 }
 
 #[juniper::graphql_object(
@@ -366,19 +452,9 @@ impl Control {
                 f_bool: None,
                 f_string: None,
                 f_color: None,
-            } => {
-                Control::perform_setting(db, &name, v)
-                    .await
-                    .map(|v| Reading {
-                        device: name,
-                        stamp: Utc::now(),
-                        int_value: Some(v),
-                        float_value: None,
-                        bool_value: None,
-                        string_value: None,
-                        color_value: None,
-                    })
-            }
+            } => Control::perform_setting(db, &name, v)
+                .await
+                .map(Control::int_to_reading(name)),
 
             SettingData {
                 f_int: None,
@@ -386,19 +462,9 @@ impl Control {
                 f_bool: None,
                 f_string: None,
                 f_color: None,
-            } => {
-                Control::perform_setting(db, &name, v)
-                    .await
-                    .map(|v| Reading {
-                        device: name,
-                        stamp: Utc::now(),
-                        int_value: None,
-                        float_value: Some(v),
-                        bool_value: None,
-                        string_value: None,
-                        color_value: None,
-                    })
-            }
+            } => Control::perform_setting(db, &name, v)
+                .await
+                .map(Control::flt_to_reading(name)),
 
             SettingData {
                 f_int: None,
@@ -406,19 +472,9 @@ impl Control {
                 f_bool: Some(v),
                 f_string: None,
                 f_color: None,
-            } => {
-                Control::perform_setting(db, &name, v)
-                    .await
-                    .map(|v| Reading {
-                        device: name,
-                        stamp: Utc::now(),
-                        int_value: None,
-                        float_value: None,
-                        bool_value: Some(v),
-                        string_value: None,
-                        color_value: None,
-                    })
-            }
+            } => Control::perform_setting(db, &name, v)
+                .await
+                .map(Control::bool_to_reading(name)),
 
             SettingData {
                 f_int: None,
@@ -426,19 +482,9 @@ impl Control {
                 f_bool: None,
                 f_string: Some(v),
                 f_color: None,
-            } => {
-                Control::perform_setting(db, &name, v)
-                    .await
-                    .map(|v| Reading {
-                        device: name,
-                        stamp: Utc::now(),
-                        int_value: None,
-                        float_value: None,
-                        bool_value: None,
-                        string_value: Some(v),
-                        color_value: None,
-                    })
-            }
+            } => Control::perform_setting(db, &name, v)
+                .await
+                .map(Control::str_to_reading(name)),
 
             SettingData {
                 f_int: None,
@@ -446,43 +492,51 @@ impl Control {
                 f_bool: None,
                 f_string: None,
                 f_color: Some(v),
-            } => {
-                if let &[r, g, b] = &v[..] {
+            } => match &v[..] {
+                &[r, g, b] => {
                     if let (Ok(r), Ok(g), Ok(b)) =
                         (u8::try_from(r), u8::try_from(g), u8::try_from(b))
                     {
                         Control::perform_setting(
                             db,
                             &name,
-                            palette::LinSrgb::<u8>::new(r, g, b),
+                            palette::LinSrgba::<u8>::new(r, g, b, 255),
                         )
                         .await
-                        .map(|v| Reading {
-                            device: name,
-                            stamp: Utc::now(),
-                            int_value: None,
-                            float_value: None,
-                            bool_value: None,
-                            string_value: None,
-                            color_value: Some(vec![
-                                v.red as i32,
-                                v.green as i32,
-                                v.blue as i32,
-                            ]),
-                        })
+                        .map(Control::color_to_reading(name))
                     } else {
                         Err(FieldError::new(
                             "color component is out of range",
                             Value::null(),
                         ))
                     }
-                } else {
-                    Err(FieldError::new(
-                        "color values only have three components",
-                        Value::null(),
-                    ))
                 }
-            }
+                &[r, g, b, a] => {
+                    if let (Ok(r), Ok(g), Ok(b), Ok(a)) = (
+                        u8::try_from(r),
+                        u8::try_from(g),
+                        u8::try_from(b),
+                        u8::try_from(a),
+                    ) {
+                        Control::perform_setting(
+                            db,
+                            &name,
+                            palette::LinSrgba::<u8>::new(r, g, b, a),
+                        )
+                        .await
+                        .map(Control::color_to_reading(name))
+                    } else {
+                        Err(FieldError::new(
+                            "color component is out of range",
+                            Value::null(),
+                        ))
+                    }
+                }
+                _ => Err(FieldError::new(
+                    "color values have three or four components",
+                    Value::null(),
+                )),
+            },
 
             SettingData { .. } => Err(FieldError::new(
                 "must only specify one item of data",
@@ -563,6 +617,19 @@ impl From<&device::Reading> for Reading {
                 string_value: Some(v.to_string()),
                 color_value: None,
             },
+            device::Value::Color(v) if v.alpha == 255 => Reading {
+                device: "".into(),
+                stamp: DateTime::<Utc>::from(value.ts),
+                int_value: None,
+                float_value: None,
+                bool_value: None,
+                string_value: None,
+                color_value: Some(vec![
+                    v.red as i32,
+                    v.green as i32,
+                    v.blue as i32,
+                ]),
+            },
             device::Value::Color(v) => Reading {
                 device: "".into(),
                 stamp: DateTime::<Utc>::from(value.ts),
@@ -574,6 +641,7 @@ impl From<&device::Reading> for Reading {
                     v.red as i32,
                     v.green as i32,
                     v.blue as i32,
+                    v.alpha as i32,
                 ]),
             },
         }
@@ -600,9 +668,17 @@ impl Subscription {
                 device::Value::Int(v) => reading.int_value = Some(v),
                 device::Value::Flt(v) => reading.float_value = Some(v),
                 device::Value::Str(v) => reading.string_value = Some(v),
-                device::Value::Color(v) => {
+                device::Value::Color(v) if v.alpha == 255 => {
                     reading.color_value =
                         Some(vec![v.red as i32, v.green as i32, v.blue as i32])
+                }
+                device::Value::Color(v) => {
+                    reading.color_value = Some(vec![
+                        v.red as i32,
+                        v.green as i32,
+                        v.blue as i32,
+                        v.alpha as i32,
+                    ])
                 }
             }
 
