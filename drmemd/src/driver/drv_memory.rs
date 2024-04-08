@@ -48,6 +48,13 @@ impl Instance {
             ))),
         }
     }
+
+    // Gets the initial value of the device from the configuration.
+
+    fn get_cfg_init_val(cfg: &DriverConfig) -> Option<device::Value> {
+        cfg.get("initial")
+            .and_then(|v| device::Value::try_from(v).ok())
+    }
 }
 
 impl driver::API for Instance {
@@ -59,6 +66,7 @@ impl driver::API for Instance {
         max_history: Option<usize>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
         let name = Instance::get_cfg_name(cfg);
+        let init_value = Instance::get_cfg_init_val(cfg);
 
         Box::pin(async move {
             let name = name?;
@@ -68,6 +76,13 @@ impl driver::API for Instance {
 
             let (d_memory, s_memory, _) =
                 core.add_rw_device(name, None, max_history).await?;
+
+            // If the user configured an initial value, immediately
+            // set it.
+
+            if let Some(v) = init_value {
+                d_memory(v).await
+            }
 
             Ok(Devices { d_memory, s_memory })
         })

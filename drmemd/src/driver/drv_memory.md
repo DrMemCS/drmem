@@ -19,9 +19,14 @@ the string to the bulbs.
 
 Since memory devices are similar to variables in a programming
 language, this driver doesn't impose a final, device name but,
-instead, lets the user decide. The only parameter is:
+instead, lets the user decide. The configuration parameters for this
+driver are:
 
 - `name` is a string containing the base name of the memory device.
+- `initial` is the initial value of the device. If this value is
+  omitted, the memory device will either revert to the value stored in
+  the redis backend or, if there is no previous value, it will have no
+  value. It is recommended that an intial value be given.
 
 ## Devices
 
