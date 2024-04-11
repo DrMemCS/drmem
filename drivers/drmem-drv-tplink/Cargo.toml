@@ -1,6 +1,6 @@
 [package]
 name = "drmem-drv-tplink"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 homepage = "https://github.com/DrMemCS/drmem"
@@ -25,4 +25,4 @@ serde = { workspace = true, features = ["derive"] }
 serde_derive.workspace = true
 serde_json = { workspace = true, features = ["std"] }
 
-drmem-api = { path = "../../drmem-api", version = "0.3.1" }
+drmem-api = { path = "../../drmem-api", version = "0.4" }

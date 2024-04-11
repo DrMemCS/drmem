@@ -1,6 +1,6 @@
 [package]
 name = "drmemd"
-version = "0.3.1"
+version = "0.4.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 description = "Main process of the DrMem control system"
@@ -41,7 +41,7 @@ palette.workspace = true
 
 lazy_static = "1"
 
-drmem-api = { path = "../drmem-api", version = "0.3" }
+drmem-api = { path = "../drmem-api", version = "0.4" }
 
 cfgrammar = "0.13"
 lrlex = "0.13"
@@ -53,34 +53,34 @@ lrpar = "0.13"
 
 [dependencies.drmem-drv-ntp]
 path = "../drivers/drmem-drv-ntp"
-version = "0.3"
+version = "0.4"
 optional = true
 
 [dependencies.drmem-drv-sump]
 path = "../drivers/drmem-drv-sump"
-version = "0.3"
+version = "0.4"
 optional = true
 
 [dependencies.drmem-drv-tplink]
 path = "../drivers/drmem-drv-tplink"
-version = "0.1"
+version = "0.2"
 optional = true
 
 [dependencies.drmem-drv-weather-wu]
 path = "../drivers/drmem-drv-weather-wu"
-version = "0.3"
+version = "0.4"
 optional = true
 
 # This section defines the optional dependencies for backend storage.
 
 [dependencies.drmem-db-redis]
 path = "../backends/drmem-db-redis"
-version = "0.3"
+version = "0.4"
 optional = true
 
 [dependencies.drmem-db-simple]
 path = "../backends/drmem-db-simple"
-version = "0.3.1"
+version = "0.4"
 optional = true
 
 # This section defines the optional dependencies for the 'graphql'
