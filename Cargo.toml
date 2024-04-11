@@ -6,6 +6,7 @@ members = [
     "drmemd"
 ]
 default-members = ["drmemd"]
+resolver = "2"
 
 [workspace.dependencies]
 async-trait = { version = "0.1", default-features = false }
