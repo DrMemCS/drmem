@@ -35,7 +35,7 @@ serde_derive.workspace = true
 
 palette.workspace = true
 
-redis.version = "0.22"
+redis.version = "0.25"
 redis.default-features = false
 redis.features = ["tokio-comp", "streams"]
 

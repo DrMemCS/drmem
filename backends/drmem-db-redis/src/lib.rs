@@ -21,7 +21,6 @@ use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
 type AioMplexConnection = aio::MultiplexedConnection;
-type AioConnection = aio::Connection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;
 
 pub mod config;
@@ -260,8 +259,9 @@ fn id_to_ts(id: &str) -> Result<time::SystemTime> {
 
 type ReadFuture = Pin<
     Box<
-        dyn Future<Output = (AioConnection, redis::RedisResult<redis::Value>)>
-            + Send,
+        dyn Future<
+                Output = (AioMplexConnection, redis::RedisResult<redis::Value>),
+            > + Send,
     >,
 >;
 
@@ -305,7 +305,11 @@ impl ReadingStream {
     // returns it with the result.) This is necessary because an
     // AioConnection isn't clonable.
 
-    fn mk_fut(mut con: AioConnection, key: String, id: String) -> ReadFuture {
+    fn mk_fut(
+        mut con: AioMplexConnection,
+        key: String,
+        id: String,
+    ) -> ReadFuture {
         Box::pin(async move {
             let result =
                 Self::read_next_cmd(&key, &id).query_async(&mut con).await;
@@ -315,7 +319,7 @@ impl ReadingStream {
     }
 
     pub fn new(
-        con: AioConnection,
+        con: AioMplexConnection,
         key: &str,
         id: Option<time::SystemTime>,
     ) -> Self {
@@ -456,15 +460,18 @@ impl RedisStore {
         cfg: &config::Config,
         name: Option<String>,
         pword: Option<String>,
-    ) -> Result<AioConnection> {
+    ) -> Result<AioMplexConnection> {
         let client = Self::make_client(cfg, name.as_ref(), pword.as_ref())?;
 
         debug!("creating new redis connection");
 
-        client.get_tokio_connection().await.map_err(|e| {
-            error!("redis error: {}", &e);
-            xlat_err(e)
-        })
+        client
+            .get_multiplexed_tokio_connection()
+            .await
+            .map_err(|e| {
+                error!("redis error: {}", &e);
+                xlat_err(e)
+            })
     }
 
     // Creates a mulitplexed connection to redis.
