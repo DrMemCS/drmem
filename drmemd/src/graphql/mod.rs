@@ -35,7 +35,12 @@ struct DriverInfo {
 #[graphql_object(
     Context = ConfigDb,
     description = "Information about a driver in the running version \
-		   of `drmemd`."
+		   of `drmemd`.\n\n\
+		   An instance of DrMem has a set of drivers that are \
+		   compiled into the executable. This set will be fixed \
+		   until the next time the node is restarted (because the \
+		   restart may be a new executable with a different set \
+		   of drivers.)"
 )]
 impl DriverInfo {
     #[graphql(description = "The name of the driver.")]
@@ -77,6 +82,11 @@ struct SettingData {
 // Contains information about a device's history in the backend.
 
 #[derive(GraphQLObject)]
+#[graphql(description = "Contains information about a device's history, \
+			 as currently stored in the backend. This information \
+			 is a snapshot from when it was obtained. Depending \
+			 on how frequently a device gets updated, this \
+			 information may be obsolete in a short time.")]
 struct DeviceHistory {
     #[graphql(description = "Total number of points in backend storage.")]
     total_points: i32,
@@ -122,16 +132,14 @@ impl DeviceInfo {
         self.units.as_ref()
     }
 
-    #[graphql(
-        description = "Indicates whether the device is read-only or can be controlled."
-    )]
+    #[graphql(description = "Indicates whether the device is read-only \
+			     or can be controlled.")]
     fn settable(&self) -> bool {
         self.settable
     }
 
-    #[graphql(
-        description = "Information about the driver that implements this device."
-    )]
+    #[graphql(description = "Information about the driver that implements \
+			     this device.")]
     fn driver(&self) -> DriverInfo {
         self.db
             .get_driver(&self.driver_name)
@@ -218,32 +226,33 @@ impl Config {
 
     #[graphql(
         description = "Returns information associated with the devices that \
-		     are active in the running system. Arguments to the \
-		     query will filter the results.\n\n\
-		     \
-		     If the argument `pattern` is provided, only the devices \
-		     whose name matches the pattern will be included in the \
-		     results. The pattern follows the shell \"glob\" style.\n\n\
-		     \
-		     If the argument `settable` is provided, it returns \
-		     devices that are or aren't settable, depending on the \
-		     value of the agument."
+		       are active in the running system. Arguments to the \
+		       query will filter the results.\n\n\
+		       If the argument `pattern` is provided, only the \
+		       devices whose name matches the pattern will be \
+		       included in the results. The pattern follows the \
+		       shell \"glob\" style.\n\n\
+		       If the argument `settable` is provided, it returns \
+		       devices that are or aren't settable, depending on the \
+		       value of the agument."
     )]
     async fn device_info(
         #[graphql(context)] db: &ConfigDb,
         #[graphql(
             name = "pattern",
-            description = "If this argument is provided, the query returns information \
-			   for devices whose name matches the pattern. The pattern uses \
-			   \"globbing\" grammar: '?' matches one character, '*' matches \
-			   zero or more, '**' matches arbtrary levels of the path \
+            description = "If this argument is provided, the query returns \
+			   information for devices whose name matches the \
+			   pattern. The pattern uses \"globbing\" grammar: \
+			   '?' matches one character, '*' matches zero or \
+			   more, '**' matches arbtrary levels of the path \
 			   (between ':'s)."
         )]
         pattern: Option<String>,
         #[graphql(
             name = "settable",
-            description = "If this argument is provided, the query filters the result \
-			   based on whether the device can be set or not."
+            description = "If this argument is provided, the query filters \
+			   the result based on whether the device can be set \
+			   or not."
         )]
         settable: Option<bool>,
     ) -> result::Result<Vec<DeviceInfo>, FieldError> {
@@ -545,8 +554,10 @@ impl Control {
 #[derive(GraphQLInputObject)]
 #[graphql(description = "Defines a range of time between two dates.")]
 struct DateRange {
-    #[graphql(description = "The start of the date range (in UTC.) If \
-			     `null`, it means \"now\".")]
+    #[graphql(
+        description = "The start of the date range (in UTC.) If `null`, \
+			     it means \"now\"."
+    )]
     start: Option<DateTime<Utc>>,
     #[graphql(description = "The end of the date range (in UTC.) If `null`, \
 			     it means \"infinity\".")]
@@ -569,7 +580,10 @@ struct Reading {
     #[graphql(description = "Placeholder for string values.")]
     string_value: Option<String>,
     #[graphql(
-        description = "Placeholder for color values. Values are a 3-element array holding red, green, and blue values. Each value ranges from 0 - 255."
+        description = "Placeholder for color values. Values are a 3-element \
+		       array holding red, green, and blue values or a \
+		       4-element array holding red, gree, blue, and alpha \
+		       values. Each value ranges from 0 - 255."
     )]
     color_value: Option<Vec<i32>>,
 }
@@ -685,11 +699,11 @@ impl Subscription {
 
 #[graphql_subscription(context = ConfigDb)]
 impl Subscription {
-    #[graphql(description = "Sets up a connection to receive all \
-			     updates to a device. The GraphQL request \
-			     must provide the name of a device. This \
-			     method returns a stream which generates a \
-			     reply each time a device's value changes.")]
+    #[graphql(description = "Sets up a connection to receive all updates to \
+			     a device. The GraphQL request must provide the \
+			     name of a device. This method returns a stream \
+			     which generates a reply each time a device's \
+			     value changes.")]
     async fn monitor_device(
         #[graphql(context)] db: &ConfigDb,
         device: String,
