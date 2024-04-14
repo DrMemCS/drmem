@@ -2,7 +2,7 @@ use chrono::prelude::*;
 use drmem_api::{client, device, driver, Error};
 use futures::Future;
 use juniper::{
-    self, executor::FieldError, graphql_subscription, graphql_value,
+    executor::FieldError, graphql_object, graphql_subscription, graphql_value,
     FieldResult, GraphQLInputObject, GraphQLObject, RootNode, Value,
 };
 use juniper_graphql_ws::ConnectionConfig;
@@ -32,7 +32,7 @@ struct DriverInfo {
     description: &'static str,
 }
 
-#[juniper::graphql_object(
+#[graphql_object(
     Context = ConfigDb,
     description = "Information about a driver in the running version \
 		   of `drmemd`."
@@ -106,7 +106,7 @@ struct DeviceInfo {
     db: crate::driver::DriverDb,
 }
 
-#[juniper::graphql_object(
+#[graphql_object(
     Context = ConfigDb,
     description = "Information about a registered device in the running \
 		   version of `drmemd`."
@@ -169,28 +169,24 @@ impl Config {
     }
 }
 
-#[juniper::graphql_object(
+#[graphql_object(
     context = ConfigDb,
     description = "Reports configuration information for `drmemd`."
 )]
 impl Config {
-    #[graphql(
-        description = "Returns information about the available drivers \
-		       in the running instance of `drmemd`. If `name` \
-		       isn't provided, an array of all driver \
-		       information is returned. If `name` is specified \
-		       and a driver with that name exists, a single \
-		       element array is returned. Otherwise `null` is \
-		       returned.",
-        arguments(arg2(
-            description = "An optional argument which, when provided, \
-			   only returns driver information whose name \
-			   matches. If this argument isn't provided, \
-			   every drivers' information will be returned."
-        ),)
-    )]
+    #[graphql(description = "Returns information about the available drivers \
+			     in the running instance of `drmemd`. If `name` \
+			     isn't provided, an array of all driver \
+			     information is returned. If `name` is specified \
+			     and a driver with that name exists, a single \
+			     element array is returned. Otherwise `null` is \
+			     returned.")]
     fn driver_info(
         #[graphql(context)] db: &ConfigDb,
+        #[graphql(description = "An optional argument which, when provided, \
+				 only returns driver information whose name \
+				 matches. If this argument isn't provided, \
+				 every drivers' information will be returned.")]
         name: Option<String>,
     ) -> result::Result<Vec<DriverInfo>, FieldError> {
         if let Some(name) = name {
@@ -420,7 +416,7 @@ impl Control {
     }
 }
 
-#[juniper::graphql_object(
+#[graphql_object(
     context = ConfigDb,
     description = "This group of queries perform modifications to devices."
 )]
