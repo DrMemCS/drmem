@@ -1,6 +1,6 @@
 [package]
 name = "drmem-db-redis"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 description = "Redis backend for DrMem control system"
@@ -35,8 +35,8 @@ serde_derive.workspace = true
 
 palette.workspace = true
 
-redis.version = "0.22"
+redis.version = "0.25"
 redis.default-features = false
 redis.features = ["tokio-comp", "streams"]
 
-drmem-api = { path = "../../drmem-api", version = "0.3" }
+drmem-api = { path = "../../drmem-api", version = "0.4" }

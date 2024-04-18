@@ -1,6 +1,6 @@
 [package]
 name = "drmem-drv-sump"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 homepage = "https://github.com/DrMemCS/drmem"
@@ -23,4 +23,4 @@ tracing.workspace = true
 tracing-futures.workspace = true
 tracing-subscriber.workspace = true
 
-drmem-api = { path = "../../drmem-api", version = "0.3" }
+drmem-api = { path = "../../drmem-api", version = "0.4" }

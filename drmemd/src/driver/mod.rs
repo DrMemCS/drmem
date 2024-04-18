@@ -262,6 +262,7 @@ impl DriverDb {
     /// found, it extracts the information needed for the GraphQL
     /// query and returns it.
 
+    #[cfg(feature = "graphql")]
     pub fn find(
         &self,
         key: &str,
@@ -273,6 +274,7 @@ impl DriverDb {
     /// Similar to `.find()`, but returns all the drivers'
     /// information.
 
+    #[cfg(feature = "graphql")]
     pub fn get_all(
         &self,
     ) -> impl Iterator<Item = (driver::Name, &'static str, &'static str)> + '_
