@@ -93,24 +93,33 @@ pub struct Node {
     in_stream: InputStream,
     time_ch: Option<tod::TimeFilter>,
     solar_ch: Option<broadcast::Receiver<solar::Info>>,
+    def_exprs: Vec<compile::Program>,
     exprs: Vec<compile::Program>,
 }
 
 impl Node {
     // Iterate through the input device mapping. As we work through
-    // the list, build two things:
+    // the list, build three things:
     //
-    // 1) An array of pairs where the first element is the variable
-    // name and the second element is the current value.
+    // 1) An array of the variable and definition names.
     //
     // 2) A chained set of streams which provide the readings.
+    //
+    // 3) An array of `Programs` which store their results in their
+    // respective variable location.
 
     async fn setup_inputs(
         c_req: &client::RequestChan,
         vars: &HashMap<String, device::Name>,
-    ) -> Result<(Vec<String>, InputStream)> {
-        let mut inputs = Vec::with_capacity(vars.len());
+        defs: &HashMap<String, String>,
+    ) -> Result<(Vec<String>, InputStream, Vec<compile::Program>)> {
+        let mut inputs = Vec::with_capacity(vars.len() + defs.len());
+        let mut def_exprs = Vec::with_capacity(defs.len());
         let mut in_stream = StreamMap::with_capacity(vars.len());
+
+        // Iterate through the input variable definitions. This maps
+        // an indentifier name with a local, shorter name. For each
+        // device, we get a monitor stream and add it to the set.
 
         for (vv, dev) in vars {
             match c_req.monitor_device(dev.clone(), None, None).await {
@@ -131,7 +140,43 @@ impl Node {
                 }
             }
         }
-        Ok((inputs, in_stream))
+
+        // Now add the definitions to the returned state. Definitions
+        // add new variables to the vector of inputs.
+
+        for (name, expr) in defs {
+            // Make sure the name isn't already in the list of inputs.
+
+            if inputs.iter().any(|v| v == name) {
+                error!("definition tried to redefine {}", name);
+                return Err(drmem_api::Error::ParseError(format!(
+                    "can't redefine {}",
+                    name
+                )));
+            }
+
+            // Add the definition's target name to the list of names.
+
+            inputs.push(name.clone());
+
+            // Compile the expression. Set the inputs to one less (the
+            // expression can't refer to its target variable.) The
+            // "outputs" are also the inputs since `defs` calculate
+            // values used by expressions and save their result in an
+            // input parameter.
+
+            let env = (&inputs[..inputs.len() - 1], &inputs[..]);
+            let result = compile::Program::compile(
+                &format!("{} -> {{{}}}", &expr, &name),
+                &env,
+            )?;
+
+            // Add the program to the list of programs.
+
+            def_exprs.push(result);
+        }
+
+        Ok((inputs, in_stream, def_exprs))
     }
 
     async fn setup_outputs(
@@ -174,8 +219,8 @@ impl Node {
     ) -> Result<Node> {
         debug!("compiling expressions");
 
-        let (inputs, in_stream) =
-            Node::setup_inputs(&c_req, &cfg.inputs).await?;
+        let (inputs, in_stream, def_exprs) =
+            Node::setup_inputs(&c_req, &cfg.inputs, &cfg.defs).await?;
 
         let (outputs, out_chans) =
             Node::setup_outputs(&c_req, &cfg.outputs).await?;
@@ -202,15 +247,22 @@ impl Node {
             .collect();
         let exprs = exprs?;
 
-        // Look at each expression and see if it needs the time-of-day.
+        // Look at each expression and see if it needs the
+        // time-of-day.
 
         let needs_time = exprs
             .iter()
+            .chain(&def_exprs)
             .filter_map(|compile::Program(e, _)| e.uses_time())
             .min();
 
-        let needs_solar =
-            exprs.iter().any(|compile::Program(e, _)| e.uses_solar());
+        // Look at each expression and see if it needs any solar
+        // information.
+
+        let needs_solar = exprs
+            .iter()
+            .chain(&def_exprs)
+            .any(|compile::Program(e, _)| e.uses_solar());
 
         // Return the initialized `Node`.
 
@@ -225,6 +277,7 @@ impl Node {
                 }
             },
             solar_ch: if needs_solar { Some(c_solar) } else { None },
+            def_exprs,
             exprs,
         })
     }
@@ -271,6 +324,13 @@ impl Node {
 		    debug!("updated solar position");
 		}
 	    }
+
+            // Recalculate the defs array.
+
+            for compile::Program(expr, idx) in &self.def_exprs {
+                self.inputs[*idx] =
+                    compile::eval(expr, &self.inputs, &time, solar.as_ref());
+            }
 
             // Loop through each defined expression.
 
