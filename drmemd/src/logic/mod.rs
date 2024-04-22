@@ -159,13 +159,17 @@ impl Node {
 
             inputs.push(name.clone());
 
-            // Compile the expression. Set the inputs to one less (the
-            // expression can't refer to its target variable.) The
+            // Compile the expression. The length of the input slice
+            // is clipped to the size of the input variables. We do
+            // this so we don't include any variables created by
+            // definitions. This includes loops (a definition
+            // referring to itself) and referring to other defintions
+            // (because we can't enforce an order of evaluation.) The
             // "outputs" are also the inputs since `defs` calculate
             // values used by expressions and save their result in an
             // input parameter.
 
-            let env = (&inputs[..inputs.len() - 1], &inputs[..]);
+            let env = (&inputs[..vars.len()], &inputs[..]);
             let result = compile::Program::compile(
                 &format!("{} -> {{{}}}", &expr, &name),
                 &env,
@@ -325,7 +329,7 @@ impl Node {
 		}
 	    }
 
-            // Recalculate the defs array.
+            // Calculate the defs array.
 
             for compile::Program(expr, idx) in &self.def_exprs {
                 self.inputs[*idx] =
