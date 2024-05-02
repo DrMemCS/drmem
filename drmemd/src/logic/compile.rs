@@ -100,12 +100,34 @@ impl std::fmt::Display for TimeField {
     }
 }
 
+#[derive(Clone, PartialEq, Debug)]
+pub enum SolarField {
+    Elevation,
+    Azimuth,
+    RightAscension,
+    Declination,
+}
+
+impl std::fmt::Display for SolarField {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+	    SolarField::Elevation => write!(f, "alt"),
+	    SolarField::Azimuth => write!(f, "az"),
+	    SolarField::RightAscension => write!(f, "ra"),
+	    SolarField::Declination => write!(f, "dec"),
+	}
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Lit(device::Value),
     Var(usize),
     TimeVal(&'static str, TimeField, fn(&tod::Info) -> device::Value),
-    SolarVal(&'static str, fn(&solar::Info) -> device::Value),
+    SolarVal(SolarField, fn(&solar::Info) -> device::Value),
 
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),

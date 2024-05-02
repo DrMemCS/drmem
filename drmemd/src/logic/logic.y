@@ -197,7 +197,7 @@ Unknown -> ():
 use drmem_api::{Result, Error, device};
 use chrono::{Timelike, Datelike};
 use palette::{LinSrgba, LinSrgb, Srgb, named, WithAlpha};
-use super::{TimeField, super::tod, super::solar, Expr, Program};
+use super::{TimeField, SolarField, super::tod, super::solar, Expr, Program};
 use std::str::FromStr;
 
 use lrlex::{DefaultLexeme, DefaultLexerTypes};
@@ -394,16 +394,16 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
             CAT_LOCAL, TimeField::DOY, get_local_day_of_year
         )),
 	(CAT_SOLAR, FLD_ALT) => Ok(Expr::SolarVal(
-            FLD_ALT, get_solar_altitude
+	    SolarField::Elevation, get_solar_altitude
         )),
 	(CAT_SOLAR, FLD_AZ) => Ok(Expr::SolarVal(
-            FLD_AZ, get_solar_azimuth
+            SolarField::Azimuth, get_solar_azimuth
         )),
 	(CAT_SOLAR, FLD_RA) => Ok(Expr::SolarVal(
-            FLD_RA, get_solar_right_ascension
+            SolarField::RightAscension, get_solar_right_ascension
         )),
 	(CAT_SOLAR, FLD_DEC) => Ok(Expr::SolarVal(
-            FLD_DEC, get_solar_declination
+            SolarField::Declination, get_solar_declination
         )),
 	_ => Err(Error::ParseError(
 		 format!("unknown built-in: {}:{}", cat, fld)
