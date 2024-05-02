@@ -383,8 +383,20 @@ impl Node {
 
 #[cfg(test)]
 mod test {
-    use drmem_api::device;
-    use tokio::{sync::mpsc, task};
+    use super::{config, solar, tod, Node};
+    use drmem_api::{
+        client::{self, Request},
+        device, Error, Result,
+    };
+    use futures::{stream, Future};
+    use std::collections::HashMap;
+    use tokio::{
+        sync::{broadcast, mpsc},
+        task, try_join,
+    };
+
+    // Test sending a setting. The settings pass through an Output
+    // channel and get debounced.
 
     #[tokio::test]
     async fn test_send() {
@@ -407,5 +419,179 @@ mod test {
         assert!(tx.send(Ok(v)).is_ok());
 
         h.await.unwrap();
+    }
+
+    // Builds a future that will create a node. When awaiting on this
+    // future, another task needs to handle potential requests
+    // initiated by the node, over the `mpsc_rx` channel. These
+    // requests can be monitoring requests for other devices or
+    // requests for a setting channel to a device.
+
+    fn init_node<'a>(
+        cfg: &'a config::Logic,
+    ) -> (
+        impl Future<Output = Result<Node>> + 'a,
+        mpsc::Receiver<client::Request>,
+        broadcast::Sender<tod::Info>,
+        broadcast::Sender<solar::Info>,
+    ) {
+        let (mpsc_tx, mpsc_rx) = mpsc::channel(10);
+        let c_req = client::RequestChan::new(mpsc_tx);
+        let (tod_tx, c_time) = broadcast::channel(10);
+        let (sol_tx, c_solar) = broadcast::channel(10);
+        let node_fut = Node::init(c_req, c_time, c_solar, cfg);
+
+        (node_fut, mpsc_rx, tod_tx, sol_tx)
+    }
+
+    // This tests the initialization of an empty configuration. The
+    // main tests are to see if the two broadcast receivers are
+    // dropped.
+
+    #[tokio::test]
+    async fn test_empty_node_init() {
+        let cfg = config::Logic {
+            name: "name".into(),
+            summary: None,
+            inputs: HashMap::new(),
+            outputs: HashMap::new(),
+            defs: HashMap::new(),
+            exprs: vec![],
+        };
+        let (node, _, tod_tx, sol_tx) = init_node(&cfg);
+
+        // `await` on the future. This should return immediately since
+        // the config has no inputs or outputs.
+
+        let node = node.await.unwrap();
+
+        // With no config, the TOD and solar channel handles should
+        // have been dropped.
+
+        assert_eq!(tod_tx.receiver_count(), 0);
+        assert_eq!(sol_tx.receiver_count(), 0);
+
+        // This call allows us to keep ownership of the node so we're
+        // sure the Node dropped the broadcast receivers and not from
+        // an early drop of `node` itself.
+
+        std::mem::drop(node);
+    }
+
+    #[tokio::test]
+    async fn test_node_initialization() {
+        let cfg = config::Logic {
+            name: "test".into(),
+            summary: None,
+            inputs: HashMap::new(),
+            outputs: vec![(
+                "out".into(),
+                device::Name::create("device:out").unwrap(),
+            )]
+            .into_iter()
+            .collect(),
+            defs: HashMap::new(),
+            exprs: vec!["{utc:second} -> {out}".into()],
+        };
+        let (node_fut, mut req_rx, _, _) = init_node(&cfg);
+
+        // Run the initialization concurrently with handling the one
+        // request it is going to make.
+
+        #[rustfmt::skip]
+	try_join!(
+	    node_fut,
+	    async move {
+		match req_rx.recv().await.unwrap() {
+		    Request::GetSettingChan { name, rpy_chan, .. } => {
+			if name.to_string() == "device:out" {
+			    let (tx, _) = mpsc::channel(10);
+
+			    assert!(rpy_chan.send(Ok(tx)).is_ok());
+			} else {
+			    assert!(
+				rpy_chan.send(Err(Error::NotFound)).is_ok());
+			}
+		    }
+		    Request::QueryDeviceInfo { rpy_chan, .. } =>
+			assert!(rpy_chan
+				.send(Err(Error::ProtocolError(
+				    "bad request".into())))
+				.is_ok()),
+		    Request::SetDevice { rpy_chan, .. } =>
+			assert!(rpy_chan
+				.send(Err(Error::ProtocolError(
+				    "bad request".into())))
+				.is_ok()),
+		    Request::MonitorDevice { rpy_chan, .. } =>
+			assert!(rpy_chan
+				.send(Err(Error::ProtocolError(
+				    "bad request".into())))
+				.is_ok())
+		};
+		Ok(())
+	    }
+	)
+	.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_node_def_initialization() {
+        let cfg = config::Logic {
+            name: "test".into(),
+            summary: None,
+            inputs: vec![(
+                "in".into(),
+                device::Name::create("device:in").unwrap(),
+            )]
+            .into_iter()
+            .collect(),
+            outputs: vec![(
+                "out".into(),
+                device::Name::create("device:out").unwrap(),
+            )]
+            .into_iter()
+            .collect(),
+            defs: vec![("out".into(), "{in}".into())].into_iter().collect(),
+            exprs: vec!["{utc:second} -> {out}".into()],
+        };
+        let (node_fut, mut req_rx, _, _) = init_node(&cfg);
+
+        // Run the initialization concurrently with handling the one
+        // request it is going to make.
+
+        #[rustfmt::skip]
+	try_join!(
+	    node_fut,
+	    async move {
+		match req_rx.recv().await {
+		    Some(Request::GetSettingChan { name, rpy_chan, .. }) => {
+			if name.to_string() == "device:out" {
+			    let (tx, _) = mpsc::channel(10);
+
+			    rpy_chan.send(Ok(tx));
+			} else {
+			    rpy_chan.send(Err(Error::NotFound));
+			}
+		    }
+		    Some(Request::QueryDeviceInfo { rpy_chan, .. }) =>
+			assert!(rpy_chan
+				.send(Err(Error::ProtocolError(
+				    "bad request".into())))
+				.is_ok()),
+		    Some(Request::SetDevice { rpy_chan, .. }) =>
+			assert!(rpy_chan
+				.send(Err(Error::ProtocolError(
+				    "bad request".into())))
+				.is_ok()),
+		    Some(Request::MonitorDevice { rpy_chan, .. }) => {
+			rpy_chan.send(Ok(Box::pin(stream::empty())));
+		    }
+		    None => return Ok(())
+		};
+		Ok(())
+	    }
+	)
+	.unwrap();
     }
 }
