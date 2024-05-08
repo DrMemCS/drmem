@@ -295,6 +295,30 @@ impl Node {
         info!("starting");
 
         loop {
+            // Create a future that yields the time-of-day using the
+            // TimeFilter. If no expression uses time, then `time_ch`
+            // will be `None` and we return a future that immediately
+            // yields `None`.
+
+            let wait_for_time = async {
+                match self.time_ch.as_mut() {
+                    None => None,
+                    Some(s) => s.next().await,
+                }
+            };
+
+            // Create a future that yields the next solar update. If
+            // no expression uses solar data, `solar_ch` will be
+            // `None` and we, instead, return a future that
+            // immediately yields `None`.
+
+            let wait_for_solar = async {
+                match self.solar_ch.as_mut() {
+                    None => None,
+                    Some(ch) => ch.recv().await.ok(),
+                }
+            };
+
             #[rustfmt::skip]
 	    tokio::select! {
 		// Wait for the next reading to arrive. All the
@@ -313,23 +337,22 @@ impl Node {
 		// If we need the time channel, wait for the next
 		// second.
 
-		Some(v) = self.time_ch.as_mut().unwrap().next(),
-		            if self.time_ch.is_some() => {
+		Some(v) = wait_for_time => {
+		    info!("updating time");
 		    time = v;
-		    debug!("updated time");
 		}
 
 		// If we need the solar channel, wait for the next
 		// update.
 
-		Ok(v) = self.solar_ch.as_mut().unwrap().recv(),
-		            if self.solar_ch.is_some() => {
+		Some(v) = wait_for_solar => {
+		    info!("updating solar position");
 		    solar = Some(v);
-		    debug!("updated solar position");
 		}
 	    }
 
-            // Calculate the defs array.
+            // Calculate each expression of the `defs` array. Store
+            // the result in the associated `input` cell.
 
             for compile::Program(expr, idx) in &self.def_exprs {
                 self.inputs[*idx] =
