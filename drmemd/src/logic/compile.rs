@@ -88,15 +88,15 @@ impl std::fmt::Display for TimeField {
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::result::Result<(), std::fmt::Error> {
         match self {
-	    TimeField::Second => write!(f, "second"),
-	    TimeField::Minute => write!(f, "minute"),
-	    TimeField::Hour => write!(f, "hour"),
-	    TimeField::Day => write!(f, "day"),
-	    TimeField::DOW => write!(f, "DOW"),
-	    TimeField::Month => write!(f, "month"),
-	    TimeField::Year => write!(f, "year"),
-	    TimeField::DOY => write!(f, "DOY"),
-	}
+            TimeField::Second => write!(f, "second"),
+            TimeField::Minute => write!(f, "minute"),
+            TimeField::Hour => write!(f, "hour"),
+            TimeField::Day => write!(f, "day"),
+            TimeField::DOW => write!(f, "DOW"),
+            TimeField::Month => write!(f, "month"),
+            TimeField::Year => write!(f, "year"),
+            TimeField::DOY => write!(f, "DOY"),
+        }
     }
 }
 
@@ -114,11 +114,11 @@ impl std::fmt::Display for SolarField {
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::result::Result<(), std::fmt::Error> {
         match self {
-	    SolarField::Elevation => write!(f, "alt"),
-	    SolarField::Azimuth => write!(f, "az"),
-	    SolarField::RightAscension => write!(f, "ra"),
-	    SolarField::Declination => write!(f, "dec"),
-	}
+            SolarField::Elevation => write!(f, "alt"),
+            SolarField::Azimuth => write!(f, "az"),
+            SolarField::RightAscension => write!(f, "ra"),
+            SolarField::Declination => write!(f, "dec"),
+        }
     }
 }
 
