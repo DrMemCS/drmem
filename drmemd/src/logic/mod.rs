@@ -260,6 +260,8 @@ impl Node {
             .filter_map(|compile::Program(e, _)| e.uses_time())
             .min();
 
+        info!("needs time: {:?}", &needs_time);
+
         // Look at each expression and see if it needs any solar
         // information.
 
@@ -267,6 +269,8 @@ impl Node {
             .iter()
             .chain(&def_exprs)
             .any(|compile::Program(e, _)| e.uses_solar());
+
+        info!("needs solar: {:?}", &needs_solar);
 
         // Return the initialized `Node`.
 
@@ -327,11 +331,12 @@ impl Node {
 		// and the actual reading.
 
 		Some((idx, reading)) = self.in_stream.next() => {
+		    info!("updating in[{}] with {}", idx, &reading.value);
+
 		    // Save the reading in our array for future
 		    // recalculations.
 
 		    self.inputs[idx] = Some(reading.value);
-		    debug!("updated input[{}]", idx);
 		}
 
 		// If we need the time channel, wait for the next
@@ -357,6 +362,11 @@ impl Node {
             for compile::Program(expr, idx) in &self.def_exprs {
                 self.inputs[*idx] =
                     compile::eval(expr, &self.inputs, &time, solar.as_ref());
+
+                info!(
+                    "def ({}) produced {:?} for in[{}]",
+                    &expr, &self.inputs[*idx], *idx
+                );
             }
 
             // Loop through each defined expression.
@@ -371,9 +381,13 @@ impl Node {
                 if let Some(result) =
                     compile::eval(expr, &self.inputs, &time, solar.as_ref())
                 {
+                    info!(
+                        "expr ({}) produced {:?} for out[{}]",
+                        &expr, &result, *idx
+                    );
                     let _ = self.outputs[*idx].send(result).await;
                 } else {
-                    error!("couldn't evaluate {}", &expr)
+                    error!("couldn't evaluate ({})", &expr)
                 }
             }
         }
