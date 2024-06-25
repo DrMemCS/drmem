@@ -481,20 +481,39 @@ mod test {
         (node_fut, mpsc_rx, tod_tx, sol_tx)
     }
 
+    // Builds a `config::Logic` type using arrays of config
+    // parameters. This is much cleaner than doing it inline and
+    // trying to get the final collection types.
+
+    fn build_config(
+        inputs: &[(&str, &str)],
+        outputs: &[(&str, &str)],
+        defs: &[(&str, &str)],
+        exprs: &[&str],
+    ) -> config::Logic {
+        config::Logic {
+            name: "test".into(),
+            summary: None,
+            inputs: inputs
+                .iter()
+                .map(|&(a, b)| (a.into(), device::Name::create(b).unwrap()))
+                .collect(),
+            outputs: outputs
+                .iter()
+                .map(|&(a, b)| (a.into(), device::Name::create(b).unwrap()))
+                .collect(),
+            defs: defs.iter().map(|&(a, b)| (a.into(), b.into())).collect(),
+            exprs: exprs.iter().map(|&a| a.into()).collect(),
+        }
+    }
+
     // This tests the initialization of an empty configuration. The
     // main tests are to see if the two broadcast receivers are
     // dropped.
 
     #[tokio::test]
     async fn test_empty_node_init() {
-        let cfg = config::Logic {
-            name: "name".into(),
-            summary: None,
-            inputs: HashMap::new(),
-            outputs: HashMap::new(),
-            defs: HashMap::new(),
-            exprs: vec![],
-        };
+        let cfg = build_config(&[], &[], &[], &[]);
         let (node, _, tod_tx, sol_tx) = init_node(&cfg);
 
         // `await` on the future. This should return immediately since
@@ -517,19 +536,12 @@ mod test {
 
     #[tokio::test]
     async fn test_node_initialization() {
-        let cfg = config::Logic {
-            name: "test".into(),
-            summary: None,
-            inputs: HashMap::new(),
-            outputs: vec![(
-                "out".into(),
-                device::Name::create("device:out").unwrap(),
-            )]
-            .into_iter()
-            .collect(),
-            defs: HashMap::new(),
-            exprs: vec!["{utc:second} -> {out}".into()],
-        };
+        let cfg = build_config(
+            &[],
+            &[("out", "device:out")],
+            &[],
+            &["{utc:second} -> {out}"],
+        );
         let (node_fut, mut req_rx, _, _) = init_node(&cfg);
 
         // Run the initialization concurrently with handling the one
@@ -538,8 +550,8 @@ mod test {
         #[rustfmt::skip]
 	try_join!(
 	    node_fut,
-	    async move {
-		match req_rx.recv().await.unwrap() {
+	    async {
+		match (&mut req_rx).recv().await.unwrap() {
 		    Request::GetSettingChan { name, rpy_chan, .. } => {
 			if name.to_string() == "device:out" {
 			    let (tx, _) = mpsc::channel(10);
@@ -574,24 +586,12 @@ mod test {
 
     #[tokio::test]
     async fn test_node_def_initialization() {
-        let cfg = config::Logic {
-            name: "test".into(),
-            summary: None,
-            inputs: vec![(
-                "in".into(),
-                device::Name::create("device:in").unwrap(),
-            )]
-            .into_iter()
-            .collect(),
-            outputs: vec![(
-                "out".into(),
-                device::Name::create("device:out").unwrap(),
-            )]
-            .into_iter()
-            .collect(),
-            defs: vec![("out".into(), "{in}".into())].into_iter().collect(),
-            exprs: vec!["{utc:second} -> {out}".into()],
-        };
+        let cfg = build_config(
+            &[("in", "device:in")],
+            &[("out", "device:out")],
+            &[("out", "{in}")],
+            &["{utc:second} -> {out}"],
+        );
         let (node_fut, mut req_rx, _, _) = init_node(&cfg);
 
         // Run the initialization concurrently with handling the one
