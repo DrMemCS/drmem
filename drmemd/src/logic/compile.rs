@@ -104,10 +104,9 @@ impl Expr {
             | Expr::TimeVal(..)
             | Expr::SolarVal(..) => 10,
             Expr::Not(_) => 9,
-            Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 6,
-            Expr::Add(_, _) | Expr::Sub(_, _) => 5,
-            Expr::Lt(_, _) | Expr::LtEq(_, _) => 4,
-            Expr::Eq(_, _) => 3,
+            Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 5,
+            Expr::Add(_, _) | Expr::Sub(_, _) => 4,
+            Expr::Lt(_, _) | Expr::LtEq(_, _) | Expr::Eq(_, _) => 3,
             Expr::And(_, _) => 2,
             Expr::Or(_, _) => 1,
         }
