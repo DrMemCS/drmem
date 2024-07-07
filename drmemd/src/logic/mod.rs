@@ -278,12 +278,8 @@ impl Node {
             inputs: vec![None; inputs.len()],
             outputs: out_chans,
             in_stream,
-            time_ch: match needs_time {
-                None => None,
-                Some(tf) => {
-                    Some(tod::time_filter(BroadcastStream::new(c_time), tf))
-                }
-            },
+            time_ch: needs_time
+                .map(|tf| tod::time_filter(BroadcastStream::new(c_time), tf)),
             solar_ch: if needs_solar { Some(c_solar) } else { None },
             def_exprs,
             exprs,

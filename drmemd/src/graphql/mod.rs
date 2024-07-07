@@ -50,7 +50,7 @@ impl DriverInfo {
 
     #[graphql(description = "A short summary of the driver's purpose.")]
     fn summary(&self) -> &str {
-        &self.summary
+        self.summary
     }
 
     #[graphql(description = "Detailed information about the driver: the \
@@ -58,7 +58,7 @@ impl DriverInfo {
 			     registers; and other pertinent information. \
 			     This information is formatted in Markdown.")]
     fn description(&self) -> &str {
-        &self.description
+        self.description
     }
 }
 
@@ -497,8 +497,8 @@ impl Control {
                 f_bool: None,
                 f_string: None,
                 f_color: Some(v),
-            } => match &v[..] {
-                &[r, g, b] => {
+            } => match v[..] {
+                [r, g, b] => {
                     if let (Ok(r), Ok(g), Ok(b)) =
                         (u8::try_from(r), u8::try_from(g), u8::try_from(b))
                     {
@@ -516,7 +516,7 @@ impl Control {
                         ))
                     }
                 }
-                &[r, g, b, a] => {
+                [r, g, b, a] => {
                     if let (Ok(r), Ok(g), Ok(b), Ok(a)) = (
                         u8::try_from(r),
                         u8::try_from(g),
