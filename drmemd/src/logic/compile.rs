@@ -104,10 +104,9 @@ impl Expr {
             | Expr::TimeVal(..)
             | Expr::SolarVal(..) => 10,
             Expr::Not(_) => 9,
-            Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 6,
-            Expr::Add(_, _) | Expr::Sub(_, _) => 5,
-            Expr::Lt(_, _) | Expr::LtEq(_, _) => 4,
-            Expr::Eq(_, _) => 3,
+            Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 5,
+            Expr::Add(_, _) | Expr::Sub(_, _) => 4,
+            Expr::Lt(_, _) | Expr::LtEq(_, _) | Expr::Eq(_, _) => 3,
             Expr::And(_, _) => 2,
             Expr::Or(_, _) => 1,
         }
@@ -393,7 +392,14 @@ fn eval_as_or_expr(
             error!("OR expression contains non-boolean argument: {}", &v);
             None
         }
-        None => None,
+        None => match eval(b, inp, time, solar) {
+            v @ Some(device::Value::Bool(true)) => v,
+            Some(device::Value::Bool(false)) | None => None,
+            Some(v) => {
+                error!("OR expression contains non-boolean argument: {}", &v);
+                None
+            }
+        },
     }
 }
 
@@ -420,7 +426,14 @@ fn eval_as_and_expr(
             error!("AND expression contains non-boolean argument: {}", &v);
             None
         }
-        None => None,
+        None => match eval(b, inp, time, solar) {
+            v @ Some(device::Value::Bool(false)) => v,
+            Some(device::Value::Bool(true)) | None => None,
+            Some(v) => {
+                error!("AND expression contains non-boolean argument: {}", &v);
+                None
+            }
+        },
     }
 }
 
@@ -1003,6 +1016,23 @@ mod tests {
         );
 
         assert_eq!(
+            Program::compile("true and (5 < 7 or true) -> {bulb}", &env),
+            Ok(Program(
+                Expr::And(
+                    Box::new(Expr::Lit(device::Value::Bool(true))),
+                    Box::new(Expr::Or(
+                        Box::new(Expr::Lt(
+                            Box::new(Expr::Lit(device::Value::Int(5))),
+                            Box::new(Expr::Lit(device::Value::Int(7)))
+                        )),
+                        Box::new(Expr::Lit(device::Value::Bool(true)))
+                    ))
+                ),
+                0
+            ))
+        );
+
+        assert_eq!(
             Program::compile("\"Hello, world!\" -> {bulb}", &env),
             Ok(Program(
                 Expr::Lit(device::Value::Str("Hello, world!".to_string())),
@@ -1017,6 +1047,24 @@ mod tests {
         const FALSE: device::Value = device::Value::Bool(false);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
+        // Test for uninitialized and initialized variables.
+
+        assert_eq!(
+            eval(&Expr::Not(Box::new(Expr::Var(0))), &[None], &time, None),
+            None
+        );
+        assert_eq!(
+            eval(
+                &Expr::Not(Box::new(Expr::Var(0))),
+                &[Some(device::Value::Bool(true))],
+                &time,
+                None
+            ),
+            Some(device::Value::Bool(false))
+        );
+
+        // Test literal values.
+
         assert_eq!(
             eval(&Expr::Not(Box::new(Expr::Lit(FALSE))), &[], &time, None),
             Some(TRUE)
@@ -1025,6 +1073,9 @@ mod tests {
             eval(&Expr::Not(Box::new(Expr::Lit(TRUE))), &[], &time, None),
             Some(FALSE)
         );
+
+        // Test incorrect types.
+
         assert_eq!(
             eval(
                 &Expr::Not(Box::new(Expr::Lit(device::Value::Int(1)))),
@@ -1042,6 +1093,74 @@ mod tests {
         const FALSE: device::Value = device::Value::Bool(false);
         const ONE: device::Value = device::Value::Int(1);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
+
+        // Test uninitialized and initialized variables.
+
+        assert_eq!(
+            eval(
+                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(FALSE), Some(FALSE)],
+                &time,
+                None
+            ),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(FALSE), Some(TRUE)],
+                &time,
+                None
+            ),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(TRUE), Some(FALSE)],
+                &time,
+                None
+            ),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(TRUE), None],
+                &time,
+                None
+            ),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(FALSE), None],
+                &time,
+                None
+            ),
+            None
+        );
+        assert_eq!(
+            eval(
+                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[None, Some(TRUE)],
+                &time,
+                None
+            ),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[None, Some(FALSE)],
+                &time,
+                None
+            ),
+            None
+        );
+
+        // Test literal values.
 
         assert_eq!(
             eval(
@@ -1088,6 +1207,9 @@ mod tests {
             ),
             Some(TRUE)
         );
+
+        // Test invalid types.
+
         assert_eq!(
             eval(
                 &Expr::Or(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TRUE))),
@@ -1127,6 +1249,83 @@ mod tests {
         const FALSE: device::Value = device::Value::Bool(false);
         const ONE: device::Value = device::Value::Int(1);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
+
+        // Test uninitialized and initialized variables.
+
+        assert_eq!(
+            eval(
+                &Expr::And(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(FALSE), Some(FALSE)],
+                &time,
+                None
+            ),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::And(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(FALSE), Some(TRUE)],
+                &time,
+                None
+            ),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::And(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(TRUE), Some(FALSE)],
+                &time,
+                None
+            ),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::And(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(TRUE), Some(TRUE)],
+                &time,
+                None
+            ),
+            Some(TRUE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::And(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(TRUE), None],
+                &time,
+                None
+            ),
+            None
+        );
+        assert_eq!(
+            eval(
+                &Expr::And(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[Some(FALSE), None],
+                &time,
+                None
+            ),
+            Some(FALSE)
+        );
+        assert_eq!(
+            eval(
+                &Expr::And(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[None, Some(TRUE)],
+                &time,
+                None
+            ),
+            None
+        );
+        assert_eq!(
+            eval(
+                &Expr::And(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                &[None, Some(FALSE)],
+                &time,
+                None
+            ),
+            Some(FALSE)
+        );
+
+        // Test literal values.
 
         assert_eq!(
             eval(

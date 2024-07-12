@@ -151,13 +151,13 @@ fn decode_string(buf: &[u8]) -> Result<device::Value> {
 }
 
 fn decode_color(buf: &[u8]) -> Result<device::Value> {
-    match buf {
-        &[r, g, b] => {
+    match *buf {
+        [r, g, b] => {
             let rgb = palette::LinSrgba::new(r, g, b, 255);
 
             Ok(device::Value::Color(rgb))
         }
-        &[r, g, b, a] => {
+        [r, g, b, a] => {
             let rgb = palette::LinSrgba::new(r, g, b, a);
 
             Ok(device::Value::Color(rgb))
