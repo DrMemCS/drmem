@@ -596,15 +596,14 @@ mod test {
         #[rustfmt::skip]
 	try_join!(
 	    node_fut,
-	    async move {
-		match req_rx.recv().await {
+	    async {
+		match (&mut req_rx).recv().await {
 		    Some(Request::GetSettingChan { name, rpy_chan, .. }) => {
 			if name.to_string() == "device:out" {
 			    let (tx, _) = mpsc::channel(10);
-
-			    rpy_chan.send(Ok(tx));
+			    let _ = rpy_chan.send(Ok(tx));
 			} else {
-			    rpy_chan.send(Err(Error::NotFound));
+			    let _ = rpy_chan.send(Err(Error::NotFound));
 			}
 		    }
 		    Some(Request::QueryDeviceInfo { rpy_chan, .. }) =>
@@ -618,13 +617,13 @@ mod test {
 				    "bad request".into())))
 				.is_ok()),
 		    Some(Request::MonitorDevice { rpy_chan, .. }) => {
-			rpy_chan.send(Ok(Box::pin(stream::empty())));
+			let _ = rpy_chan.send(Ok(Box::pin(stream::empty())));
 		    }
 		    None => return Ok(())
 		};
 		Ok(())
 	    }
 	)
-	.unwrap();
+	    .unwrap();
     }
 }
