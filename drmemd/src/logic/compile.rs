@@ -1016,6 +1016,23 @@ mod tests {
         );
 
         assert_eq!(
+            Program::compile("true and (5 < 7 or true) -> {bulb}", &env),
+            Ok(Program(
+                Expr::And(
+                    Box::new(Expr::Lit(device::Value::Bool(true))),
+                    Box::new(Expr::Or(
+                        Box::new(Expr::Lt(
+                            Box::new(Expr::Lit(device::Value::Int(5))),
+                            Box::new(Expr::Lit(device::Value::Int(7)))
+                        )),
+                        Box::new(Expr::Lit(device::Value::Bool(true)))
+                    ))
+                ),
+                0
+            ))
+        );
+
+        assert_eq!(
             Program::compile("\"Hello, world!\" -> {bulb}", &env),
             Ok(Program(
                 Expr::Lit(device::Value::Str("Hello, world!".to_string())),
