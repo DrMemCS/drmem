@@ -26,8 +26,8 @@ pub struct Devices {
     d_dewpt: driver::ReportReading<f64>,
     d_htidx: driver::ReportReading<f64>,
     d_humidity: driver::ReportReading<f64>,
-    d_prate: driver::ReportReading<f64>,
-    d_ptotal: driver::ReportReading<f64>,
+    d_prec_rate: driver::ReportReading<f64>,
+    d_prec_total: driver::ReportReading<f64>,
     d_pressure: driver::ReportReading<f64>,
     d_solrad: driver::ReportReading<f64>,
     d_state: driver::ReportReading<bool>,
@@ -185,12 +185,12 @@ impl Instance {
 
         if let (Some(prate), Some(ptotal)) = (prate, ptotal) {
             if (0.0..=24.0).contains(&prate) {
-                (devices.d_prate)(prate).await
+                (devices.d_prec_rate)(prate).await
             } else {
                 warn!("ignoring bad precip rate: {:.2}", prate)
             }
 
-            (devices.d_ptotal)(ptotal).await
+            (devices.d_prec_total)(ptotal).await
         } else {
             warn!("need both precip fields to update precip calculations")
         }
@@ -313,7 +313,7 @@ impl driver::API for Instance {
             let (d_humidity, _) = core
                 .add_ro_device(humidity_name, Some("%"), max_history)
                 .await?;
-            let (d_prate, _) = core
+            let (d_prec_rate, _) = core
                 .add_ro_device(
                     precip_rate_name,
                     Some(if let wu::Unit::English = units {
@@ -325,7 +325,7 @@ impl driver::API for Instance {
                 )
                 .await?;
 
-            let (d_ptotal, _) = core
+            let (d_prec_total, _) = core
                 .add_ro_device(
                     precip_total_name,
                     Some(if let wu::Unit::English = units {
@@ -378,8 +378,8 @@ impl driver::API for Instance {
                 d_dewpt,
                 d_htidx,
                 d_humidity,
-                d_prate,
-                d_ptotal,
+                d_prec_rate,
+                d_prec_total,
                 d_pressure,
                 d_solrad,
                 d_state,
