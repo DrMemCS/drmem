@@ -28,6 +28,7 @@ pub struct Devices {
     d_humidity: driver::ReportReading<f64>,
     d_prec_rate: driver::ReportReading<f64>,
     d_prec_total: driver::ReportReading<f64>,
+    d_prec_last_total: driver::ReportReading<f64>,
     d_pressure: driver::ReportReading<f64>,
     d_solrad: driver::ReportReading<f64>,
     d_state: driver::ReportReading<bool>,
@@ -276,6 +277,7 @@ impl driver::API for Instance {
         let humidity_name = "humidity".parse::<device::Base>().unwrap();
         let precip_rate_name = "precip-rate".parse::<device::Base>().unwrap();
         let precip_total_name = "precip-total".parse::<device::Base>().unwrap();
+        let precip_last_total_name = "precip-last-total".parse::<device::Base>().unwrap();
         let pressure_name = "pressure".parse::<device::Base>().unwrap();
         let solar_rad_name = "solar-rad".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
@@ -337,6 +339,18 @@ impl driver::API for Instance {
                 )
                 .await?;
 
+            let (d_prec_last_total, _) = core
+                .add_ro_device(
+                    precip_last_total_name,
+                    Some(if let wu::Unit::English = units {
+                        "in"
+                    } else {
+                        "mm"
+                    }),
+                    max_history,
+                )
+                .await?;
+
             let (d_pressure, _) = core
                 .add_ro_device(
                     pressure_name,
@@ -380,6 +394,7 @@ impl driver::API for Instance {
                 d_humidity,
                 d_prec_rate,
                 d_prec_total,
+                d_prec_last_total,
                 d_pressure,
                 d_solrad,
                 d_state,
