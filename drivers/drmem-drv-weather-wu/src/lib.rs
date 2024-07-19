@@ -13,17 +13,81 @@ use weather_underground as wu;
 const DEFAULT_INTERVAL: u64 = 10;
 const MIN_PUBLIC_INTERVAL: u64 = 10;
 
+// This type defines a mini state machine to help us accumulate
+// rainfall. Some weather stations reset their rainfall total at
+// midnight -- even if it's still raining! This state machine tries to
+// recognize those resets to properly maintain its local precip
+// totals.
+
+enum PrecipState {
+    NoRain,
+    Rain { prev: f64, running: f64 },
+}
+
+impl PrecipState {
+    fn new() -> Self {
+        PrecipState::NoRain
+    }
+
+    // This method updates the state of the data based on new
+    // readings. It returns values to be reported by the driver for
+    // the three precip devices.
+
+    fn update(&mut self, p_rate: f64, p_total: f64) -> (f64, f64, Option<f64>) {
+        match self {
+            Self::NoRain => {
+                // If there's a non-zero total, we need to switch to
+                // the rain state.
+
+                if p_total > 0.0 {
+                    *self = Self::Rain {
+                        prev: p_total,
+                        running: p_total,
+                    };
+                }
+                (p_rate, p_total, None)
+            }
+
+            Self::Rain { prev, running } => {
+                let mut running = *running;
+
+                // If the weather station reports no rainfall and
+                // reset its total, we emit the total as the value of
+                // the last rainfall.
+
+                if p_rate == 0.0 && p_total == 0.0 {
+                    *self = Self::NoRain;
+                    (0.0, 0.0, Some(running))
+                } else {
+                    // If the total is less than the previous value,
+                    // then we crossed midnight. Just use the reset
+                    // value as the delta.
+
+                    running += if *prev > p_total {
+                        p_total
+                    } else {
+                        p_total - *prev
+                    };
+
+                    // Update the totals in the state.
+
+                    *self = Self::Rain {
+                        running,
+                        prev: p_total,
+                    };
+                    (p_rate, running, None)
+                }
+            }
+        }
+    }
+}
+
 pub struct Instance {
     con: reqwest::Client,
     api_key: String,
     interval: Duration,
 
-    // These two fields are used to make sure the total precipitation
-    // is always increasing during a storm. Some weather stations
-    // reset their totals at midnight, even though it's still raining.
-
-    last_precip: f64,
-    total_precip: f64,
+    precip: PrecipState,
 }
 
 pub struct Devices {
@@ -192,34 +256,14 @@ impl Instance {
         }
 
         if let (Some(prate), Some(ptotal)) = (prate, ptotal) {
-            if (0.0..=24.0).contains(&prate) {
-                (devices.d_prec_rate)(prate).await
-            } else {
-                warn!("ignoring bad precip rate: {:.2}", prate)
+            let (nrate, ntotal, nlast) = self.precip.update(prate, ptotal);
+
+            (devices.d_prec_rate)(nrate).await;
+            (devices.d_prec_total)(ntotal).await;
+
+            if let Some(last) = nlast {
+                (devices.d_prec_last_total)(last).await;
             }
-
-	    // If the new total is less than the previous, then the
-	    // weather station reset the total (because modnight
-	    // occurred or the rain stopped. In that case, we use the
-	    // new total as the delta. Otherwise we compute the delta
-	    // from the previous total and add it to the running
-	    // total.
-
-	    self.total_precip += if self.last_precip > ptotal {
-		ptotal
-	    } else {
-		ptotal - self.last_precip
-	    };
-	    self.last_precip = ptotal;
-
-            (devices.d_prec_total)(self.total_precip).await;
-
-	    if prate == 0.0 {
-		if self.total_precip > 0.0 && ptotal == 0.0 {
-		    (devices.d_prec_last_total)(self.total_precip).await;
-		    self.total_precip = 0.0;
-		}
-	    }
         } else {
             warn!("need both precip fields to update precip calculations")
         }
@@ -305,7 +349,8 @@ impl driver::API for Instance {
         let humidity_name = "humidity".parse::<device::Base>().unwrap();
         let precip_rate_name = "precip-rate".parse::<device::Base>().unwrap();
         let precip_total_name = "precip-total".parse::<device::Base>().unwrap();
-        let precip_last_total_name = "precip-last-total".parse::<device::Base>().unwrap();
+        let precip_last_total_name =
+            "precip-last-total".parse::<device::Base>().unwrap();
         let pressure_name = "pressure".parse::<device::Base>().unwrap();
         let solar_rad_name = "solar-rad".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
@@ -465,8 +510,7 @@ impl driver::API for Instance {
                         con,
                         api_key,
                         interval,
-			last_precip: 0.0,
-			total_precip: 0.0
+                        precip: PrecipState::new(),
                     }))
                 }
                 Err(e) => Err(Error::ConfigError(format!(
@@ -561,10 +605,71 @@ impl driver::API for Instance {
 
 #[cfg(test)]
 mod tests {
+    use super::PrecipState;
 
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    fn test_precip() {
+        let mut s = PrecipState::new();
+
+        // Should start as `NoRain` and, as long as we have no precip,
+        // it should stay that way.
+
+        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, None));
+        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, None));
+
+        // Even if the rainfall rate is non zero, we don't go into the
+        // rain state until the total is nonzero.
+
+        assert_eq!(s.update(0.1, 0.0), (0.1, 0.0, None));
+
+        // With both inputs 0.0, we shouldn't trigger a "last
+        // rainfall" total.
+
+        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, None));
+
+        // As rain occurs, we should track the total.
+
+        assert_eq!(s.update(0.1, 0.125), (0.1, 0.125, None));
+        assert_eq!(s.update(0.05, 0.25), (0.05, 0.25, None));
+        assert_eq!(s.update(0.7, 0.375), (0.7, 0.375, None));
+
+        // Zero rate shouldn't reset by itself.
+
+        assert_eq!(s.update(0.0, 0.375), (0.0, 0.375, None));
+
+        // If both are zeroed, we go back to `NoRain` and we get an
+        // entry for the last total.
+
+        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, Some(0.375)));
+
+        // Reproduce the previous rain, but we'll add a midnight
+        // crossing (which resets the total).
+
+        assert_eq!(s.update(0.1, 0.125), (0.1, 0.125, None));
+        assert_eq!(s.update(0.05, 0.25), (0.05, 0.25, None));
+        assert_eq!(s.update(0.7, 0.375), (0.7, 0.375, None));
+        assert_eq!(s.update(0.3, 0.125), (0.3, 0.5, None));
+        assert_eq!(s.update(0.3, 0.25), (0.3, 0.625, None));
+
+        // If both are zeroed, we go back to `NoRain` and we get an
+        // entry for the last total.
+
+        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, Some(0.625)));
+
+        // Reproduce the previous inputs except, let's assume that the
+        // total got reset just before reporting it to Weather
+        // Unground. In that case, the total would be zero but the
+        // rate would be non-zero.
+
+        assert_eq!(s.update(0.1, 0.125), (0.1, 0.125, None));
+        assert_eq!(s.update(0.05, 0.25), (0.05, 0.25, None));
+        assert_eq!(s.update(0.7, 0.375), (0.7, 0.375, None));
+        assert_eq!(s.update(0.3, 0.0), (0.3, 0.375, None));
+        assert_eq!(s.update(0.3, 0.125), (0.3, 0.5, None));
+
+        // If both are zeroed, we go back to `NoRain` and we get an
+        // entry for the last total.
+
+        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, Some(0.5)));
     }
 }
