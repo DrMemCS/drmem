@@ -17,6 +17,13 @@ pub struct Instance {
     con: reqwest::Client,
     api_key: String,
     interval: Duration,
+
+    // These two fields are used to make sure the total precipitation
+    // is always increasing during a storm. Some weather stations
+    // reset their totals at midnight, even though it's still raining.
+
+    last_precip: f64,
+    total_precip: f64,
 }
 
 pub struct Devices {
@@ -191,7 +198,28 @@ impl Instance {
                 warn!("ignoring bad precip rate: {:.2}", prate)
             }
 
-            (devices.d_prec_total)(ptotal).await
+	    // If the new total is less than the previous, then the
+	    // weather station reset the total (because modnight
+	    // occurred or the rain stopped. In that case, we use the
+	    // new total as the delta. Otherwise we compute the delta
+	    // from the previous total and add it to the running
+	    // total.
+
+	    self.total_precip += if self.last_precip > ptotal {
+		ptotal
+	    } else {
+		ptotal - self.last_precip
+	    };
+	    self.last_precip = ptotal;
+
+            (devices.d_prec_total)(self.total_precip).await;
+
+	    if prate == 0.0 {
+		if self.total_precip > 0.0 && ptotal == 0.0 {
+		    (devices.d_prec_last_total)(self.total_precip).await;
+		    self.total_precip = 0.0;
+		}
+	    }
         } else {
             warn!("need both precip fields to update precip calculations")
         }
@@ -437,6 +465,8 @@ impl driver::API for Instance {
                         con,
                         api_key,
                         interval,
+			last_precip: 0.0,
+			total_precip: 0.0
                     }))
                 }
                 Err(e) => Err(Error::ConfigError(format!(
