@@ -421,8 +421,7 @@ mod test {
         client::{self, Request},
         device, Error, Result,
     };
-    use futures::{stream, Future};
-    use std::collections::HashMap;
+    use futures::Future;
     use tokio::{
         sync::{broadcast, mpsc},
         task, try_join,

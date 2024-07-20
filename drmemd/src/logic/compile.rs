@@ -70,12 +70,64 @@ use tracing::error;
 lrlex_mod!("logic/logic.l");
 lrpar_mod!("logic/logic.y");
 
+#[derive(Clone, PartialEq, Debug)]
+pub enum TimeField {
+    Second,
+    Minute,
+    Hour,
+    Day,
+    DOW,
+    DOY,
+    Month,
+    Year,
+}
+
+impl std::fmt::Display for TimeField {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            TimeField::Second => write!(f, "second"),
+            TimeField::Minute => write!(f, "minute"),
+            TimeField::Hour => write!(f, "hour"),
+            TimeField::Day => write!(f, "day"),
+            TimeField::DOW => write!(f, "DOW"),
+            TimeField::Month => write!(f, "month"),
+            TimeField::Year => write!(f, "year"),
+            TimeField::DOY => write!(f, "DOY"),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum SolarField {
+    Elevation,
+    Azimuth,
+    RightAscension,
+    Declination,
+}
+
+impl std::fmt::Display for SolarField {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            SolarField::Elevation => write!(f, "alt"),
+            SolarField::Azimuth => write!(f, "az"),
+            SolarField::RightAscension => write!(f, "ra"),
+            SolarField::Declination => write!(f, "dec"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Lit(device::Value),
     Var(usize),
-    TimeVal(&'static str, &'static str, fn(&tod::Info) -> device::Value),
-    SolarVal(&'static str, fn(&solar::Info) -> device::Value),
+    TimeVal(&'static str, TimeField, fn(&tod::Info) -> device::Value),
+    SolarVal(SolarField, fn(&solar::Info) -> device::Value),
 
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
@@ -117,18 +169,21 @@ impl Expr {
 
     pub fn uses_time(&self) -> Option<tod::TimeField> {
         match self {
-            Expr::TimeVal(_, "second", _) => Some(tod::TimeField::Second),
-            Expr::TimeVal(_, "minute", _) => Some(tod::TimeField::Minute),
-            Expr::TimeVal(_, "hour", _) => Some(tod::TimeField::Hour),
-            Expr::TimeVal(_, "day", _)
-            | Expr::TimeVal(_, "DOW", _)
-            | Expr::TimeVal(_, "DOY", _) => Some(tod::TimeField::Day),
-            Expr::TimeVal(_, "month", _) => Some(tod::TimeField::Month),
-            Expr::TimeVal(_, "year", _) => Some(tod::TimeField::Year),
-            Expr::TimeVal(_, _, _)
-            | Expr::SolarVal(..)
-            | Expr::Lit(_)
-            | Expr::Var(_) => None,
+            Expr::TimeVal(_, TimeField::Second, _) => {
+                Some(tod::TimeField::Second)
+            }
+            Expr::TimeVal(_, TimeField::Minute, _) => {
+                Some(tod::TimeField::Minute)
+            }
+            Expr::TimeVal(_, TimeField::Hour, _) => Some(tod::TimeField::Hour),
+            Expr::TimeVal(_, TimeField::Day, _)
+            | Expr::TimeVal(_, TimeField::DOW, _)
+            | Expr::TimeVal(_, TimeField::DOY, _) => Some(tod::TimeField::Day),
+            Expr::TimeVal(_, TimeField::Month, _) => {
+                Some(tod::TimeField::Month)
+            }
+            Expr::TimeVal(_, TimeField::Year, _) => Some(tod::TimeField::Year),
+            Expr::SolarVal(..) | Expr::Lit(_) | Expr::Var(_) => None,
             Expr::Not(e) => e.uses_time(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)

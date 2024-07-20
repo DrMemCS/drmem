@@ -317,7 +317,7 @@ impl Instance {
         s: &mut TcpStream,
         v: f64,
     ) -> Result<()> {
-        // If the brightness is zero, we trun off the dimmer instead
+        // If the brightness is zero, we turn off the dimmer instead
         // of setting the brightness to 0.0. If it's greater than 0.0,
         // set the brightness and then turn on the dimmer.
 

@@ -197,7 +197,7 @@ Unknown -> ():
 use drmem_api::{Result, Error, device};
 use chrono::{Timelike, Datelike};
 use palette::{LinSrgba, LinSrgb, Srgb, named, WithAlpha};
-use super::{super::tod, super::solar, Expr, Program};
+use super::{TimeField, SolarField, super::tod, super::solar, Expr, Program};
 use std::str::FromStr;
 
 use lrlex::{DefaultLexeme, DefaultLexerTypes};
@@ -346,64 +346,64 @@ fn get_solar_declination(info: &solar::Info) -> device::Value {
 fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
     match (cat, fld) {
 	(CAT_UTC, FLD_SECOND) => Ok(Expr::TimeVal(
-            CAT_UTC, FLD_SECOND, get_utc_second
+	    CAT_UTC, TimeField::Second, get_utc_second
         )),
 	(CAT_UTC, FLD_MINUTE) => Ok(Expr::TimeVal(
-            CAT_UTC, FLD_MINUTE, get_utc_minute
+            CAT_UTC, TimeField::Minute, get_utc_minute
         )),
 	(CAT_UTC, FLD_HOUR) => Ok(Expr::TimeVal(
-            CAT_UTC, FLD_HOUR, get_utc_hour
+	    CAT_UTC, TimeField::Hour, get_utc_hour
         )),
 	(CAT_UTC, FLD_DAY) => Ok(Expr::TimeVal(
-            CAT_UTC, FLD_DAY, get_utc_day
+	    CAT_UTC, TimeField::Day, get_utc_day
         )),
 	(CAT_UTC, FLD_DOW) => Ok(Expr::TimeVal(
-            CAT_UTC, FLD_DOW, get_utc_day_of_week
+            CAT_UTC, TimeField::DOW, get_utc_day_of_week
         )),
 	(CAT_UTC, FLD_MONTH) => Ok(Expr::TimeVal(
-            CAT_UTC, FLD_MONTH, get_utc_month
+            CAT_UTC, TimeField::Month, get_utc_month
         )),
 	(CAT_UTC, FLD_YEAR) => Ok(Expr::TimeVal(
-            CAT_UTC, FLD_YEAR, get_utc_year
+            CAT_UTC, TimeField::Year, get_utc_year
         )),
 	(CAT_UTC, FLD_DOY) => Ok(Expr::TimeVal(
-            CAT_UTC, FLD_DOY, get_utc_day_of_year
+            CAT_UTC, TimeField::DOY, get_utc_day_of_year
         )),
 	(CAT_LOCAL, FLD_SECOND) => Ok(Expr::TimeVal(
-            CAT_LOCAL, FLD_SECOND, get_local_second
+            CAT_LOCAL, TimeField::Second, get_local_second
         )),
 	(CAT_LOCAL, FLD_MINUTE) => Ok(Expr::TimeVal(
-            CAT_LOCAL, FLD_MINUTE, get_local_minute
+            CAT_LOCAL, TimeField::Minute, get_local_minute
         )),
 	(CAT_LOCAL, FLD_HOUR) => Ok(Expr::TimeVal(
-            CAT_LOCAL, FLD_HOUR, get_local_hour
+            CAT_LOCAL, TimeField::Hour, get_local_hour
         )),
 	(CAT_LOCAL, FLD_DAY) => Ok(Expr::TimeVal(
-            CAT_LOCAL, FLD_DAY, get_local_day
+            CAT_LOCAL, TimeField::Day, get_local_day
         )),
 	(CAT_LOCAL, FLD_DOW) => Ok(Expr::TimeVal(
-            CAT_LOCAL, FLD_DOW, get_local_day_of_week
+            CAT_LOCAL, TimeField::DOW, get_local_day_of_week
         )),
 	(CAT_LOCAL, FLD_MONTH) => Ok(Expr::TimeVal(
-            CAT_LOCAL, FLD_MONTH, get_local_month
+            CAT_LOCAL, TimeField::Month, get_local_month
         )),
 	(CAT_LOCAL, FLD_YEAR) => Ok(Expr::TimeVal(
-            CAT_LOCAL, FLD_YEAR, get_local_year
+            CAT_LOCAL, TimeField::Year, get_local_year
         )),
 	(CAT_LOCAL, FLD_DOY) => Ok(Expr::TimeVal(
-            CAT_LOCAL, FLD_DOY, get_local_day_of_year
+            CAT_LOCAL, TimeField::DOY, get_local_day_of_year
         )),
 	(CAT_SOLAR, FLD_ALT) => Ok(Expr::SolarVal(
-            FLD_ALT, get_solar_altitude
+	    SolarField::Elevation, get_solar_altitude
         )),
 	(CAT_SOLAR, FLD_AZ) => Ok(Expr::SolarVal(
-            FLD_AZ, get_solar_azimuth
+            SolarField::Azimuth, get_solar_azimuth
         )),
 	(CAT_SOLAR, FLD_RA) => Ok(Expr::SolarVal(
-            FLD_RA, get_solar_right_ascension
+            SolarField::RightAscension, get_solar_right_ascension
         )),
 	(CAT_SOLAR, FLD_DEC) => Ok(Expr::SolarVal(
-            FLD_DEC, get_solar_declination
+            SolarField::Declination, get_solar_declination
         )),
 	_ => Err(Error::ParseError(
 		 format!("unknown built-in: {}:{}", cat, fld)
