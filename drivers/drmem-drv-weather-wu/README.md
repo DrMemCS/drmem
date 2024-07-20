@@ -51,7 +51,8 @@ log.
 | `heat-index` | f64, RO | °F or °C | Heat index temperature |
 | `humidity` | f64, RO | % | Relative humidity |
 | `precip-rate` | f64, RO | in/hr or mm/hr | Rate of precipitation |
-| `precip-total` | f64, RO | in or mm | Integration of precipitation. Gets reset when `precip-rate` remains at 0 for two polls |
+| `precip-total` | f64, RO | in or mm | Integration of precipitation. |
+| `precip-last-total` | f64, RO | in or mm | Holds the previous rainfall's total. Gets updated when `precip-total` gets reset. |
 | `pressure` | f64, RO | in:Hg or hPa | Barometric pressure |
 | `solar-rad` | f64, RO | W/m² | Solar radiation measurement. |
 | `state`   | bool, RO | | Set to `true` while the system is able to communicate with Weather Underground. |
