@@ -1,4 +1,5 @@
 use drmem_api::{client, device, driver, Result};
+use futures::future::join_all;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -89,12 +90,11 @@ impl Output {
 
 pub struct Node {
     inputs: Vec<Inputs>,
-    outputs: Vec<Output>,
     in_stream: InputStream,
     time_ch: Option<tod::TimeFilter>,
     solar_ch: Option<broadcast::Receiver<solar::Info>>,
     def_exprs: Vec<compile::Program>,
-    exprs: Vec<compile::Program>,
+    exprs: Vec<(compile::Program, Output)>,
 }
 
 impl Node {
@@ -249,7 +249,7 @@ impl Node {
                 Err(e) => error!("{}", &e),
             })
             .collect();
-        let exprs = exprs?;
+        let mut exprs = exprs?;
 
         // Look at each expression and see if it needs the
         // time-of-day.
@@ -276,13 +276,12 @@ impl Node {
 
         Ok(Node {
             inputs: vec![None; inputs.len()],
-            outputs: out_chans,
             in_stream,
             time_ch: needs_time
                 .map(|tf| tod::time_filter(BroadcastStream::new(c_time), tf)),
             solar_ch: if needs_solar { Some(c_solar) } else { None },
             def_exprs,
-            exprs,
+            exprs: exprs.drain(..).zip(out_chans).collect(),
         })
     }
 
@@ -365,27 +364,17 @@ impl Node {
                 );
             }
 
-            // Loop through each defined expression.
+            // Calculate each of the final expressions. If there are
+            // more than one expressions in this node, they are
+            // evaluated concurrently.
 
-            for compile::Program(expr, idx) in &self.exprs {
-                // Compute the result of the expression, given the set
-                // of inputs. If the result is None, then something in
-                // the expression was wrong (either one or more input
-                // values are None or the expression performed a bad
-                // operation, like dividing by 0.)
-
-                if let Some(result) =
+            join_all(self.exprs.iter_mut().filter_map(
+                |(compile::Program(expr, _), out)| {
                     compile::eval(expr, &self.inputs, &time, solar.as_ref())
-                {
-                    info!(
-                        "expr ({}) produced {:?} for out[{}]",
-                        &expr, &result, *idx
-                    );
-                    let _ = self.outputs[*idx].send(result).await;
-                } else {
-                    error!("couldn't evaluate ({})", &expr)
-                }
-            }
+                        .map(|v| out.send(v))
+                },
+            ))
+            .await;
         }
     }
 
