@@ -177,17 +177,12 @@ async fn run() -> Result<()> {
         // Iterate through the [[logic]] sections of the config.
 
         for logic in cfg.logic {
-            match logic::Node::start(
+            tasks.push(wrap_task(logic::Node::start(
                 tx_clnt_req.clone(),
                 tx_tod.subscribe(),
                 tx_solar.subscribe(),
-                &logic,
-            )
-            .await
-            {
-                Ok(instance) => tasks.push(wrap_task(instance)),
-                Err(_) => error!("logic node '{}' is not running", &logic.name),
-            }
+                logic,
+            )));
         }
 
         // Now that we've given all the logic blocks receive handles
