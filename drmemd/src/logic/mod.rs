@@ -251,6 +251,17 @@ impl Node {
             .collect();
         let mut exprs = exprs?;
 
+        // Sort the expressions based on the index of the outputs. The
+        // output variables are in a hash map, so the vector is built
+        // in whatever order the map uses. This might not be the same
+        // order that the expressions are given. By sorting the
+        // expressions, we line them up so they can be zipped together
+        // later in this function.
+
+        exprs[..].sort_unstable_by(
+            |compile::Program(_, a), compile::Program(_, b)| a.cmp(b),
+        );
+
         // Look at each expression and see if it needs the
         // time-of-day.
 
