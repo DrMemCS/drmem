@@ -792,51 +792,112 @@ mod test {
         const OUT1: &str = "device:out1";
         const OUT2: &str = "device:out2";
 
-        let cfg = build_config(
-            &[("in", "device:in")],
-            &[("out1", OUT1), ("out2", OUT2)],
-            &[],
-            &["{in} -> {out1}", "{in} -> {out2}"],
-        );
-        let (tx_in, rx_in) = mpsc::channel(100);
-        let (tx_out1, mut rx_out1) = mpsc::channel(100);
-        let (tx_out2, mut rx_out2) = mpsc::channel(100);
+        // This section sets the output expressions in out1 -> out2
+        // order. It computes a different value that is sent to the
+        // outputs and verifies the correct value is sent to the
+        // correct device.
 
-        let (_, _, emu, tx_stop) = Emulator::start(
-            vec![("device:in".into(), rx_in)],
-            vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
-            cfg,
-        )
-        .await
-        .unwrap();
+        {
+            let cfg = build_config(
+                &[("in", "device:in")],
+                &[("out1", OUT1), ("out2", OUT2)],
+                &[],
+                &["{in} -> {out1}", "{in} * 2 -> {out2}"],
+            );
+            let (tx_in, rx_in) = mpsc::channel(100);
+            let (tx_out1, mut rx_out1) = mpsc::channel(100);
+            let (tx_out2, mut rx_out2) = mpsc::channel(100);
 
-        // Send a value and see if it was forwarded to both
-        // channels. We hold off replying until we verify both
-        // channels have content.
+            let (_, _, emu, tx_stop) = Emulator::start(
+                vec![("device:in".into(), rx_in)],
+                vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
+                cfg,
+            )
+            .await
+            .unwrap();
 
-        assert!(tx_in.send(device::Value::Int(10)).await.is_ok());
+            // Send a value and see if it was forwarded to both
+            // channels. We hold off replying until we verify both
+            // channels have content.
 
-        let (value1, rpy1) =
-            time::timeout(Duration::from_millis(100), rx_out1.recv())
-                .await
-                .unwrap()
-                .unwrap();
-        let (value2, rpy2) =
-            time::timeout(Duration::from_millis(100), rx_out2.recv())
-                .await
-                .unwrap()
-                .unwrap();
+            assert!(tx_in.send(device::Value::Int(10)).await.is_ok());
 
-        assert_eq!(value1, device::Value::Int(10));
-        assert_eq!(value2, device::Value::Int(10));
+            let (value1, rpy1) =
+                time::timeout(Duration::from_millis(100), rx_out1.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let (value2, rpy2) =
+                time::timeout(Duration::from_millis(100), rx_out2.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
 
-        let _ = rpy1.send(Ok(value1.clone()));
-        let _ = rpy2.send(Ok(value2.clone()));
+            assert_eq!(value1, device::Value::Int(10));
+            assert_eq!(value2, device::Value::Int(20));
 
-        // Stop the emulator and see that its return status is good.
+            let _ = rpy1.send(Ok(value1.clone()));
+            let _ = rpy2.send(Ok(value2.clone()));
 
-        let _ = tx_stop.send(());
+            // Stop the emulator and see that its return status is good.
 
-        assert_eq!(emu.await.unwrap(), Ok(true));
+            let _ = tx_stop.send(());
+
+            assert_eq!(emu.await.unwrap(), Ok(true));
+        }
+
+        // This section sets the output expressions in out2 -> out1
+        // order. It computes a different value that is sent to the
+        // outputs and verifies the correct value is sent to the
+        // correct device.
+
+        {
+            let cfg = build_config(
+                &[("in", "device:in")],
+                &[("out1", OUT1), ("out2", OUT2)],
+                &[],
+                &["{in} * 2 -> {out2}", "{in} -> {out1}"],
+            );
+            let (tx_in, rx_in) = mpsc::channel(100);
+            let (tx_out1, mut rx_out1) = mpsc::channel(100);
+            let (tx_out2, mut rx_out2) = mpsc::channel(100);
+
+            let (_, _, emu, tx_stop) = Emulator::start(
+                vec![("device:in".into(), rx_in)],
+                vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
+                cfg,
+            )
+            .await
+            .unwrap();
+
+            // Send a value and see if it was forwarded to both
+            // channels. We hold off replying until we verify both
+            // channels have content.
+
+            assert!(tx_in.send(device::Value::Int(10)).await.is_ok());
+
+            let (value1, rpy1) =
+                time::timeout(Duration::from_millis(100), rx_out1.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let (value2, rpy2) =
+                time::timeout(Duration::from_millis(100), rx_out2.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+
+            assert_eq!(value1, device::Value::Int(10));
+            assert_eq!(value2, device::Value::Int(20));
+
+            let _ = rpy1.send(Ok(value1.clone()));
+            let _ = rpy2.send(Ok(value2.clone()));
+
+            // Stop the emulator and see that its return status is good.
+
+            let _ = tx_stop.send(());
+
+            assert_eq!(emu.await.unwrap(), Ok(true));
+        }
     }
 }
