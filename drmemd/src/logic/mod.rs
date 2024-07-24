@@ -260,8 +260,6 @@ impl Node {
             .filter_map(|compile::Program(e, _)| e.uses_time())
             .min();
 
-        info!("needs time: {:?}", &needs_time);
-
         // Look at each expression and see if it needs any solar
         // information.
 
@@ -269,8 +267,6 @@ impl Node {
             .iter()
             .chain(&def_exprs)
             .any(|compile::Program(e, _)| e.uses_solar());
-
-        info!("needs solar: {:?}", &needs_solar);
 
         // Return the initialized `Node`.
 
@@ -338,7 +334,6 @@ impl Node {
 		// second.
 
 		Some(v) = wait_for_time => {
-		    info!("updating time");
 		    time = v;
 		}
 
@@ -346,7 +341,6 @@ impl Node {
 		// update.
 
 		Some(v) = wait_for_solar => {
-		    info!("updating solar position");
 		    solar = Some(v);
 		}
 	    }
