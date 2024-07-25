@@ -1,4 +1,5 @@
 use drmem_api::{client, device, driver, Result};
+use futures::future::join_all;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -89,12 +90,11 @@ impl Output {
 
 pub struct Node {
     inputs: Vec<Inputs>,
-    outputs: Vec<Output>,
     in_stream: InputStream,
     time_ch: Option<tod::TimeFilter>,
     solar_ch: Option<broadcast::Receiver<solar::Info>>,
     def_exprs: Vec<compile::Program>,
-    exprs: Vec<compile::Program>,
+    exprs: Vec<(compile::Program, Output)>,
 }
 
 impl Node {
@@ -141,20 +141,11 @@ impl Node {
             }
         }
 
-        // Now add the definitions to the returned state. Definitions
-        // add new variables to the vector of inputs.
+        // Now add the definitions to the vector of inputs (we've
+        // already verified the 'defs' names don't conflict with
+        // 'inputs' names.)
 
         for (name, expr) in defs {
-            // Make sure the name isn't already in the list of inputs.
-
-            if inputs.iter().any(|v| v == name) {
-                error!("definition tried to redefine {}", name);
-                return Err(drmem_api::Error::ParseError(format!(
-                    "can't redefine {}",
-                    name
-                )));
-            }
-
             // Add the definition's target name to the list of names.
 
             inputs.push(name.clone());
@@ -219,9 +210,91 @@ impl Node {
         c_req: client::RequestChan,
         c_time: broadcast::Receiver<tod::Info>,
         c_solar: broadcast::Receiver<solar::Info>,
-        cfg: &config::Logic,
+        cfg: config::Logic,
     ) -> Result<Node> {
         debug!("compiling expressions");
+
+        if cfg.exprs.is_empty() {
+            return Err(drmem_api::Error::ConfigError(
+                "configuration doesn't define any expressions".into(),
+            ));
+        }
+
+        // Validate the inputs.
+        //
+        // We add the names of the `inputs` and `defs` variables to a
+        // set. If a name is already in the set, we return an
+        // error. We add the devices in another set and make sure all
+        // are unique.
+
+        {
+            use std::collections::HashSet;
+
+            let mut name_set: HashSet<&String> =
+                HashSet::with_capacity(cfg.inputs.len() + cfg.defs.len());
+            let mut dev_set: HashSet<&device::Name> =
+                HashSet::with_capacity(cfg.inputs.len());
+
+            for (ref k, ref v) in &cfg.inputs {
+                if !name_set.insert(k) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "name '{}' is defined more than once in 'inputs'",
+                        k
+                    )));
+                }
+                if !dev_set.insert(v) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "device '{}' is defined more than once in 'inputs'",
+                        v
+                    )));
+                }
+            }
+
+            for ref k in cfg.defs.keys() {
+                if !name_set.insert(k) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "'{}' is defined in 'defs' and 'inputs' sections",
+                        k
+                    )));
+                }
+            }
+        }
+
+        // Validate the outputs.
+        //
+        // We add the names of the `outputs` variables to a set. If a
+        // name is already in the set, we return an error. We add the
+        // devices in another set and make sure all are unique.
+
+        {
+            use std::collections::HashSet;
+
+            if cfg.outputs.is_empty() {
+                return Err(drmem_api::Error::ConfigError(
+                    "configuration doesn't define any outputs".into(),
+                ));
+            }
+
+            let mut name_set: HashSet<&str> =
+                HashSet::with_capacity(cfg.outputs.len());
+            let mut dev_set: HashSet<&device::Name> =
+                HashSet::with_capacity(cfg.outputs.len());
+
+            for (ref k, ref v) in &cfg.outputs {
+                if !name_set.insert(k.as_str()) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "name '{}' is defined more than once in 'outputs'",
+                        k
+                    )));
+                }
+                if !dev_set.insert(v) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "device '{}' is defined more than once in 'outputs'",
+                        v
+                    )));
+                }
+            }
+        }
 
         let (inputs, in_stream, def_exprs) =
             Node::setup_inputs(&c_req, &cfg.inputs, &cfg.defs).await?;
@@ -249,7 +322,32 @@ impl Node {
                 Err(e) => error!("{}", &e),
             })
             .collect();
-        let exprs = exprs?;
+        let mut exprs = exprs?;
+
+        // Sort the expressions based on the index of the outputs. The
+        // output variables are in a hash map, so the vector is built
+        // in whatever order the map uses. This might not be the same
+        // order that the expressions are given. By sorting the
+        // expressions, we line them up so they can be zipped together
+        // later in this function.
+        //
+        // XXX: This should be refactored. The parser should return
+        // the output variable name instead of an index in the output
+        // environment. Then we should go through the expressions, in
+        // order, and add the target output to the output vector. This
+        // would have two benefits:
+        //
+        // 1) Even though multiple expressions send their results at
+        // roughly the same time, the actual settings would go out
+        // quickly in expression order.
+        //
+        // 2) If the user specified more output variables than
+        // expressions that use them, resources wouldn't be allocated
+        // for unused output devices.
+
+        exprs[..].sort_unstable_by(
+            |compile::Program(_, a), compile::Program(_, b)| a.cmp(b),
+        );
 
         // Look at each expression and see if it needs the
         // time-of-day.
@@ -260,8 +358,6 @@ impl Node {
             .filter_map(|compile::Program(e, _)| e.uses_time())
             .min();
 
-        info!("needs time: {:?}", &needs_time);
-
         // Look at each expression and see if it needs any solar
         // information.
 
@@ -270,19 +366,16 @@ impl Node {
             .chain(&def_exprs)
             .any(|compile::Program(e, _)| e.uses_solar());
 
-        info!("needs solar: {:?}", &needs_solar);
-
         // Return the initialized `Node`.
 
         Ok(Node {
             inputs: vec![None; inputs.len()],
-            outputs: out_chans,
             in_stream,
             time_ch: needs_time
                 .map(|tf| tod::time_filter(BroadcastStream::new(c_time), tf)),
             solar_ch: if needs_solar { Some(c_solar) } else { None },
             def_exprs,
-            exprs,
+            exprs: exprs.drain(..).zip(out_chans).collect(),
         })
     }
 
@@ -327,8 +420,6 @@ impl Node {
 		// and the actual reading.
 
 		Some((idx, reading)) = self.in_stream.next() => {
-		    info!("updating in[{}] with {}", idx, &reading.value);
-
 		    // Save the reading in our array for future
 		    // recalculations.
 
@@ -339,7 +430,6 @@ impl Node {
 		// second.
 
 		Some(v) = wait_for_time => {
-		    info!("updating time");
 		    time = v;
 		}
 
@@ -347,70 +437,57 @@ impl Node {
 		// update.
 
 		Some(v) = wait_for_solar => {
-		    info!("updating solar position");
 		    solar = Some(v);
 		}
 	    }
 
             // Calculate each expression of the `defs` array. Store
-            // the result in the associated `input` cell.
+            // each expression's result in the associated `input`
+            // cell.
 
-            for compile::Program(expr, idx) in &self.def_exprs {
-                self.inputs[*idx] =
-                    compile::eval(expr, &self.inputs, &time, solar.as_ref());
+            self.def_exprs
+                .iter()
+                .for_each(|compile::Program(expr, idx)| {
+                    self.inputs[*idx] =
+                        compile::eval(expr, &self.inputs, &time, solar.as_ref())
+                });
 
-                info!(
-                    "def ({}) produced {:?} for in[{}]",
-                    &expr, &self.inputs[*idx], *idx
-                );
-            }
+            // Calculate each of the final expressions. If there are
+            // more than one expressions in this node, they are
+            // evaluated concurrently.
 
-            // Loop through each defined expression.
-
-            for compile::Program(expr, idx) in &self.exprs {
-                // Compute the result of the expression, given the set
-                // of inputs. If the result is None, then something in
-                // the expression was wrong (either one or more input
-                // values are None or the expression performed a bad
-                // operation, like dividing by 0.)
-
-                if let Some(result) =
+            join_all(self.exprs.iter_mut().filter_map(
+                |(compile::Program(expr, _), out)| {
                     compile::eval(expr, &self.inputs, &time, solar.as_ref())
-                {
-                    info!(
-                        "expr ({}) produced {:?} for out[{}]",
-                        &expr, &result, *idx
-                    );
-                    let _ = self.outputs[*idx].send(result).await;
-                } else {
-                    error!("couldn't evaluate ({})", &expr)
-                }
-            }
+                        .map(|v| out.send(v))
+                },
+            ))
+            .await;
         }
     }
 
     // Starts a new instance of a logic node.
 
-    pub async fn start(
+    pub fn start(
         c_req: client::RequestChan,
         rx_tod: broadcast::Receiver<tod::Info>,
         rx_solar: broadcast::Receiver<solar::Info>,
-        cfg: &config::Logic,
-    ) -> Result<JoinHandle<Result<Infallible>>> {
+        cfg: config::Logic,
+    ) -> JoinHandle<Result<Infallible>> {
         let name = cfg.name.clone();
-
-        // Create a new instance and let it initialize itself. If an
-        // error occurs, return it.
-
-        let node = Node::init(c_req, rx_tod, rx_solar, cfg)
-            .instrument(info_span!("logic-init", name = &name))
-            .await?;
 
         // Put the node in the background.
 
-        Ok(tokio::spawn(async move {
+        tokio::spawn(async move {
+            // Create a new instance and let it initialize itself. If
+            // an error occurs, return it.
+
+            let node = Node::init(c_req, rx_tod, rx_solar, cfg)
+                .instrument(info_span!("logic-init", name = &name))
+                .await?;
+
             node.run().instrument(info_span!("logic", name)).await
-        }))
+        })
     }
 }
 
@@ -419,13 +496,190 @@ mod test {
     use super::{config, solar, tod, Node};
     use drmem_api::{
         client::{self, Request},
-        device, Error, Result,
+        device, driver, Error, Result,
     };
     use futures::Future;
+    use std::{collections::HashMap, sync::Arc, time::Duration};
     use tokio::{
-        sync::{broadcast, mpsc},
-        task, try_join,
+        sync::{broadcast, mpsc, oneshot},
+        task, time,
     };
+    use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+
+    // This type implements an emulator of the DrMem core. It will
+    // spin up a logic block using the provided configuration. The
+    // unit tests can provide channels to send readings and receive
+    // settings and verify correct operation.
+
+    struct Emulator {
+        inputs: HashMap<Arc<str>, mpsc::Receiver<device::Value>>,
+        outputs: HashMap<Arc<str>, driver::TxDeviceSetting>,
+    }
+
+    impl Emulator {
+        pub async fn start(
+            inputs: Vec<(Arc<str>, mpsc::Receiver<device::Value>)>,
+            outputs: Vec<(Arc<str>, driver::TxDeviceSetting)>,
+            cfg: config::Logic,
+        ) -> Result<(
+            broadcast::Sender<tod::Info>,
+            broadcast::Sender<solar::Info>,
+            task::JoinHandle<Result<bool>>,
+            oneshot::Sender<()>,
+        )> {
+            Emulator::new(inputs, outputs).launch(cfg).await
+        }
+
+        // Creates a new instance of an Emulator and loads it with the
+        // input and output names and channels.
+
+        fn new(
+            mut inputs: Vec<(Arc<str>, mpsc::Receiver<device::Value>)>,
+            mut outputs: Vec<(Arc<str>, driver::TxDeviceSetting)>,
+        ) -> Self {
+            Emulator {
+                inputs: HashMap::from_iter(inputs.drain(..)),
+                outputs: HashMap::from_iter(outputs.drain(..)),
+            }
+        }
+
+        // Launches a logic block with the provided configuration.
+
+        async fn launch(
+            mut self,
+            cfg: config::Logic,
+        ) -> Result<(
+            broadcast::Sender<tod::Info>,
+            broadcast::Sender<solar::Info>,
+            task::JoinHandle<Result<bool>>,
+            oneshot::Sender<()>,
+        )> {
+            // Create the common channels used by DrMem.
+
+            let (tx_req, mut c_recv) = mpsc::channel(100);
+            let (tx_tod, rx_tod) = broadcast::channel(100);
+            let (tx_solar, rx_solar) = broadcast::channel(100);
+
+            // Start the logic block with the proper communciation
+            // channels and configuration.
+
+            let node = Node::start(
+                client::RequestChan::new(tx_req),
+                rx_tod,
+                rx_solar,
+                cfg,
+            );
+
+            // Create the 'stop' channel.
+
+            let (tx_stop, rx_stop) = oneshot::channel();
+
+            let emu = task::spawn(async move {
+                // The first responsibility is to handle the
+                // initialization of the node. This loop iterates
+                // through and satisfies the requests made by the
+                // node.
+
+                loop {
+                    // Did we get a request message? Handle it.
+
+                    if let Some(message) = c_recv.recv().await {
+                        match message {
+                            Request::GetSettingChan {
+                                name, rpy_chan, ..
+                            } => {
+                                let name = name.to_string();
+                                let _ = rpy_chan.send(
+                                    if let Some(tx) =
+                                        self.outputs.remove(name.as_str())
+                                    {
+                                        Ok(tx)
+                                    } else {
+                                        Err(Error::NotFound)
+                                    },
+                                );
+                            }
+                            Request::QueryDeviceInfo { rpy_chan, .. } => {
+                                let _ = rpy_chan.send(Err(
+                                    Error::ProtocolError("bad request".into()),
+                                ));
+                            }
+                            Request::SetDevice { rpy_chan, .. } => {
+                                let _ = rpy_chan.send(Err(
+                                    Error::ProtocolError("bad request".into()),
+                                ));
+                            }
+                            Request::MonitorDevice {
+                                name, rpy_chan, ..
+                            } => {
+                                let name = name.to_string();
+                                let _ = rpy_chan.send(
+                                    if let Some(rx) =
+					self.inputs.remove(name.as_str())
+                                    {
+					let stream =
+                                            Box::pin(ReceiverStream::new(rx).map(
+						|v| device::Reading {
+                                                    ts: std::time::SystemTime::now(
+                                                    ),
+                                                    value: v,
+						},
+                                            ));
+
+					Ok(stream as device::DataStream<device::Reading,>)
+                                    } else {
+					Err(Error::NotFound)
+                                    }
+				);
+                            }
+                        }
+                    }
+                    // If the channel returned `None`, then the node
+                    // dropped the channel sender (indicating its
+                    // initialization is done.) If both hash maps
+                    // aren't empty, then the node didn't ask for all
+                    // the resources we provided (could be the
+                    // configuration was incorrect.) In any case,
+                    // return `false`.
+                    else if !self.outputs.is_empty()
+                        || !self.inputs.is_empty()
+                    {
+                        return Ok(false);
+                    }
+                    // All is good. Break out of the loop.
+                    else {
+                        break;
+                    }
+                }
+
+                let ah = node.abort_handle();
+
+                #[rustfmt::skip]
+                tokio::select! {
+		    // Look for the signal from the unit test to tell
+		    // us to exit.
+
+                    _ = rx_stop => (),
+
+		    // If the Node exits, it's due to an error. Report
+		    // the error.
+
+                    v = node =>
+			return match v {
+                            Ok(result) => result.map(|_| false),
+                            Err(e) => Err(Error::OperationError(
+				format!("logic block panicked: {}", &e)
+			    ))
+			}
+                }
+
+                ah.abort();
+                Ok(true)
+            });
+
+            Ok((tx_tod, tx_solar, emu, tx_stop))
+        }
+    }
 
     // Test sending a setting. The settings pass through an Output
     // channel and get debounced.
@@ -460,7 +714,7 @@ mod test {
     // requests for a setting channel to a device.
 
     fn init_node<'a>(
-        cfg: &'a config::Logic,
+        cfg: config::Logic,
     ) -> (
         impl Future<Output = Result<Node>> + 'a,
         mpsc::Receiver<client::Request>,
@@ -507,75 +761,372 @@ mod test {
     // dropped.
 
     #[tokio::test]
-    async fn test_empty_node_init() {
-        let cfg = build_config(&[], &[], &[], &[]);
-        let (node, _, tod_tx, sol_tx) = init_node(&cfg);
+    async fn test_bad_config() {
+        // Test that we reject an empty configuration (mainly because
+        // if there are no expressions, there is nothing to do.)
 
-        // `await` on the future. This should return immediately since
-        // the config has no inputs or outputs.
+        {
+            let cfg = build_config(&[], &[], &[], &[]);
+            let (node, _, tod_tx, sol_tx) = init_node(cfg);
 
-        let node = node.await.unwrap();
+            tokio::pin!(node);
 
-        // With no config, the TOD and solar channel handles should
-        // have been dropped.
+            // `await` on the future. This should return immediately
+            // as an error because there are no expressions to
+            // process.
 
-        assert_eq!(tod_tx.receiver_count(), 0);
-        assert_eq!(sol_tx.receiver_count(), 0);
+            assert!(matches!(node.as_mut().await, Err(Error::ConfigError(_))));
 
-        // This call allows us to keep ownership of the node so we're
-        // sure the Node dropped the broadcast receivers and not from
-        // an early drop of `node` itself.
+            // With no config, the TOD and solar channel handles
+            // should have been dropped.
 
-        std::mem::drop(node);
+            assert_eq!(tod_tx.receiver_count(), 0);
+            assert_eq!(sol_tx.receiver_count(), 0);
+
+            // This call allows us to keep ownership of the node so
+            // we're sure the Node dropped the broadcast receivers and
+            // not from an early drop of `node` itself.
+
+            std::mem::drop(node);
+        }
+
+        // Test that we reject two inputs with the same device.
+
+        {
+            let cfg = build_config(
+                &[("in", "device:in"), ("in2", "device:in")],
+                &[("out", "device:out")],
+                &[],
+                &["{in} -> {out}"],
+            );
+            let (node, _, _, _) = init_node(cfg);
+
+            // `await` on the future. This should return immediately
+            // as an error because there are no expressions to
+            // process.
+
+            assert!(matches!(node.await, Err(Error::ConfigError(_))));
+        }
+
+        // Test that we reject an input and a def with the same name.
+
+        {
+            let cfg = build_config(
+                &[("in", "device:in")],
+                &[("out", "device:out")],
+                &[("in", "{in}")],
+                &["{in} -> {out}"],
+            );
+            let (node, _, _, _) = init_node(cfg);
+
+            // `await` on the future. This should return immediately
+            // as an error because there are no expressions to
+            // process.
+
+            assert!(matches!(node.await, Err(Error::ConfigError(_))));
+        }
+
+        // Test that we reject two outputs with the same device.
+
+        {
+            let cfg = build_config(
+                &[("in", "device:in")],
+                &[("out", "device:out"), ("out2", "device:out")],
+                &[],
+                &["{in} -> {out}"],
+            );
+            let (node, _, _, _) = init_node(cfg);
+
+            // `await` on the future. This should return immediately
+            // as an error because there are no expressions to
+            // process.
+
+            assert!(matches!(node.await, Err(Error::ConfigError(_))));
+        }
     }
 
+    // Test a basic logic block in which an input device's value is
+    // forwarded to an output device.
+
     #[tokio::test]
-    async fn test_node_initialization() {
+    async fn test_basic_node() {
         let cfg = build_config(
-            &[],
+            &[("in", "device:in")],
             &[("out", "device:out")],
             &[],
-            &["{utc:second} -> {out}"],
+            &["{in} -> {out}"],
         );
-        let (node_fut, mut req_rx, _, _) = init_node(&cfg);
+        let (tx_in, rx_in) = mpsc::channel(100);
+        let (tx_out, mut rx_out) = mpsc::channel(100);
 
-        // Run the initialization concurrently with handling the one
-        // request it is going to make.
+        let (_, _, emu, tx_stop) = Emulator::start(
+            vec![("device:in".into(), rx_in)],
+            vec![("device:out".into(), tx_out)],
+            cfg,
+        )
+        .await
+        .unwrap();
 
-        #[rustfmt::skip]
-	try_join!(
-	    node_fut,
-	    async {
-		match (&mut req_rx).recv().await.unwrap() {
-		    Request::GetSettingChan { name, rpy_chan, .. } => {
-			if name.to_string() == "device:out" {
-			    let (tx, _) = mpsc::channel(10);
+        // Send a value and see if it was forwarded.
 
-			    assert!(rpy_chan.send(Ok(tx)).is_ok());
-			} else {
-			    assert!(
-				rpy_chan.send(Err(Error::NotFound)).is_ok());
-			}
-		    }
-		    Request::QueryDeviceInfo { rpy_chan, .. } =>
-			assert!(rpy_chan
-				.send(Err(Error::ProtocolError(
-				    "bad request".into())))
-				.is_ok()),
-		    Request::SetDevice { rpy_chan, .. } =>
-			assert!(rpy_chan
-				.send(Err(Error::ProtocolError(
-				    "bad request".into())))
-				.is_ok()),
-		    Request::MonitorDevice { rpy_chan, .. } =>
-			assert!(rpy_chan
-				.send(Err(Error::ProtocolError(
-				    "bad request".into())))
-				.is_ok())
-		};
-		Ok(())
-	    }
-	)
-	.unwrap();
+        assert!(tx_in.send(device::Value::Int(1)).await.is_ok());
+
+        let (value, rpy) = rx_out.recv().await.unwrap();
+        let _ = rpy.send(Ok(value.clone()));
+
+        assert_eq!(value, device::Value::Int(1));
+
+        // Send the same value and see that it wasn't forwarded.
+
+        assert!(tx_in.send(device::Value::Int(1)).await.is_ok());
+        assert!(time::timeout(Duration::from_millis(100), rx_out.recv())
+            .await
+            .is_err());
+
+        // Send a different value and see if it was forwarded.
+
+        assert!(tx_in.send(device::Value::Int(9)).await.is_ok());
+
+        let (value, rpy) = rx_out.recv().await.unwrap();
+        let _ = rpy.send(Ok(value.clone()));
+
+        assert_eq!(value, device::Value::Int(9));
+
+        // Stop the emulator and see that its return status is good.
+
+        let _ = tx_stop.send(());
+
+        assert_eq!(emu.await.unwrap(), Ok(true));
+    }
+
+    // Test a basic logic block in which an input device's value is
+    // used in a calculation and then forwarded to an output device.
+
+    #[tokio::test]
+    async fn test_basic_calc_node() {
+        let cfg = build_config(
+            &[("in", "device:in")],
+            &[("out", "device:out")],
+            &[],
+            &["{in} > 5 -> {out}"],
+        );
+        let (tx_in, rx_in) = mpsc::channel(100);
+        let (tx_out, mut rx_out) = mpsc::channel(100);
+
+        let (_, _, emu, tx_stop) = Emulator::start(
+            vec![("device:in".into(), rx_in)],
+            vec![("device:out".into(), tx_out)],
+            cfg,
+        )
+        .await
+        .unwrap();
+
+        // Send a value and see if it was forwarded.
+
+        assert!(tx_in.send(device::Value::Int(10)).await.is_ok());
+
+        let (value, rpy) = rx_out.recv().await.unwrap();
+        let _ = rpy.send(Ok(value.clone()));
+
+        assert_eq!(value, device::Value::Bool(true));
+
+        // Send a different value that doesn't change the result and
+        // see that it doesn't get forwarded.
+
+        assert!(tx_in.send(device::Value::Int(9)).await.is_ok());
+        assert!(time::timeout(Duration::from_millis(100), rx_out.recv())
+            .await
+            .is_err());
+
+        // Send a different value and see if it was forwarded.
+
+        assert!(tx_in.send(device::Value::Int(2)).await.is_ok());
+
+        let (value, rpy) = rx_out.recv().await.unwrap();
+        let _ = rpy.send(Ok(value.clone()));
+
+        assert_eq!(value, device::Value::Bool(false));
+
+        // Stop the emulator and see that its return status is good.
+
+        let _ = tx_stop.send(());
+
+        assert_eq!(emu.await.unwrap(), Ok(true));
+    }
+
+    // Test a logic block with two outputs. Make sure they are sent
+    // "in parallel".
+
+    #[tokio::test]
+    async fn test_node_concurrency() {
+        const IN1: &str = "device:in";
+        const OUT1: &str = "device:out1";
+        const OUT2: &str = "device:out2";
+
+        // This section sets the output expressions in out1 -> out2
+        // order. It computes a different value that is sent to the
+        // outputs and verifies the correct value is sent to the
+        // correct device.
+
+        {
+            let cfg = build_config(
+                &[("in", IN1)],
+                &[("out1", OUT1), ("out2", OUT2)],
+                &[],
+                &["{in} -> {out1}", "{in} * 2 -> {out2}"],
+            );
+            let (tx_in, rx_in) = mpsc::channel(100);
+            let (tx_out1, mut rx_out1) = mpsc::channel(100);
+            let (tx_out2, mut rx_out2) = mpsc::channel(100);
+
+            let (_, _, emu, tx_stop) = Emulator::start(
+                vec![(IN1.into(), rx_in)],
+                vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
+                cfg,
+            )
+            .await
+            .unwrap();
+
+            // Send a value and see if it was forwarded to both
+            // channels. We hold off replying until we verify both
+            // channels have content.
+
+            assert!(tx_in.send(device::Value::Int(10)).await.is_ok());
+
+            let (value1, rpy1) =
+                time::timeout(Duration::from_millis(100), rx_out1.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let (value2, rpy2) =
+                time::timeout(Duration::from_millis(100), rx_out2.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+
+            assert_eq!(value1, device::Value::Int(10));
+            assert_eq!(value2, device::Value::Int(20));
+
+            let _ = rpy1.send(Ok(value1.clone()));
+            let _ = rpy2.send(Ok(value2.clone()));
+
+            // Stop the emulator and see that its return status is good.
+
+            let _ = tx_stop.send(());
+
+            assert_eq!(emu.await.unwrap(), Ok(true));
+        }
+
+        // This section sets the output expressions in out2 -> out1
+        // order. It computes a different value that is sent to the
+        // outputs and verifies the correct value is sent to the
+        // correct device.
+
+        {
+            let cfg = build_config(
+                &[("in", IN1)],
+                &[("out1", OUT1), ("out2", OUT2)],
+                &[],
+                &["{in} * 2 -> {out2}", "{in} -> {out1}"],
+            );
+            let (tx_in, rx_in) = mpsc::channel(100);
+            let (tx_out1, mut rx_out1) = mpsc::channel(100);
+            let (tx_out2, mut rx_out2) = mpsc::channel(100);
+
+            let (_, _, emu, tx_stop) = Emulator::start(
+                vec![(IN1.into(), rx_in)],
+                vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
+                cfg,
+            )
+            .await
+            .unwrap();
+
+            // Send a value and see if it was forwarded to both
+            // channels. We hold off replying until we verify both
+            // channels have content.
+
+            assert!(tx_in.send(device::Value::Int(10)).await.is_ok());
+
+            let (value1, rpy1) =
+                time::timeout(Duration::from_millis(100), rx_out1.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let (value2, rpy2) =
+                time::timeout(Duration::from_millis(100), rx_out2.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+
+            assert_eq!(value1, device::Value::Int(10));
+            assert_eq!(value2, device::Value::Int(20));
+
+            let _ = rpy1.send(Ok(value1.clone()));
+            let _ = rpy2.send(Ok(value2.clone()));
+
+            // Stop the emulator and see that its return status is good.
+
+            let _ = tx_stop.send(());
+
+            assert_eq!(emu.await.unwrap(), Ok(true));
+        }
+
+        // This section sets the output expressions in out2 -> out1
+        // order. It computes a different value that is sent to the
+        // outputs and verifies the correct value is sent to the
+        // correct device. The expression uses some expression in the
+        // `defs` section.
+
+        {
+            let cfg = build_config(
+                &[("in", IN1)],
+                &[("out1", OUT1), ("out2", OUT2)],
+                &[("def1", "{in} * 10"), ("def2", "{in} * 100")],
+                &[
+                    "{def1} * 2 + {def2} + {in} -> {out2}",
+                    "{def1} + {def2} * 2 + {in} * 3 -> {out1}",
+                ],
+            );
+            let (tx_in, rx_in) = mpsc::channel(100);
+            let (tx_out1, mut rx_out1) = mpsc::channel(100);
+            let (tx_out2, mut rx_out2) = mpsc::channel(100);
+
+            let (_, _, emu, tx_stop) = Emulator::start(
+                vec![(IN1.into(), rx_in)],
+                vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
+                cfg,
+            )
+            .await
+            .unwrap();
+
+            // Send a value and see if it was forwarded to both
+            // channels. We hold off replying until we verify both
+            // channels have content.
+
+            assert!(tx_in.send(device::Value::Int(4)).await.is_ok());
+
+            let (value1, rpy1) =
+                time::timeout(Duration::from_millis(100), rx_out1.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let (value2, rpy2) =
+                time::timeout(Duration::from_millis(100), rx_out2.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+
+            assert_eq!(value1, device::Value::Int(852));
+            assert_eq!(value2, device::Value::Int(484));
+
+            let _ = rpy1.send(Ok(value1.clone()));
+            let _ = rpy2.send(Ok(value2.clone()));
+
+            // Stop the emulator and see that its return status is good.
+
+            let _ = tx_stop.send(());
+
+            assert_eq!(emu.await.unwrap(), Ok(true));
+        }
     }
 }
