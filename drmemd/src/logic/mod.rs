@@ -652,14 +652,28 @@ mod test {
                     }
                 }
 
-                // Wait for the unit test to tell us to exit.
+                let ah = node.abort_handle();
 
-                let _ = rx_stop.await;
+                #[rustfmt::skip]
+                tokio::select! {
+		    // Look for the signal from the unit test to tell
+		    // us to exit.
 
-                // Cancel the logic node. Return `true` because
-                // everything worked.
+                    _ = rx_stop => (),
 
-                node.abort();
+		    // If the Node exits, it's due to an error. Report
+		    // the error.
+
+                    v = node =>
+			return match v {
+                            Ok(result) => result.map(|_| false),
+                            Err(e) => Err(Error::OperationError(
+				format!("logic block panicked: {}", &e)
+			    ))
+			}
+                }
+
+                ah.abort();
                 Ok(true)
             });
 
