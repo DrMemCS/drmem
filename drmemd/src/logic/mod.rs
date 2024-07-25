@@ -141,20 +141,11 @@ impl Node {
             }
         }
 
-        // Now add the definitions to the returned state. Definitions
-        // add new variables to the vector of inputs.
+        // Now add the definitions to the vector of inputs (we've
+        // already verified the 'defs' names don't conflict with
+        // 'inputs' names.)
 
         for (name, expr) in defs {
-            // Make sure the name isn't already in the list of inputs.
-
-            if inputs.iter().any(|v| v == name) {
-                error!("definition tried to redefine {}", name);
-                return Err(drmem_api::Error::ParseError(format!(
-                    "can't redefine {}",
-                    name
-                )));
-            }
-
             // Add the definition's target name to the list of names.
 
             inputs.push(name.clone());
@@ -222,6 +213,88 @@ impl Node {
         cfg: config::Logic,
     ) -> Result<Node> {
         debug!("compiling expressions");
+
+        if cfg.exprs.is_empty() {
+            return Err(drmem_api::Error::ConfigError(
+                "configuration doesn't define any expressions".into(),
+            ));
+        }
+
+        // Validate the inputs.
+        //
+        // We add the names of the `inputs` and `defs` variables to a
+        // set. If a name is already in the set, we return an
+        // error. We add the devices in another set and make sure all
+        // are unique.
+
+        {
+            use std::collections::HashSet;
+
+            let mut name_set: HashSet<&String> =
+                HashSet::with_capacity(cfg.inputs.len() + cfg.defs.len());
+            let mut dev_set: HashSet<&device::Name> =
+                HashSet::with_capacity(cfg.inputs.len());
+
+            for (ref k, ref v) in &cfg.inputs {
+                if !name_set.insert(k) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "name '{}' is defined more than once in 'inputs'",
+                        k
+                    )));
+                }
+                if !dev_set.insert(v) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "device '{}' is defined more than once in 'inputs'",
+                        v
+                    )));
+                }
+            }
+
+            for ref k in cfg.defs.keys() {
+                if !name_set.insert(k) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "'{}' is defined in 'defs' and 'inputs' sections",
+                        k
+                    )));
+                }
+            }
+        }
+
+        // Validate the outputs.
+        //
+        // We add the names of the `outputs` variables to a set. If a
+        // name is already in the set, we return an error. We add the
+        // devices in another set and make sure all are unique.
+
+        {
+            use std::collections::HashSet;
+
+            if cfg.outputs.is_empty() {
+                return Err(drmem_api::Error::ConfigError(
+                    "configuration doesn't define any outputs".into(),
+                ));
+            }
+
+            let mut name_set: HashSet<&str> =
+                HashSet::with_capacity(cfg.outputs.len());
+            let mut dev_set: HashSet<&device::Name> =
+                HashSet::with_capacity(cfg.outputs.len());
+
+            for (ref k, ref v) in &cfg.outputs {
+                if !name_set.insert(k.as_str()) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "name '{}' is defined more than once in 'outputs'",
+                        k
+                    )));
+                }
+                if !dev_set.insert(v) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "device '{}' is defined more than once in 'outputs'",
+                        v
+                    )));
+                }
+            }
+        }
 
         let (inputs, in_stream, def_exprs) =
             Node::setup_inputs(&c_req, &cfg.inputs, &cfg.defs).await?;
@@ -664,26 +737,88 @@ mod test {
     // dropped.
 
     #[tokio::test]
-    async fn test_empty_node_init() {
-        let cfg = build_config(&[], &[], &[], &[]);
-        let (node, _, tod_tx, sol_tx) = init_node(cfg);
+    async fn test_bad_config() {
+        // Test that we reject an empty configuration (mainly because
+        // if there are no expressions, there is nothing to do.)
 
-        // `await` on the future. This should return immediately since
-        // the config has no inputs or outputs.
+        {
+            let cfg = build_config(&[], &[], &[], &[]);
+            let (node, _, tod_tx, sol_tx) = init_node(cfg);
 
-        let node = node.await.unwrap();
+            tokio::pin!(node);
 
-        // With no config, the TOD and solar channel handles should
-        // have been dropped.
+            // `await` on the future. This should return immediately
+            // as an error because there are no expressions to
+            // process.
 
-        assert_eq!(tod_tx.receiver_count(), 0);
-        assert_eq!(sol_tx.receiver_count(), 0);
+            assert!(matches!(node.as_mut().await, Err(Error::ConfigError(_))));
 
-        // This call allows us to keep ownership of the node so we're
-        // sure the Node dropped the broadcast receivers and not from
-        // an early drop of `node` itself.
+            // With no config, the TOD and solar channel handles
+            // should have been dropped.
 
-        std::mem::drop(node);
+            assert_eq!(tod_tx.receiver_count(), 0);
+            assert_eq!(sol_tx.receiver_count(), 0);
+
+            // This call allows us to keep ownership of the node so
+            // we're sure the Node dropped the broadcast receivers and
+            // not from an early drop of `node` itself.
+
+            std::mem::drop(node);
+        }
+
+        // Test that we reject two inputs with the same device.
+
+        {
+            let cfg = build_config(
+                &[("in", "device:in"), ("in2", "device:in")],
+                &[("out", "device:out")],
+                &[],
+                &["{in} -> {out}"],
+            );
+            let (node, _, _, _) = init_node(cfg);
+
+            // `await` on the future. This should return immediately
+            // as an error because there are no expressions to
+            // process.
+
+            assert!(matches!(node.await, Err(Error::ConfigError(_))));
+        }
+
+        // Test that we reject an input and a def with the same name.
+
+        {
+            let cfg = build_config(
+                &[("in", "device:in")],
+                &[("out", "device:out")],
+                &[("in", "{in}")],
+                &["{in} -> {out}"],
+            );
+            let (node, _, _, _) = init_node(cfg);
+
+            // `await` on the future. This should return immediately
+            // as an error because there are no expressions to
+            // process.
+
+            assert!(matches!(node.await, Err(Error::ConfigError(_))));
+        }
+
+        // Test that we reject two outputs with the same device.
+
+        {
+            let cfg = build_config(
+                &[("in", "device:in")],
+                &[("out", "device:out"), ("out2", "device:out")],
+                &[],
+                &["{in} -> {out}"],
+            );
+            let (node, _, _, _) = init_node(cfg);
+
+            // `await` on the future. This should return immediately
+            // as an error because there are no expressions to
+            // process.
+
+            assert!(matches!(node.await, Err(Error::ConfigError(_))));
+        }
     }
 
     // Test a basic logic block in which an input device's value is
@@ -800,6 +935,7 @@ mod test {
 
     #[tokio::test]
     async fn test_node_concurrency() {
+        const IN1: &str = "device:in";
         const OUT1: &str = "device:out1";
         const OUT2: &str = "device:out2";
 
@@ -810,7 +946,7 @@ mod test {
 
         {
             let cfg = build_config(
-                &[("in", "device:in")],
+                &[("in", IN1)],
                 &[("out1", OUT1), ("out2", OUT2)],
                 &[],
                 &["{in} -> {out1}", "{in} * 2 -> {out2}"],
@@ -820,7 +956,7 @@ mod test {
             let (tx_out2, mut rx_out2) = mpsc::channel(100);
 
             let (_, _, emu, tx_stop) = Emulator::start(
-                vec![("device:in".into(), rx_in)],
+                vec![(IN1.into(), rx_in)],
                 vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
                 cfg,
             )
@@ -864,7 +1000,7 @@ mod test {
 
         {
             let cfg = build_config(
-                &[("in", "device:in")],
+                &[("in", IN1)],
                 &[("out1", OUT1), ("out2", OUT2)],
                 &[],
                 &["{in} * 2 -> {out2}", "{in} -> {out1}"],
@@ -874,7 +1010,7 @@ mod test {
             let (tx_out2, mut rx_out2) = mpsc::channel(100);
 
             let (_, _, emu, tx_stop) = Emulator::start(
-                vec![("device:in".into(), rx_in)],
+                vec![(IN1.into(), rx_in)],
                 vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
                 cfg,
             )
@@ -900,6 +1036,64 @@ mod test {
 
             assert_eq!(value1, device::Value::Int(10));
             assert_eq!(value2, device::Value::Int(20));
+
+            let _ = rpy1.send(Ok(value1.clone()));
+            let _ = rpy2.send(Ok(value2.clone()));
+
+            // Stop the emulator and see that its return status is good.
+
+            let _ = tx_stop.send(());
+
+            assert_eq!(emu.await.unwrap(), Ok(true));
+        }
+
+        // This section sets the output expressions in out2 -> out1
+        // order. It computes a different value that is sent to the
+        // outputs and verifies the correct value is sent to the
+        // correct device. The expression uses some expression in the
+        // `defs` section.
+
+        {
+            let cfg = build_config(
+                &[("in", IN1)],
+                &[("out1", OUT1), ("out2", OUT2)],
+                &[("def1", "{in} * 10"), ("def2", "{in} * 100")],
+                &[
+                    "{def1} * 2 + {def2} + {in} -> {out2}",
+                    "{def1} + {def2} * 2 + {in} * 3 -> {out1}",
+                ],
+            );
+            let (tx_in, rx_in) = mpsc::channel(100);
+            let (tx_out1, mut rx_out1) = mpsc::channel(100);
+            let (tx_out2, mut rx_out2) = mpsc::channel(100);
+
+            let (_, _, emu, tx_stop) = Emulator::start(
+                vec![(IN1.into(), rx_in)],
+                vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
+                cfg,
+            )
+            .await
+            .unwrap();
+
+            // Send a value and see if it was forwarded to both
+            // channels. We hold off replying until we verify both
+            // channels have content.
+
+            assert!(tx_in.send(device::Value::Int(4)).await.is_ok());
+
+            let (value1, rpy1) =
+                time::timeout(Duration::from_millis(100), rx_out1.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let (value2, rpy2) =
+                time::timeout(Duration::from_millis(100), rx_out2.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+
+            assert_eq!(value1, device::Value::Int(852));
+            assert_eq!(value2, device::Value::Int(484));
 
             let _ = rpy1.send(Ok(value1.clone()));
             let _ = rpy2.send(Ok(value2.clone()));
