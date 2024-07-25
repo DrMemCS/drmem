@@ -330,6 +330,20 @@ impl Node {
         // order that the expressions are given. By sorting the
         // expressions, we line them up so they can be zipped together
         // later in this function.
+        //
+        // XXX: This should be refactored. The parser should return
+        // the output variable name instead of an index in the output
+        // environment. Then we should go through the expressions, in
+        // order, and add the target output to the output vector. This
+        // would have two benefits:
+        //
+        // 1) Even though multiple expressions send their results at
+        // roughly the same time, the actual settings would go out
+        // quickly in expression order.
+        //
+        // 2) If the user specified more output variables than
+        // expressions that use them, resources wouldn't be allocated
+        // for unused output devices.
 
         exprs[..].sort_unstable_by(
             |compile::Program(_, a), compile::Program(_, b)| a.cmp(b),
