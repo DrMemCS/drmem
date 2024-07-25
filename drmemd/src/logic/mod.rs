@@ -420,8 +420,6 @@ impl Node {
 		// and the actual reading.
 
 		Some((idx, reading)) = self.in_stream.next() => {
-		    info!("updating in[{}] with {}", idx, &reading.value);
-
 		    // Save the reading in our array for future
 		    // recalculations.
 
