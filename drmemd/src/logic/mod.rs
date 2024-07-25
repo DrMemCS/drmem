@@ -442,17 +442,15 @@ impl Node {
 	    }
 
             // Calculate each expression of the `defs` array. Store
-            // the result in the associated `input` cell.
+            // each expression's result in the associated `input`
+            // cell.
 
-            for compile::Program(expr, idx) in &self.def_exprs {
-                self.inputs[*idx] =
-                    compile::eval(expr, &self.inputs, &time, solar.as_ref());
-
-                info!(
-                    "def ({}) produced {:?} for in[{}]",
-                    &expr, &self.inputs[*idx], *idx
-                );
-            }
+            self.def_exprs
+                .iter()
+                .for_each(|compile::Program(expr, idx)| {
+                    self.inputs[*idx] =
+                        compile::eval(expr, &self.inputs, &time, solar.as_ref())
+                });
 
             // Calculate each of the final expressions. If there are
             // more than one expressions in this node, they are
