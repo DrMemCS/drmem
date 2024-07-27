@@ -436,42 +436,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "drmem-db-redis"
-version = "0.4.0"
-dependencies = [
- "async-trait",
- "chrono",
- "drmem-api",
- "futures",
- "palette",
- "redis",
- "serde",
- "serde_derive",
- "tokio",
- "tokio-stream",
- "toml",
- "tracing",
- "tracing-futures",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "drmem-db-simple"
-version = "0.4.0"
-dependencies = [
- "async-trait",
- "chrono",
- "drmem-api",
- "futures",
- "serde",
- "serde_derive",
- "tokio",
- "tokio-stream",
- "toml",
- "tracing",
-]
-
-[[package]]
 name = "drmem-drv-ntp"
 version = "0.4.0"
 dependencies = [
@@ -530,12 +494,11 @@ dependencies = [
 name = "drmemd"
 version = "0.4.0"
 dependencies = [
+ "async-trait",
  "cfgrammar",
  "chrono",
  "clap",
  "drmem-api",
- "drmem-db-redis",
- "drmem-db-simple",
  "drmem-drv-ntp",
  "drmem-drv-sump",
  "drmem-drv-tplink",
@@ -549,6 +512,7 @@ dependencies = [
  "lrlex",
  "lrpar",
  "palette",
+ "redis",
  "serde",
  "serde_derive",
  "tokio",

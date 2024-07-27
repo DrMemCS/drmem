@@ -2,7 +2,6 @@
 members = [
     "drmem-api",
     "drivers/*",
-    "backends/*",
     "drmemd"
 ]
 default-members = ["drmemd"]

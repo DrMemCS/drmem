@@ -15,13 +15,7 @@ mod core;
 mod driver;
 mod logic;
 
-// Define a `store` module that pulls in the appropriate backend.
-
-#[cfg(feature = "simple-backend")]
-pub use drmem_db_simple as store;
-
-#[cfg(feature = "redis-backend")]
-pub use drmem_db_redis as store;
+pub mod backends;
 
 // If the user specifies the 'graphql' feature, then pull in the module
 // that defines the GraphQL server.
