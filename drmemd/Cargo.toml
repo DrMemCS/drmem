@@ -19,6 +19,8 @@ lrlex = "0.13"
 lrpar = "0.13"
 
 [dependencies]
+async-trait.workspace = true
+
 futures.workspace = true
 
 toml = { workspace = true, features = ["parse"] }
@@ -47,6 +49,9 @@ cfgrammar = "0.13"
 lrlex = "0.13"
 lrpar = "0.13"
 
+[dev-dependencies]
+tokio-stream = { workspace = true, features = ["sync", "time"] }
+
 # This section defines the driver dependencies. Most drivers are
 # optional, but a few drivers define common devices for a `drmem`
 # installation.
@@ -73,14 +78,10 @@ optional = true
 
 # This section defines the optional dependencies for backend storage.
 
-[dependencies.drmem-db-redis]
-path = "../backends/drmem-db-redis"
-version = "0.4"
-optional = true
-
-[dependencies.drmem-db-simple]
-path = "../backends/drmem-db-simple"
-version = "0.4"
+[dependencies.redis]
+version = "0.25"
+default-features = false
+features = ["tokio-comp", "streams"]
 optional = true
 
 # This section defines the optional dependencies for the 'graphql'
@@ -115,8 +116,8 @@ default = []
 
 # Backends
 
-simple-backend = ["drmem-db-simple"]
-redis-backend = ["drmem-db-redis"]
+simple-backend = []
+redis-backend = ["redis"]
 
 # Client APIs
 

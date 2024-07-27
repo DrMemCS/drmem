@@ -469,7 +469,7 @@ impl Store for SimpleStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mk_report_func, DeviceInfo, SimpleStore};
+    use super::{mk_report_func, DeviceInfo, SimpleStore};
     use drmem_api::{device, Store};
     use std::{collections::HashMap, time};
     use tokio::sync::{mpsc::error::TryRecvError, oneshot};

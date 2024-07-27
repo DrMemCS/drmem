@@ -1,4 +1,4 @@
-use super::store;
+use crate::backends::store;
 use drmem_api::{Error, Result};
 use serde_derive::Deserialize;
 use std::collections::HashMap;

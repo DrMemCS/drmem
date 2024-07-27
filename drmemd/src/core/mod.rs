@@ -1,4 +1,4 @@
-use super::store;
+use crate::backends::store;
 use drmem_api::{client, driver, Error, Result, Store};
 use std::convert::Infallible;
 use tokio::{sync::mpsc, task::JoinHandle};
