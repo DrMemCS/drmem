@@ -4,7 +4,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::convert::{Infallible, TryFrom};
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc, time::SystemTime};
 use tokio::sync::Mutex;
 use tokio::time::{interval_at, Duration, Instant};
 use tracing::{debug, error, warn, Span};
@@ -21,7 +21,14 @@ const MIN_PUBLIC_INTERVAL: u64 = 10;
 
 enum PrecipState {
     NoRain,
-    Rain { prev: f64, running: f64 },
+    Rain {
+        prev: f64,
+        running: f64,
+        time: SystemTime,
+    },
+    Pause {
+        prev: f64,
+    },
 }
 
 impl PrecipState {
@@ -33,8 +40,16 @@ impl PrecipState {
     // readings. It returns values to be reported by the driver for
     // the three precip devices.
 
-    fn update(&mut self, p_rate: f64, p_total: f64) -> (f64, f64, Option<f64>) {
+    fn update(
+        &mut self,
+        p_rate: f64,
+        p_total: f64,
+        now: SystemTime,
+    ) -> (f64, f64, Option<f64>) {
         match self {
+            // This state models when it isn't raining. It's the
+            // initial state and it will be re-entered when the
+            // weather station reports no rain.
             Self::NoRain => {
                 // If there's a non-zero total, we need to switch to
                 // the rain state.
@@ -43,39 +58,100 @@ impl PrecipState {
                     *self = Self::Rain {
                         prev: p_total,
                         running: p_total,
+                        time: now,
                     };
                 }
                 (p_rate, p_total, None)
             }
 
-            Self::Rain { prev, running } => {
-                let mut running = *running;
+            // This state is active after the 10 hour time between
+            // rainfall has occurred, but the weather station is still
+            // reporting a non-zero precip total.
+            Self::Pause { prev } => {
+                (
+                    p_rate,
+                    // If the weather station resets its total, we can
+                    // go back to the `NoRain` state.
+                    if p_total == 0.0 {
+                        if p_rate == 0.0 {
+                            *self = Self::NoRain;
+                        }
+                        0.0
+                    }
+                    // If more rain is reported, then a new system has
+                    // rolled in. Go back to the `Rain` state, but set
+                    // the currently reported total as the baseline
+                    // with which to subtract future readings.
+                    else if p_total > *prev {
+                        let total = p_total - *prev;
+
+                        *self = Self::Rain {
+                            prev: p_total,
+                            running: total,
+                            time: now,
+                        };
+                        total
+                    }
+                    // The total is less than the previous, but not
+                    // 0. This means we crossed midnight -- resetting
+                    // the total -- but more rain occurred before we
+                    // sampled the data. Go into the `Rain` state.
+                    else if p_total < *prev {
+                        *self = Self::Rain {
+                            prev: p_total,
+                            running: p_total,
+                            time: now,
+                        };
+                        p_total
+                    } else {
+                        0.0
+                    },
+                    None,
+                )
+            }
+
+            // This state is active while it is raining.
+            Self::Rain {
+                prev,
+                running,
+                time,
+            } => {
+                const TIMEOUT: Duration = Duration::from_secs(36_000);
+                let delta = now
+                    .duration_since(*time)
+                    .unwrap_or_else(|_| Duration::from_secs(0));
 
                 // If the weather station reports no rainfall and
                 // reset its total, we emit the total as the value of
                 // the last rainfall.
 
-                if p_rate == 0.0 && p_total == 0.0 {
-                    *self = Self::NoRain;
-                    (0.0, 0.0, Some(running))
+                if p_rate == 0.0 && delta >= TIMEOUT {
+                    let last_total = *running;
+
+                    *self = Self::Pause { prev: *prev };
+                    (0.0, 0.0, Some(last_total))
                 } else {
                     // If the total is less than the previous value,
                     // then we crossed midnight. Just use the reset
                     // value as the delta.
 
-                    running += if *prev > p_total {
+                    *running += if *prev > p_total {
                         p_total
                     } else {
                         p_total - *prev
                     };
 
+                    // If the rainfall rate is 0, don't update the
+                    // timeout value.
+
+                    if p_rate > 0.0 {
+                        *time = now;
+                    }
+
                     // Update the totals in the state.
 
-                    *self = Self::Rain {
-                        running,
-                        prev: p_total,
-                    };
-                    (p_rate, running, None)
+                    *prev = p_total;
+                    (p_rate, *running, None)
                 }
             }
         }
@@ -256,7 +332,8 @@ impl Instance {
         }
 
         if let (Some(prate), Some(ptotal)) = (prate, ptotal) {
-            let (nrate, ntotal, nlast) = self.precip.update(prate, ptotal);
+            let (nrate, ntotal, nlast) =
+                self.precip.update(prate, ptotal, SystemTime::now());
 
             (devices.d_prec_rate)(nrate).await;
             (devices.d_prec_total)(ntotal).await;
@@ -606,70 +683,92 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod tests {
     use super::PrecipState;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn mk_time(secs: u64) -> SystemTime {
+        UNIX_EPOCH.checked_add(Duration::from_secs(secs)).unwrap()
+    }
 
     #[test]
     fn test_precip() {
-        let mut s = PrecipState::new();
+        // This tests for normal rainfall. It also makes sure the
+        // totals get adjusted after the long enough delay of no rain.
 
-        // Should start as `NoRain` and, as long as we have no precip,
-        // it should stay that way.
+        {
+            let mut s = PrecipState::new();
 
-        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, None));
-        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, None));
+            // Should start as `NoRain` and, as long as we have no
+            // precip, it should stay that way.
 
-        // Even if the rainfall rate is non zero, we don't go into the
-        // rain state until the total is nonzero.
+            assert_eq!(s.update(0.0, 0.0, mk_time(0)), (0.0, 0.0, None));
+            assert_eq!(s.update(0.0, 0.0, mk_time(600)), (0.0, 0.0, None));
 
-        assert_eq!(s.update(0.1, 0.0), (0.1, 0.0, None));
+            // Even if the rainfall rate is non zero, we don't go into
+            // the rain state until the total is nonzero.
 
-        // With both inputs 0.0, we shouldn't trigger a "last
-        // rainfall" total.
+            assert_eq!(s.update(0.1, 0.0, mk_time(1200)), (0.1, 0.0, None));
 
-        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, None));
+            // With both inputs 0.0, we shouldn't trigger a "last
+            // rainfall" total.
 
-        // As rain occurs, we should track the total.
+            assert_eq!(s.update(0.0, 0.0, mk_time(1800)), (0.0, 0.0, None));
 
-        assert_eq!(s.update(0.1, 0.125), (0.1, 0.125, None));
-        assert_eq!(s.update(0.05, 0.25), (0.05, 0.25, None));
-        assert_eq!(s.update(0.7, 0.375), (0.7, 0.375, None));
+            // As rain occurs, we should track the total.
 
-        // Zero rate shouldn't reset by itself.
+            assert_eq!(s.update(0.1, 0.125, mk_time(2400)), (0.1, 0.125, None));
+            assert_eq!(s.update(0.05, 0.25, mk_time(3000)), (0.05, 0.25, None));
+            assert_eq!(s.update(0.7, 0.375, mk_time(3600)), (0.7, 0.375, None));
 
-        assert_eq!(s.update(0.0, 0.375), (0.0, 0.375, None));
+            // Zero rate shouldn't reset by itself.
 
-        // If both are zeroed, we go back to `NoRain` and we get an
-        // entry for the last total.
+            assert_eq!(s.update(0.0, 0.375, mk_time(4200)), (0.0, 0.375, None));
 
-        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, Some(0.375)));
+            // Even if both are zeroed, we don't reset the count if
+            // the time from the last rain was less than our timeout.
 
-        // Reproduce the previous rain, but we'll add a midnight
-        // crossing (which resets the total).
+            assert_eq!(s.update(0.0, 0.0, mk_time(4800)), (0.0, 0.375, None));
 
-        assert_eq!(s.update(0.1, 0.125), (0.1, 0.125, None));
-        assert_eq!(s.update(0.05, 0.25), (0.05, 0.25, None));
-        assert_eq!(s.update(0.7, 0.375), (0.7, 0.375, None));
-        assert_eq!(s.update(0.3, 0.125), (0.3, 0.5, None));
-        assert_eq!(s.update(0.3, 0.25), (0.3, 0.625, None));
+            // Now add more and then simulate 10 hours of nothing.
 
-        // If both are zeroed, we go back to `NoRain` and we get an
-        // entry for the last total.
+            assert_eq!(s.update(0.1, 0.125, mk_time(5400)), (0.1, 0.5, None));
+            assert_eq!(s.update(0.0, 0.125, mk_time(6000)), (0.0, 0.5, None));
+            assert_eq!(s.update(0.0, 0.125, mk_time(41_399)), (0.0, 0.5, None));
+            assert_eq!(
+                s.update(0.0, 0.125, mk_time(41_400)),
+                (0.0, 0.0, Some(0.5))
+            );
+            assert_eq!(s.update(0.0, 0.125, mk_time(42_001)), (0.0, 0.0, None));
 
-        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, Some(0.625)));
+            // Now any new rainfall start new accumulation.
 
-        // Reproduce the previous inputs except, let's assume that the
-        // total got reset just before reporting it to Weather
-        // Unground. In that case, the total would be zero but the
-        // rate would be non-zero.
+            assert_eq!(s.update(0.1, 0.125, mk_time(40_800)), (0.1, 0.0, None));
+            assert_eq!(
+                s.update(0.1, 0.25, mk_time(41_400)),
+                (0.1, 0.125, None)
+            );
+        }
 
-        assert_eq!(s.update(0.1, 0.125), (0.1, 0.125, None));
-        assert_eq!(s.update(0.05, 0.25), (0.05, 0.25, None));
-        assert_eq!(s.update(0.7, 0.375), (0.7, 0.375, None));
-        assert_eq!(s.update(0.3, 0.0), (0.3, 0.375, None));
-        assert_eq!(s.update(0.3, 0.125), (0.3, 0.5, None));
+        // This tests for a possible weird occurrance at midnight.
 
-        // If both are zeroed, we go back to `NoRain` and we get an
-        // entry for the last total.
+        {
+            let mut s = PrecipState::new();
 
-        assert_eq!(s.update(0.0, 0.0), (0.0, 0.0, Some(0.5)));
+            // Reproduce the previous rain, but we'll add a midnight
+            // crossing (which resets the total).
+
+            assert_eq!(s.update(0.1, 0.125, mk_time(0)), (0.1, 0.125, None));
+            assert_eq!(s.update(0.05, 0.25, mk_time(600)), (0.05, 0.25, None));
+            assert_eq!(s.update(0.7, 0.375, mk_time(1200)), (0.7, 0.375, None));
+            assert_eq!(s.update(0.3, 0.125, mk_time(1800)), (0.3, 0.5, None));
+            assert_eq!(s.update(0.3, 0.25, mk_time(2400)), (0.3, 0.625, None));
+
+            // Let's assume that the total got reset just before
+            // reporting it to Weather Underground. In that case, the
+            // total would be zero but the rate would be non-zero.
+
+            assert_eq!(s.update(0.1, 0.0, mk_time(3000)), (0.1, 0.625, None));
+            assert_eq!(s.update(0.0, 0.0, mk_time(3600)), (0.0, 0.625, None));
+            assert_eq!(s.update(0.3, 0.125, mk_time(4200)), (0.3, 0.75, None));
+        }
     }
 }
