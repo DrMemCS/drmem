@@ -79,7 +79,7 @@ impl Instance {
             })
     }
 
-    fn to_entry(tbl: &toml::Table) -> Result<Entry> {
+    fn to_entry(tbl: &toml::Table, def: &device::Value) -> Result<Entry> {
         if let Some(toml::value::Value::Integer(start)) = tbl.get("start") {
             if let Some(value) = tbl.get("value") {
                 let value = device::Value::try_from(value).map_err(|_| {
@@ -88,6 +88,13 @@ impl Instance {
                             .into(),
                     )
                 })?;
+
+                if !def.is_same_type(&value) {
+                    return Err(Error::ConfigError(
+			"all values in `values` array entries must be the same type as the default value"
+			    .into()
+		    ));
+                }
 
                 let start = *start as i32;
 
@@ -114,7 +121,10 @@ impl Instance {
         }
     }
 
-    fn get_cfg_values(cfg: &DriverConfig) -> Result<Vec<Entry>> {
+    fn get_cfg_values(
+        cfg: &DriverConfig,
+        def: &device::Value,
+    ) -> Result<Vec<Entry>> {
         match cfg.get("values") {
             Some(toml::value::Value::Array(arr)) if !arr.is_empty() => {
                 let mut result = vec![];
@@ -122,7 +132,7 @@ impl Instance {
                 for entry in arr {
                     match entry {
                         toml::value::Value::Table(tbl) => {
-                            result.push(Self::to_entry(tbl)?)
+                            result.push(Self::to_entry(tbl, def)?)
                         }
                         _ => {
                             return Err(Error::ConfigError(
@@ -194,7 +204,11 @@ impl driver::API for Instance {
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
         let init_index = Instance::get_cfg_init_val(cfg);
         let def_value = Instance::get_cfg_def_val(cfg);
-        let values = Instance::get_cfg_values(cfg);
+        let values = if def_value.is_ok() {
+            Instance::get_cfg_values(cfg, def_value.as_ref().unwrap())
+        } else {
+            Ok(vec![])
+        };
 
         Box::pin(async move {
             Ok(Box::new(Instance::new(init_index?, def_value?, values?)))
@@ -299,13 +313,14 @@ mod tests {
     #[test]
     fn test_cfg_values() {
         {
+            let def_val = device::Value::Str("world".into());
             let mut tbl = Table::new();
 
             // First test for bad configurations.
             //
             // This tests that a missing "values" key is an error.
 
-            assert!(Instance::get_cfg_values(&tbl).is_err());
+            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
 
             // Tests if the range entry is missing a "start" key.
 
@@ -314,7 +329,7 @@ mod tests {
                 Value::Array(vec![build_table(None, None, None)]),
             );
 
-            assert!(Instance::get_cfg_values(&tbl).is_err());
+            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
 
             // Tests if the range entry is missing a "value" key.
 
@@ -323,12 +338,13 @@ mod tests {
                 Value::Array(vec![build_table(Some(0), None, None)]),
             );
 
-            assert!(Instance::get_cfg_values(&tbl).is_err());
+            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
         }
 
         // Now test good configurations.
 
         {
+            let def_val = device::Value::Str("world".into());
             let mut tbl = Table::new();
 
             // Test that providing all fields generates a entry.
@@ -343,7 +359,7 @@ mod tests {
             );
 
             assert_eq!(
-                Instance::get_cfg_values(&tbl).unwrap(),
+                Instance::get_cfg_values(&tbl, &def_val).unwrap(),
                 vec![Entry(0..=10, device::Value::Str("hello".into()))]
             );
 
@@ -359,7 +375,7 @@ mod tests {
             );
 
             assert_eq!(
-                Instance::get_cfg_values(&tbl).unwrap(),
+                Instance::get_cfg_values(&tbl, &def_val).unwrap(),
                 vec![Entry(0..=0, device::Value::Str("hello".into()))]
             );
         }
