@@ -35,6 +35,19 @@ pub enum Value {
     Color(palette::LinSrgba<u8>),
 }
 
+impl Value {
+    pub fn is_same_type(&self, o: &Value) -> bool {
+        match (self, o) {
+            (Value::Bool(_), Value::Bool(_))
+            | (Value::Int(_), Value::Int(_))
+            | (Value::Flt(_), Value::Flt(_))
+            | (Value::Str(_), Value::Str(_))
+            | (Value::Color(_), Value::Color(_)) => true,
+            _ => false,
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
