@@ -37,14 +37,14 @@ pub enum Value {
 
 impl Value {
     pub fn is_same_type(&self, o: &Value) -> bool {
-        match (self, o) {
+        matches!(
+            (self, o),
             (Value::Bool(_), Value::Bool(_))
-            | (Value::Int(_), Value::Int(_))
-            | (Value::Flt(_), Value::Flt(_))
-            | (Value::Str(_), Value::Str(_))
-            | (Value::Color(_), Value::Color(_)) => true,
-            _ => false,
-        }
+                | (Value::Int(_), Value::Int(_))
+                | (Value::Flt(_), Value::Flt(_))
+                | (Value::Str(_), Value::Str(_))
+                | (Value::Color(_), Value::Color(_))
+        )
     }
 }
 
