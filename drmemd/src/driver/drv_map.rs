@@ -195,11 +195,20 @@ impl Instance {
     // value. If no entry matches, return the error value.
 
     fn map_to(&self, idx: i32) -> device::Value {
+        use std::cmp::Ordering;
+
         self.values
-            .iter()
-            .find(|e| e.0.contains(&idx))
-            .map(|e| e.1.clone())
-            .unwrap_or_else(|| self.def_val.clone())
+            .binary_search_by(|e| {
+                if idx < *e.0.start() {
+                    Ordering::Less
+                } else if idx > *e.0.end() {
+                    Ordering::Greater
+                } else {
+                    Ordering::Equal
+                }
+            })
+            .map(|v| self.values[v].1.clone())
+            .unwrap_or_else(|_| self.def_val.clone())
     }
 }
 
