@@ -424,6 +424,116 @@ mod tests {
                 Instance::get_cfg_values(&tbl, &def_val).unwrap(),
                 vec![Entry(0..=0, device::Value::Str("hello".into()))]
             );
+
+            // Test that the function sorts the results.
+
+            let _ = tbl.insert(
+                "values".into(),
+                Value::Array(vec![
+                    build_table(
+                        Some(0),
+                        Some(3),
+                        Some(Value::String("hello".into())),
+                    ),
+                    build_table(
+                        Some(4),
+                        Some(7),
+                        Some(Value::String("there".into())),
+                    ),
+                    build_table(
+                        Some(8),
+                        Some(11),
+                        Some(Value::String("world".into())),
+                    ),
+                ]),
+            );
+
+            assert_eq!(
+                Instance::get_cfg_values(&tbl, &def_val).unwrap(),
+                vec![
+                    Entry(0..=3, device::Value::Str("hello".into())),
+                    Entry(4..=7, device::Value::Str("there".into())),
+                    Entry(8..=11, device::Value::Str("world".into()))
+                ]
+            );
+
+            let _ = tbl.insert(
+                "values".into(),
+                Value::Array(vec![
+                    build_table(
+                        Some(8),
+                        Some(11),
+                        Some(Value::String("world".into())),
+                    ),
+                    build_table(
+                        Some(4),
+                        Some(7),
+                        Some(Value::String("there".into())),
+                    ),
+                    build_table(
+                        Some(0),
+                        Some(3),
+                        Some(Value::String("hello".into())),
+                    ),
+                ]),
+            );
+
+            assert_eq!(
+                Instance::get_cfg_values(&tbl, &def_val).unwrap(),
+                vec![
+                    Entry(0..=3, device::Value::Str("hello".into())),
+                    Entry(4..=7, device::Value::Str("there".into())),
+                    Entry(8..=11, device::Value::Str("world".into()))
+                ]
+            );
+
+            // Test that it rejects an array with overlapping ranges.
+
+            let _ = tbl.insert(
+                "values".into(),
+                Value::Array(vec![
+                    build_table(
+                        Some(8),
+                        Some(11),
+                        Some(Value::String("world".into())),
+                    ),
+                    build_table(
+                        Some(2),
+                        Some(7),
+                        Some(Value::String("there".into())),
+                    ),
+                    build_table(
+                        Some(0),
+                        Some(3),
+                        Some(Value::String("hello".into())),
+                    ),
+                ]),
+            );
+
+            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
+
+            let _ = tbl.insert(
+                "values".into(),
+                Value::Array(vec![
+                    build_table(
+                        Some(8),
+                        Some(11),
+                        Some(Value::String("world".into())),
+                    ),
+                    build_table(
+                        Some(3),
+                        Some(7),
+                        Some(Value::String("there".into())),
+                    ),
+                    build_table(
+                        Some(0),
+                        Some(3),
+                        Some(Value::String("hello".into())),
+                    ),
+                ]),
+            );
+
+            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
         }
     }
 }
