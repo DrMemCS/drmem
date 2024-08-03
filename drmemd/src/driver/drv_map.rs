@@ -154,20 +154,18 @@ impl Instance {
     ) -> Result<Vec<Entry>> {
         match cfg.get("values") {
             Some(toml::value::Value::Array(arr)) if !arr.is_empty() => {
-                let mut result = vec![];
-
-                for entry in arr {
-                    match entry {
-                        toml::value::Value::Table(tbl) => {
-                            result.push(Self::to_entry(tbl, def)?)
-                        }
-                        _ => {
-                            return Err(Error::ConfigError(
+                let mut result: Vec<Entry> = arr
+		    .iter()
+                    .map(|entry| {
+                        if let toml::value::Value::Table(tbl) = entry {
+                            Self::to_entry(&tbl, def)
+                        } else {
+                            Err(Error::ConfigError(
                                 "`values` array contains a non-table".into(),
                             ))
                         }
-                    }
-                }
+                    })
+                    .collect::<Result<Vec<Entry>>>()?;
 
                 Ok(result)
             }
