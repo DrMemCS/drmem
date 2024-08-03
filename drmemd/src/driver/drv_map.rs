@@ -155,7 +155,7 @@ impl Instance {
         match cfg.get("values") {
             Some(toml::value::Value::Array(arr)) if !arr.is_empty() => {
                 let mut result: Vec<Entry> = arr
-		    .iter()
+                    .iter()
                     .map(|entry| {
                         if let toml::value::Value::Table(tbl) = entry {
                             Self::to_entry(&tbl, def)
