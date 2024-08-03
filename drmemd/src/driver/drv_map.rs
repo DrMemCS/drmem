@@ -167,7 +167,19 @@ impl Instance {
                     })
                     .collect::<Result<Vec<Entry>>>()?;
 
-                Ok(result)
+                // Sort the vector by the lower bounds of the range.
+
+                result.sort_by(|a, b| a.0.start().cmp(b.0.start()));
+
+                // If any adjacent ranges overlap, return an error.
+
+                if result.windows(2).any(|e| e[0].0.end() >= e[1].0.start()) {
+                    Err(Error::ConfigError(
+                        "`values` array contains overlapping ranges".into(),
+                    ))
+                } else {
+                    Ok(result)
+                }
             }
             Some(_) => Err(Error::ConfigError(
                 "`values` config parameter should be a non-empty array of maps"
