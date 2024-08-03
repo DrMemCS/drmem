@@ -62,6 +62,8 @@ impl Instance {
         }
     }
 
+    // Retrieve the default value from the configuration.
+
     fn get_cfg_def_val(cfg: &DriverConfig) -> Result<device::Value> {
         cfg.get("default")
             .ok_or_else(|| {
@@ -79,15 +81,29 @@ impl Instance {
             })
     }
 
+    // Helper method to convert a TOML Table into an `Entry` type.
+
     fn to_entry(tbl: &toml::Table, def: &device::Value) -> Result<Entry> {
+        // The table *must* have a key called "start" and the value
+        // *must* be an integer.
+
         if let Some(toml::value::Value::Integer(start)) = tbl.get("start") {
+            // The table *must* have a key called "value".
+
             if let Some(value) = tbl.get("value") {
+                // The value associated with the "value" key *must* be
+                // convertable into a `device::Value` type.
+
                 let value = device::Value::try_from(value).map_err(|_| {
                     Error::ConfigError(
                         "`values` array entry contains unknown `value` type"
                             .into(),
                     )
                 })?;
+
+                // All values in the array must be of the same type as
+                // the default value (it's hard to imagine a device
+                // correctly handling different types.)
 
                 if !def.is_same_type(&value) {
                     return Err(Error::ConfigError(
@@ -96,11 +112,20 @@ impl Instance {
 		    ));
                 }
 
+                // Convert to `i32`.
+
                 let start = *start as i32;
+
+                // The "end" key is optional. If missing, we use
+                // "start" as the end. If it is present, however, it
+                // must be an integer.
 
                 match tbl.get("end") {
                     Some(toml::value::Value::Integer(end)) => {
                         let end = *end as i32;
+
+                        // Make sure the limits of the range are in
+                        // ascending order.
 
                         Ok(Entry(start.min(end)..=start.max(end), value))
                     }
@@ -120,6 +145,8 @@ impl Instance {
             ))
         }
     }
+
+    // Retrieve the array of entries that make up the mapping table.
 
     fn get_cfg_values(
         cfg: &DriverConfig,
