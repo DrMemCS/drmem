@@ -204,8 +204,8 @@ impl driver::API for Instance {
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
         let init_index = Instance::get_cfg_init_val(cfg);
         let def_value = Instance::get_cfg_def_val(cfg);
-        let values = if def_value.is_ok() {
-            Instance::get_cfg_values(cfg, def_value.as_ref().unwrap())
+        let values = if let Ok(ref def_value) = def_value {
+            Instance::get_cfg_values(cfg, def_value)
         } else {
             Ok(vec![])
         };
@@ -239,7 +239,7 @@ impl driver::API for Instance {
             while let Some((v, reply)) = devices.s_index.next().await {
                 // Send the reply to the setter.
 
-                reply(Ok(v.clone()));
+                reply(Ok(v));
 
                 // Send the updated values to the backend.
 
