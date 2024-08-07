@@ -13,6 +13,10 @@ use tokio_stream::StreamExt;
 #[derive(Debug, PartialEq)]
 struct Entry(RangeInclusive<i32>, device::Value);
 
+fn config_err<T>(msg: &str) -> Result<T> {
+    Err(Error::ConfigError(msg.into()))
+}
+
 pub struct Instance {
     init_index: Option<i32>,
     def_val: device::Value,
@@ -55,9 +59,9 @@ impl Instance {
             {
                 Ok(Some(*v as i32))
             }
-            Some(_) => Err(Error::ConfigError(
-                "'initial' config parameter should be a 32-bit integer".into(),
-            )),
+            Some(_) => config_err(
+                "'initial' config parameter should be a 32-bit integer",
+            ),
             None => Ok(None),
         }
     }
@@ -105,44 +109,40 @@ impl Instance {
                 // the default value (it's hard to imagine a device
                 // correctly handling different types.)
 
-                if !def.is_same_type(&value) {
-                    return Err(Error::ConfigError(
-			"all values in `values` array entries must be the same type as the default value"
-			    .into()
-		    ));
-                }
+                if def.is_same_type(&value) {
 
-                // Convert to `i32`.
+                    // Convert to `i32`.
 
-                let start = *start as i32;
+                    let start = *start as i32;
 
-                // The "end" key is optional. If missing, we use
-                // "start" as the end. If it is present, however, it
-                // must be an integer.
+                    // The "end" key is optional. If missing, we use
+                    // "start" as the end. If it is present, however,
+                    // it must be an integer.
 
-                match tbl.get("end") {
-                    Some(toml::value::Value::Integer(end)) => {
-                        let end = *end as i32;
+                    match tbl.get("end") {
+			Some(toml::value::Value::Integer(end)) => {
+                            let end = *end as i32;
 
-                        // Make sure the limits of the range are in
-                        // ascending order.
+                            // Make sure the limits of the range are in
+                            // ascending order.
 
-                        Ok(Entry(start.min(end)..=start.max(end), value))
+                            Ok(Entry(start.min(end)..=start.max(end), value))
+			}
+			Some(_) => {
+                            config_err("`values` array entry has a bad `end` value")
+			}
+			None => Ok(Entry(start..=start, value)),
                     }
-                    Some(_) => Err(Error::ConfigError(
-                        "`values` array entry has a bad `end` value".into(),
-                    )),
-                    None => Ok(Entry(start..=start, value)),
+		} else {
+                    config_err(
+			"all values in `values` array entries must be the same type as the default value"
+		    )
                 }
             } else {
-                Err(Error::ConfigError(
-                    "`values` array entry missing `value`".into(),
-                ))
+                config_err("`values` array entry missing `value`")
             }
         } else {
-            Err(Error::ConfigError(
-                "`values` array entry missing `start`".into(),
-            ))
+            config_err("`values` array entry missing `start`")
         }
     }
 
@@ -160,9 +160,7 @@ impl Instance {
                         if let toml::value::Value::Table(tbl) = entry {
                             Self::to_entry(&tbl, def)
                         } else {
-                            Err(Error::ConfigError(
-                                "`values` array contains a non-table".into(),
-                            ))
+                            config_err("`values` array contains a non-table")
                         }
                     })
                     .collect::<Result<Vec<Entry>>>()?;
@@ -174,20 +172,15 @@ impl Instance {
                 // If any adjacent ranges overlap, return an error.
 
                 if result.windows(2).any(|e| e[0].0.end() >= e[1].0.start()) {
-                    Err(Error::ConfigError(
-                        "`values` array contains overlapping ranges".into(),
-                    ))
+                    config_err("`values` array contains overlapping ranges")
                 } else {
                     Ok(result)
                 }
             }
-            Some(_) => Err(Error::ConfigError(
-                "`values` config parameter should be a non-empty array of maps"
-                    .into(),
-            )),
-            None => Err(Error::ConfigError(
-                "`values` config parameter is missing".into(),
-            )),
+            Some(_) => config_err(
+                "`values` config parameter should be a non-empty array of maps",
+            ),
+            None => config_err("`values` config parameter is missing"),
         }
     }
 
