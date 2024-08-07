@@ -110,7 +110,6 @@ impl Instance {
                 // correctly handling different types.)
 
                 if def.is_same_type(&value) {
-
                     // Convert to `i32`.
 
                     let start = *start as i32;
@@ -120,20 +119,20 @@ impl Instance {
                     // it must be an integer.
 
                     match tbl.get("end") {
-			Some(toml::value::Value::Integer(end)) => {
+                        Some(toml::value::Value::Integer(end)) => {
                             let end = *end as i32;
 
                             // Make sure the limits of the range are in
                             // ascending order.
 
                             Ok(Entry(start.min(end)..=start.max(end), value))
-			}
-			Some(_) => {
-                            config_err("`values` array entry has a bad `end` value")
-			}
-			None => Ok(Entry(start..=start, value)),
+                        }
+                        Some(_) => config_err(
+                            "`values` array entry has a bad `end` value",
+                        ),
+                        None => Ok(Entry(start..=start, value)),
                     }
-		} else {
+                } else {
                     config_err(
 			"all values in `values` array entries must be the same type as the default value"
 		    )
