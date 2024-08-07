@@ -1,6 +1,6 @@
 ![DrMem logo](assets/logo/drmem-header-small.png)
 
-_A small, capable control system for the hobbyist_
+_A mini control system_
 
 [![MIT licensed][mit-badge]][mit-url]
 [![Crates.io][crates-badge]][crates-url]
@@ -19,22 +19,21 @@ _A small, capable control system for the hobbyist_
 ---
 
 The DrMem Project strives to be a complete, easy-to-use control system
-for the hobbyist. Like the Arduino and RaspberryPi communities, this
-project is aimed at people that like to tinker and build programmable
-systems. Although commercial products will be supported, nothing
-prevents you from incorporating and controlling your own custom
-hardware.
+for the hobbyist. This project is aimed at people that like to tinker
+and build programmable systems. Although commercial products will be
+supported, nothing prevents you from incorporating and controlling
+your own custom hardware.
 
 DrMem has been developed with the following design goals:
 
 * **Reliability**. Excepting hardware failures, this control system
 should provide 24/7 service in controlling and monitoring its devices.
 Like any project of this type, careful design and extensive testing
-will help prevent issues. However, DrMem will also be written in the
-Rust programming language which provides strong compile-time checks
-which eliminate whole classes of bugs that occur in other languages.
-This project is an experiment in writing mission-critical code in
-Rust.
+will help prevent issues. However, DrMem is also written in the
+[Rust](https://www.rust-lang.org/) programming language which provides
+strong compile-time checks which eliminate whole classes of bugs that
+occur in other languages. This project is an experiment in writing
+mission-critical code in Rust.
 
 * **Efficiency**. Because we're using Rust, we have a systems
 programming language which generates optimal code and reduces CPU
@@ -44,10 +43,12 @@ responding to hardware inputs. In this project, we're also using the
 all cores of the system, further reducing latencies (or providing more
 scalability.)
 
-* **Simplicity**. DrMem is targeted for small installations so we
-want to minimize the number services that need to be managed. The `drmemd`
-executable, along with a configuration file that defines your location's
-set of devices, is all you need.
+* **Simplicity**. DrMem is targeted for small installations so we want
+to minimize the number services that need to be managed. The `drmemd`
+executable, along with a configuration file that defines your
+location's set of devices, is all you need. DrMem also lets you define
+logic in its configuration so you don't need an external application
+to peform control loops.
 
 * **Accessibility**. Although DrMem is capable running in the
 background with no user interaction, it is useful to have an interface
@@ -65,14 +66,19 @@ currently supported features:
   - A back-end which writes device information to a Redis server
 - A client API which uses GraphQL
 - Drivers which implement devices
-  - 3 built-in drivers
+  - 4 built-in drivers
     - Memory devices
 	- Cycling device
 	- Timer device
-  - 3 external drivers
+	- Map device (maps ranges of integers to values)
+  - 4 external drivers
     - Weather Underground data
 	- NTP daemon status
+	- TP-Link support (tested with an HS440 Kasa light dimmer)
 	- (Author's) custom sump pump monitor
+- A "logic block" module that lets you define logic so that control loops
+  can be set up internally, instead of requiring external client applications
+  to do the controlling.
 
 You can try some of this out by following the
 [tutorial](doc/book/content/TUTORIAL.md).

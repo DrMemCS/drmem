@@ -5,7 +5,7 @@ this version, we'll use the simple backend, no external drivers, and
 include the GraphQL interface. We'll also enable the built-in GraphQL
 editing interface.
 
-This tutorial is based on v0.3.0.
+This tutorial is based on v0.4.0.
 
 ## Build `drmemd`
 
@@ -41,7 +41,7 @@ name = "tutorial"
 [[driver]]
 name = "timer"
 prefix = "demo-timer"
-cfg = { millis = 5000, active_level = true }
+cfg = { millis = 5000, disabled = false, enabled = true }
 ```
 
 In the "driver" section, the "name" parameter specifies which driver
@@ -60,8 +60,9 @@ Each driver has a "cfg" parameter which contains configuration
 information specific to the driver. Each drivers' documentation will
 specify what parameters are needed in the configuration. For timers,
 we specify the length of its active time using the "millis" parameter
-(in this example, 5 seconds.) The "active_level" parameter specifies
-the value of the `output` device while the timing is active.
+(in this example, 5 seconds.) The "enabled" parameter specifies the
+value of the `output` device while the timing is active and "disabled"
+specifies the value of the `output` when it's inactive.
 
 ## Run `drmemd`
 
@@ -147,13 +148,13 @@ devices whose "settable" field matches the value of this argument.
 
 ## Getting Device Readings
 
-If client applications need to access devices, they can use the
-`monitorDevice()` query. This query uses the GraphQL subscription
-service which means the query returns a stream of results until the
-client closes the connection. DrMem devices only return data when
-their value changes so a query may seem "stuck" or "hung" but as long
-as the connection is there, you can assume there haven't been any
-updates to the device.
+If client applications are interested in the changing values of a
+device, they can use the `monitorDevice()` query. This query uses the
+GraphQL subscription service which means the query returns a stream of
+results until the client closes the connection. DrMem devices only
+return data when their value changes so a query may seem "stuck" or
+"hung" but as long as the connection is there, you can assume there
+haven't been any updates to the device.
 
 Let's monitor the output of `demo-timer:output`. In the query panel,
 enter:
