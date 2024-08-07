@@ -158,7 +158,7 @@ impl Instance {
                     .iter()
                     .map(|entry| {
                         if let toml::value::Value::Table(tbl) = entry {
-                            Self::to_entry(&tbl, def)
+                            Self::to_entry(tbl, def)
                         } else {
                             config_err("`values` array contains a non-table")
                         }
