@@ -135,7 +135,7 @@ pub fn create_task(
     lat: f64,
     long: f64,
 ) -> (broadcast::Sender<Info>, broadcast::Receiver<Info>) {
-    let (tx, rx) = broadcast::channel(1);
+    let (tx, rx) = broadcast::channel(10);
     let tx_copy = tx.clone();
 
     tokio::spawn(
