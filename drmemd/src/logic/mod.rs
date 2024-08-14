@@ -968,6 +968,62 @@ mod test {
         assert_eq!(emu.await.unwrap(), Ok(true));
     }
 
+    // Test a basic logic block in which forwards a solar parameter to
+    // a memory device.
+
+    #[tokio::test]
+    async fn test_basic_solar_node() {
+        const OUT1: &str = "device:out1";
+        const OUT2: &str = "device:out2";
+        let cfg = build_config(
+            &[],
+            &[("alt", OUT1), ("dec", OUT2)],
+            &[],
+            &["{solar:alt} -> {alt}", "{solar:dec} -> {dec}"],
+        );
+        let (tx_out1, mut rx_out1) = mpsc::channel(100);
+        let (tx_out2, mut rx_out2) = mpsc::channel(100);
+
+        let (_, tx_solar, emu, tx_stop) = Emulator::start(
+            vec![],
+            vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
+            cfg,
+        )
+        .await
+        .unwrap();
+
+        // Send a value and see if it was forwarded.
+
+        assert!(tx_solar
+            .send(Arc::new(solar::SolarInfo {
+                elevation: 1.0,
+                azimuth: 2.0,
+                right_ascension: 3.0,
+                declination: 4.0
+            }))
+            .is_ok());
+
+        {
+            let (value, rpy) = rx_out1.recv().await.unwrap();
+            let _ = rpy.send(Ok(value.clone()));
+
+            assert_eq!(value, device::Value::Flt(1.0));
+        }
+
+        {
+            let (value, rpy) = rx_out2.recv().await.unwrap();
+            let _ = rpy.send(Ok(value.clone()));
+
+            assert_eq!(value, device::Value::Flt(4.0));
+        }
+
+        // Stop the emulator and see that its return status is good.
+
+        let _ = tx_stop.send(());
+
+        assert_eq!(emu.await.unwrap(), Ok(true));
+    }
+
     // Test a logic block with two outputs. Make sure they are sent
     // "in parallel".
 
