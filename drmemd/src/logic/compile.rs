@@ -2934,4 +2934,40 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_solar_usage() {
+        const DATA: &[(&str, bool)] = &[
+            // Make sure literals, variables, and time values don't
+            // return a field.
+            ("{a}", false),
+            ("1", false),
+            ("1.0", false),
+            ("true", false),
+            ("#green", false),
+            ("\"test\"", false),
+            ("{utc:second}", false),
+            // Make sure the solar values return true.
+            ("{solar:alt}", true),
+            ("{solar:dec}", true),
+            ("{solar:ra}", true),
+            ("{solar:az}", true),
+            // Now test more complicated expressions to make sure each
+            // subtree is correctly compared.
+            ("not (2 > 3)", false),
+            ("2 + 2", false),
+            ("{solar:alt} + 2", true),
+            ("2 + {solar:az}", true),
+            ("{solar:dec} + {solar:az}", true),
+        ];
+
+        for (expr, result) in DATA {
+            assert_eq!(
+                &to_expr(expr).uses_solar(),
+                result,
+                "error using {}",
+                expr
+            );
+        }
+    }
 }

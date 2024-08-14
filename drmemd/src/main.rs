@@ -156,37 +156,34 @@ async fn run() -> Result<()> {
             }
         }
 
-        // Start the time-of-day task. This needs to be done *before*
-        // any logic blocks are started because logic blocks *may*
-        // have an expression that uses the time-of-day.
+        // Create a nested scope so that the tod and solar handles are
+        // freed up.
 
-        let (tx_tod, rx_tod) = logic::tod::create_task();
+        {
+            // Start the time-of-day task. This needs to be done
+            // *before* any logic blocks are started because logic
+            // blocks *may* have an expression that uses the
+            // time-of-day.
 
-        // Start the solar task. This, too, needs to be done before
-        // any logic blocks are started.
+            let (tx_tod, _) = logic::tod::create_task();
 
-        let (tx_solar, rx_solar) =
-            logic::solar::create_task(cfg.latitude, cfg.longitude);
+            // Start the solar task. This, too, needs to be done
+            // before any logic blocks are started.
 
-        // Iterate through the [[logic]] sections of the config.
+            let (tx_solar, _) =
+                logic::solar::create_task(cfg.latitude, cfg.longitude);
 
-        for logic in cfg.logic {
-            tasks.push(wrap_task(logic::Node::start(
-                tx_clnt_req.clone(),
-                tx_tod.subscribe(),
-                tx_solar.subscribe(),
-                logic,
-            )));
+            // Iterate through the [[logic]] sections of the config.
+
+            for logic in cfg.logic {
+                tasks.push(wrap_task(logic::Node::start(
+                    tx_clnt_req.clone(),
+                    tx_tod.subscribe(),
+                    tx_solar.subscribe(),
+                    logic,
+                )));
+            }
         }
-
-        // Now that we've given all the logic blocks receive handles
-        // for the time-of-day and solar tasks, we can free up our
-        // copy. If we freed up our copy *before* creating new
-        // subscriptions, the tod or solar task may have briefly seen
-        // no clients and would exit.
-
-        std::mem::drop(rx_tod);
-        std::mem::drop(rx_solar);
 
         // Now run all the tasks.
 

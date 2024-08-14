@@ -1,5 +1,5 @@
 use drmem_api::{client, device, driver, Result};
-use futures::future::join_all;
+use futures::future::{join_all, pending};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -395,7 +395,7 @@ impl Node {
 
             let wait_for_time = async {
                 match self.time_ch.as_mut() {
-                    None => None,
+                    None => pending().await,
                     Some(s) => s.next().await,
                 }
             };
@@ -407,13 +407,41 @@ impl Node {
 
             let wait_for_solar = async {
                 match self.solar_ch.as_mut() {
-                    None => None,
-                    Some(ch) => ch.recv().await.ok(),
+                    None => pending().await,
+                    Some(ch) => ch.recv().await,
                 }
             };
 
             #[rustfmt::skip]
 	    tokio::select! {
+		biased;
+
+		// If we need the solar channel, wait for the next
+		// update.
+
+		v = wait_for_solar => {
+		    match v {
+			Ok(v) => solar = Some(v),
+			Err(broadcast::error::RecvError::Lagged(_)) => {
+			    warn!("not handling solar info fast enough");
+			    continue
+			}
+			Err(broadcast::error::RecvError::Closed) => {
+			    error!("solar info channel is closed");
+			    return Err(drmem_api::Error::OperationError(
+				"solar channel closed".into()
+			    ));
+			}
+		    }
+		}
+
+		// If we need the time channel, wait for the next
+		// second.
+
+		Some(v) = wait_for_time => {
+		    time = v;
+		}
+
 		// Wait for the next reading to arrive. All the
 		// incoming streams have been combined into one and
 		// the returned value is a pair consisting of an index
@@ -424,20 +452,6 @@ impl Node {
 		    // recalculations.
 
 		    self.inputs[idx] = Some(reading.value);
-		}
-
-		// If we need the time channel, wait for the next
-		// second.
-
-		Some(v) = wait_for_time => {
-		    time = v;
-		}
-
-		// If we need the solar channel, wait for the next
-		// update.
-
-		Some(v) = wait_for_solar => {
-		    solar = Some(v);
 		}
 	    }
 
@@ -557,16 +571,16 @@ mod test {
             // Create the common channels used by DrMem.
 
             let (tx_req, mut c_recv) = mpsc::channel(100);
-            let (tx_tod, rx_tod) = broadcast::channel(100);
-            let (tx_solar, rx_solar) = broadcast::channel(100);
+            let (tx_tod, _) = broadcast::channel(100);
+            let (tx_solar, _) = broadcast::channel(100);
 
             // Start the logic block with the proper communciation
             // channels and configuration.
 
             let node = Node::start(
                 client::RequestChan::new(tx_req),
-                rx_tod,
-                rx_solar,
+                tx_tod.subscribe(),
+                tx_solar.subscribe(),
                 cfg,
             );
 
@@ -946,6 +960,62 @@ mod test {
         let _ = rpy.send(Ok(value.clone()));
 
         assert_eq!(value, device::Value::Bool(false));
+
+        // Stop the emulator and see that its return status is good.
+
+        let _ = tx_stop.send(());
+
+        assert_eq!(emu.await.unwrap(), Ok(true));
+    }
+
+    // Test a basic logic block in which forwards a solar parameter to
+    // a memory device.
+
+    #[tokio::test]
+    async fn test_basic_solar_node() {
+        const OUT1: &str = "device:out1";
+        const OUT2: &str = "device:out2";
+        let cfg = build_config(
+            &[],
+            &[("alt", OUT1), ("dec", OUT2)],
+            &[],
+            &["{solar:alt} -> {alt}", "{solar:dec} -> {dec}"],
+        );
+        let (tx_out1, mut rx_out1) = mpsc::channel(100);
+        let (tx_out2, mut rx_out2) = mpsc::channel(100);
+
+        let (_, tx_solar, emu, tx_stop) = Emulator::start(
+            vec![],
+            vec![(OUT1.into(), tx_out1), (OUT2.into(), tx_out2)],
+            cfg,
+        )
+        .await
+        .unwrap();
+
+        // Send a value and see if it was forwarded.
+
+        assert!(tx_solar
+            .send(Arc::new(solar::SolarInfo {
+                elevation: 1.0,
+                azimuth: 2.0,
+                right_ascension: 3.0,
+                declination: 4.0
+            }))
+            .is_ok());
+
+        {
+            let (value, rpy) = rx_out1.recv().await.unwrap();
+            let _ = rpy.send(Ok(value.clone()));
+
+            assert_eq!(value, device::Value::Flt(1.0));
+        }
+
+        {
+            let (value, rpy) = rx_out2.recv().await.unwrap();
+            let _ = rpy.send(Ok(value.clone()));
+
+            assert_eq!(value, device::Value::Flt(4.0));
+        }
 
         // Stop the emulator and see that its return status is good.
 
