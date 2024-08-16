@@ -117,14 +117,16 @@ default = []
 # Backends
 
 simple-backend = []
-redis-backend = ["redis"]
+redis-backend = ["dep:redis"]
 
 # Client APIs
 
 no-client = []
-graphql = ["warp", "juniper", "juniper_graphql_ws", "juniper_warp", "libmdns"]
+graphql = ["dep:warp", "dep:juniper", "dep:juniper_graphql_ws",
+           "dep:juniper_warp", "dep:libmdns"]
 graphiql = ["graphql"]
 
 # Drivers
 
-all-drivers = ["drmem-drv-ntp", "drmem-drv-sump", "drmem-drv-tplink", "drmem-drv-weather-wu"]
+all-drivers = ["drmem-drv-ntp", "drmem-drv-sump", "drmem-drv-tplink",
+               "drmem-drv-weather-wu"]
