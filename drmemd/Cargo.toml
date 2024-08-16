@@ -79,7 +79,7 @@ optional = true
 # This section defines the optional dependencies for backend storage.
 
 [dependencies.redis]
-version = "0.25"
+version = "0.26"
 default-features = false
 features = ["tokio-comp", "streams"]
 optional = true
