@@ -200,7 +200,7 @@ impl DriverDb {
 
         // Load the set-up for the NTP monitor.
 
-        #[cfg(feature = "driver-ntp")]
+        #[cfg(feature = "drmem-drv-ntp")]
         {
             use drmem_drv_ntp::Instance;
 
@@ -216,7 +216,7 @@ impl DriverDb {
 
         // Load the set-up for the GPIO sump pump monitor.
 
-        #[cfg(feature = "driver-sump")]
+        #[cfg(feature = "drmem-drv-sump")]
         {
             use drmem_drv_sump::Instance;
 
@@ -232,7 +232,7 @@ impl DriverDb {
 
         // Load the set-up for the Weather Underground driver.
 
-        #[cfg(feature = "driver-weather-wu")]
+        #[cfg(feature = "drmem-drv-weather-wu")]
         {
             use drmem_drv_weather_wu::Instance;
 
@@ -248,7 +248,7 @@ impl DriverDb {
 
         // Load the set-up for the TP-Link driver.
 
-        #[cfg(feature = "driver-tplink")]
+        #[cfg(feature = "drmem-drv-tplink")]
         {
             use drmem_drv_tplink::Instance;
 

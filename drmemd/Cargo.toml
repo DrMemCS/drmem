@@ -127,9 +127,4 @@ graphiql = ["graphql"]
 
 # Drivers
 
-driver-ntp = ["drmem-drv-ntp"]
-driver-sump = ["drmem-drv-sump"]
-driver-tplink = ["drmem-drv-tplink"]
-driver-weather-wu = ["drmem-drv-weather-wu"]
-
-all-drivers = ["driver-ntp", "driver-sump", "driver-tplink", "driver-weather-wu"]
+all-drivers = ["drmem-drv-ntp", "drmem-drv-sump", "drmem-drv-tplink", "drmem-drv-weather-wu"]
