@@ -9,23 +9,18 @@ resolver = "2"
 
 [workspace.dependencies]
 async-trait = { version = "0.1", default-features = false }
-
-futures = { version = "0.3", features = ["std"] }
-
-toml = { version = "0.8", default-features = false }
 chrono = { version = "0.4", default-features = false }
-
+futures = { version = "0.3", default-features = false }
+toml = { version = "0.8", default-features = false }
 tokio = { version = "1", default-features = false }
 tokio-stream = { version = "0.1", default-features = false }
-tracing = { version = "0.1", features = ["std"] }
+tracing = { version = "0.1", default-features = false }
 tracing-futures = { version = "0.2", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
-
-serde = { version = "1.0", default-features = false }
-serde_json = { version = "1.0", default-features = false }
-serde_derive = { version = "1.0", default-features = false }
-
-palette = "0.7"
+serde = { version = "1", default-features = false }
+serde_json = { version = "1", default-features = false }
+serde_derive = { version = "1", default-features = false }
+palette = { version = "0.7", default-features = false }
 
 # Profiles used by all binaries and packages.
 

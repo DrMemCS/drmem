@@ -1,5 +1,5 @@
-use crate::backends::store;
-use drmem_api::{client, driver, Error, Result, Store};
+use crate::backends::{store, Store};
+use drmem_api::{client, driver, Error, Result};
 use std::convert::Infallible;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{info, info_span, warn};

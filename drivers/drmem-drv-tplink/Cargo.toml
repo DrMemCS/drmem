@@ -14,15 +14,35 @@ keywords = ["control-system", "automation"]
 doctest = false
 
 [dependencies]
+
 toml.workspace = true
+toml.default-features = false
 
 futures.workspace = true
-tokio = { workspace = true, features = ["net", "time", "macros", "io-util"] }
-tracing.workspace = true
-tracing-futures.workspace = true
-tracing-subscriber.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_derive.workspace = true
-serde_json = { workspace = true, features = ["std"] }
+futures.default-features = false
 
-drmem-api = { path = "../../drmem-api", version = "0.4" }
+tokio.workspace = true
+tokio.default-features = false
+tokio.features = ["net", "time", "macros", "io-util"]
+
+tracing.workspace = true
+tracing.default-features = false
+
+tracing-futures.workspace = true
+tracing-futures.default-features = false
+
+tracing-subscriber.workspace = true
+tracing-subscriber.default-features = false
+
+serde.workspace = true
+serde.default-features = false
+serde.features = ["derive"]
+
+serde_derive.workspace = true
+serde_derive.default-features = false
+
+serde_json.workspace = true
+serde_json.default-features = false
+serde_json.features = ["std"]
+
+drmem-api = { path = "../../drmem-api", version = "0.5" }

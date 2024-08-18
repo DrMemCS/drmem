@@ -1,9 +1,10 @@
+use crate::backends::Store;
 use async_trait::async_trait;
 use chrono::*;
 use drmem_api::{
     client, device,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
-    Error, Result, Store,
+    Error, Result,
 };
 use futures::task::{Context, Poll};
 use futures::Future;
@@ -167,11 +168,11 @@ fn decode_color(buf: &[u8]) -> Result<device::Value> {
 }
 
 // Returns a `device::Value` from a `redis::Value`. The only
-// enumeration we support is the `redis::Value::Data` form since
+// enumeration we support is the `redis::Value::BulkString` form since
 // that's the one used to return redis data.
 
 fn from_value(v: &redis::Value) -> Result<device::Value> {
-    if let redis::Value::Data(buf) = v {
+    if let redis::Value::BulkString(buf) = v {
         // The buffer has to have at least one character in order to
         // be decoded.
 
@@ -448,6 +449,7 @@ impl RedisStore {
                 db: cfg.get_dbn(),
                 username: name.cloned(),
                 password: pword.cloned(),
+                protocol: redis::ProtocolVersion::RESP3,
             },
         };
 
@@ -700,17 +702,13 @@ impl RedisStore {
         name: device::Name,
     ) -> Result<client::DevInfoReply> {
         let info = Self::device_info_cmd(name.to_string().as_str())
-            .query_async::<AioMplexConnection, HashMap<String, String>>(
-                &mut self.db_con,
-            )
+            .query_async::<HashMap<String, String>>(&mut self.db_con)
             .await
             .map_err(xlat_err)
             .and_then(|v| Self::hash_to_info(&self.table, &name, &v))?;
 
         Self::xinfo_cmd(name.to_string().as_str())
-            .query_async::<AioMplexConnection, StreamInfoStreamReply>(
-                &mut self.db_con,
-            )
+            .query_async::<StreamInfoStreamReply>(&mut self.db_con)
             .await
             .map_err(xlat_err)
             .and_then(move |v| {
@@ -742,7 +740,7 @@ impl RedisStore {
         name: &str,
         reply: &redis::Value,
     ) -> Option<device::Reading> {
-        if redis::Value::Bulk(vec![]) == *reply {
+        if redis::Value::Array(vec![]) == *reply {
             warn!("no previous value for {}", name);
             return None;
         }
@@ -892,7 +890,7 @@ impl RedisStore {
                 Box::pin(async move {
                     if let Err(e) =
                         Self::report_bounded_new_value_cmd(&hist_key, &v, mh)
-                            .query_async::<AioMplexConnection, ()>(&mut db_con)
+                            .query_async::<()>(&mut db_con)
                             .await
                     {
                         warn!("couldn't save {} data to redis ... {}", &name, e)
@@ -907,7 +905,7 @@ impl RedisStore {
 
                 Box::pin(async move {
                     if let Err(e) = Self::report_new_value_cmd(&hist_key, &v)
-                        .query_async::<AioMplexConnection, ()>(&mut db_con)
+                        .query_async::<()>(&mut db_con)
                         .await
                     {
                         warn!("couldn't save {} data to redis ... {}", &name, e)
@@ -1166,19 +1164,20 @@ mod tests {
     use super::*;
     use drmem_api::device;
 
-    // We only want to convert Value::Data() forms. These tests make
-    // sure the other variants don't translate.
+    // We only want to convert Value::BulkString() forms. These tests
+    // make sure the other variants don't translate.
 
     #[test]
     fn test_reject_invalid_forms() {
         if let Ok(v) = from_value(&redis::Value::Int(0)) {
             panic!("Value::Int incorrectly translated to {:?}", v);
         }
-        if let Ok(v) = from_value(&redis::Value::Bulk(vec![])) {
-            panic!("Value::Bulk incorrectly translated to {:?}", v);
+        if let Ok(v) = from_value(&redis::Value::Array(vec![])) {
+            panic!("Value::Array incorrectly translated to {:?}", v);
         }
-        if let Ok(v) = from_value(&redis::Value::Status(String::from(""))) {
-            panic!("Value::Status incorrectly translated to {:?}", v);
+        if let Ok(v) = from_value(&redis::Value::SimpleString(String::from("")))
+        {
+            panic!("Value::SimpleString incorrectly translated to {:?}", v);
         }
         if let Ok(v) = from_value(&redis::Value::Okay) {
             panic!("Value::Okay incorrectly translated to {:?}", v);
@@ -1191,11 +1190,11 @@ mod tests {
     fn test_bool_decoder() {
         assert_eq!(
             Ok(device::Value::Bool(false)),
-            from_value(&redis::Value::Data(vec![b'B', b'F']))
+            from_value(&redis::Value::BulkString(vec![b'B', b'F']))
         );
         assert_eq!(
             Ok(device::Value::Bool(true)),
-            from_value(&redis::Value::Data(vec![b'B', b'T']))
+            from_value(&redis::Value::BulkString(vec![b'B', b'T']))
         );
     }
 
@@ -1229,16 +1228,18 @@ mod tests {
 
     #[test]
     fn test_int_decoder() {
-        assert!(from_value(&redis::Value::Data(vec![])).is_err());
-        assert!(from_value(&redis::Value::Data(vec![b'I'])).is_err());
-        assert!(from_value(&redis::Value::Data(vec![b'I', 0u8])).is_err());
-        assert!(from_value(&redis::Value::Data(vec![b'I', 0u8, 0u8])).is_err());
-        assert!(
-            from_value(&redis::Value::Data(vec![b'I', 0u8, 0u8, 0u8])).is_err()
-        );
+        assert!(from_value(&redis::Value::BulkString(vec![])).is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![b'I'])).is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![b'I', 0u8])).is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![b'I', 0u8, 0u8]))
+            .is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![
+            b'I', 0u8, 0u8, 0u8
+        ]))
+        .is_err());
 
         for (v, rv) in INT_TEST_CASES {
-            let data = redis::Value::Data(rv.to_vec());
+            let data = redis::Value::BulkString(rv.to_vec());
 
             assert_eq!(Ok(device::Value::Int(*v)), from_value(&data));
         }
@@ -1275,32 +1276,34 @@ mod tests {
 
     #[test]
     fn test_float_decoder() {
-        assert!(from_value(&redis::Value::Data(vec![])).is_err());
-        assert!(from_value(&redis::Value::Data(vec![b'D'])).is_err());
-        assert!(from_value(&redis::Value::Data(vec![b'D', 0u8])).is_err());
-        assert!(from_value(&redis::Value::Data(vec![b'D', 0u8, 0u8])).is_err());
-        assert!(
-            from_value(&redis::Value::Data(vec![b'D', 0u8, 0u8, 0u8])).is_err()
-        );
-        assert!(from_value(&redis::Value::Data(vec![
+        assert!(from_value(&redis::Value::BulkString(vec![])).is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![b'D'])).is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![b'D', 0u8])).is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![b'D', 0u8, 0u8]))
+            .is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![
+            b'D', 0u8, 0u8, 0u8
+        ]))
+        .is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![
             b'D', 0u8, 0u8, 0u8, 0u8
         ]))
         .is_err());
-        assert!(from_value(&redis::Value::Data(vec![
+        assert!(from_value(&redis::Value::BulkString(vec![
             b'D', 0u8, 0u8, 0u8, 0u8, 0u8
         ]))
         .is_err());
-        assert!(from_value(&redis::Value::Data(vec![
+        assert!(from_value(&redis::Value::BulkString(vec![
             b'D', 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
         ]))
         .is_err());
-        assert!(from_value(&redis::Value::Data(vec![
+        assert!(from_value(&redis::Value::BulkString(vec![
             b'D', 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8
         ]))
         .is_err());
 
         for (v, rv) in FLT_TEST_CASES {
-            let data = redis::Value::Data(rv.to_vec());
+            let data = redis::Value::BulkString(rv.to_vec());
 
             assert_eq!(Ok(device::Value::Flt(*v)), from_value(&data));
         }
@@ -1334,7 +1337,7 @@ mod tests {
     fn test_color_decoder() {
         for ((r, g, b, a), rv) in COLOR_TEST_CASES {
             assert_eq!(
-                from_value(&redis::Value::Data(rv.to_vec())).unwrap(),
+                from_value(&redis::Value::BulkString(rv.to_vec())).unwrap(),
                 device::Value::Color(palette::LinSrgba::new(*r, *g, *b, *a))
             );
         }
@@ -1360,18 +1363,20 @@ mod tests {
     fn test_string_decoder() {
         // Buffers smaller than 5 bytes are an error.
 
-        assert!(from_value(&redis::Value::Data(vec![])).is_err());
-        assert!(from_value(&redis::Value::Data(vec![b'S'])).is_err());
-        assert!(from_value(&redis::Value::Data(vec![b'S', 0u8])).is_err());
-        assert!(from_value(&redis::Value::Data(vec![b'S', 0u8, 0u8])).is_err());
-        assert!(
-            from_value(&redis::Value::Data(vec![b'S', 0u8, 0u8, 0u8])).is_err()
-        );
+        assert!(from_value(&redis::Value::BulkString(vec![])).is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![b'S'])).is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![b'S', 0u8])).is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![b'S', 0u8, 0u8]))
+            .is_err());
+        assert!(from_value(&redis::Value::BulkString(vec![
+            b'S', 0u8, 0u8, 0u8
+        ]))
+        .is_err());
 
         // Loop through the test cases.
 
         for (v, rv) in STR_TEST_CASES {
-            let data = redis::Value::Data(rv.to_vec());
+            let data = redis::Value::BulkString(rv.to_vec());
 
             assert_eq!(
                 Ok(device::Value::Str(String::from(*v))),
@@ -1382,17 +1387,17 @@ mod tests {
         // Verify proper response (both good and bad) when the buffer
         // doesn't match the size of the string.
 
-        assert!(from_value(&redis::Value::Data(vec![
+        assert!(from_value(&redis::Value::BulkString(vec![
             b'S', 0u8, 0u8, 0u8, 1u8
         ]))
         .is_err());
-        assert!(from_value(&redis::Value::Data(vec![
+        assert!(from_value(&redis::Value::BulkString(vec![
             b'S', 0u8, 0u8, 0u8, 2u8, b'A'
         ]))
         .is_err());
         assert_eq!(
             Ok(device::Value::Str(String::from("AB"))),
-            from_value(&redis::Value::Data(vec![
+            from_value(&redis::Value::BulkString(vec![
                 b'S', 0u8, 0u8, 0u8, 2u8, b'A', b'B', 0, 0
             ]))
         );
@@ -1513,15 +1518,15 @@ $1\r\n1\r\n"
             None
         );
         assert_eq!(
-            RedisStore::parse_last_value(NAME, &redis::Value::Bulk(vec![])),
+            RedisStore::parse_last_value(NAME, &redis::Value::Array(vec![])),
             None
         );
 
-        let val = redis::Value::Bulk(vec![redis::Value::Bulk(vec![
-            redis::Value::Data(b"1000000-0".to_vec()),
-            redis::Value::Bulk(vec![
-                redis::Value::Data(b"value".to_vec()),
-                redis::Value::Data(b"BT".to_vec()),
+        let val = redis::Value::Array(vec![redis::Value::Array(vec![
+            redis::Value::BulkString(b"1000000-0".to_vec()),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"value".to_vec()),
+                redis::Value::BulkString(b"BT".to_vec()),
             ]),
         ])]);
 
@@ -1533,11 +1538,11 @@ $1\r\n1\r\n"
             })
         );
 
-        let val = redis::Value::Bulk(vec![redis::Value::Bulk(vec![
-            redis::Value::Data(b"1234-567".to_vec()),
-            redis::Value::Bulk(vec![
-                redis::Value::Data(b"value".to_vec()),
-                redis::Value::Data(b"BF".to_vec()),
+        let val = redis::Value::Array(vec![redis::Value::Array(vec![
+            redis::Value::BulkString(b"1234-567".to_vec()),
+            redis::Value::Array(vec![
+                redis::Value::BulkString(b"value".to_vec()),
+                redis::Value::BulkString(b"BF".to_vec()),
             ]),
         ])]);
 
@@ -1778,7 +1783,7 @@ $4\r\nEXEC\r\n"
             id: "1000-0".into(),
             map: HashMap::from([(
                 "junk".into(),
-                redis::Value::Data(b"10".to_vec())
+                redis::Value::BulkString(b"10".to_vec())
             )])
         })
         .is_err());
@@ -1786,7 +1791,7 @@ $4\r\nEXEC\r\n"
             id: "1000-0".into(),
             map: HashMap::from([(
                 "value".into(),
-                redis::Value::Data(b"10".to_vec())
+                redis::Value::BulkString(b"10".to_vec())
             )])
         })
         .is_err());
@@ -1798,7 +1803,9 @@ $4\r\nEXEC\r\n"
                 id: "1000-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::Data(to_redis(&device::Value::Bool(true)))
+                    redis::Value::BulkString(to_redis(&device::Value::Bool(
+                        true
+                    )))
                 )])
             }),
             Ok(device::Reading {
@@ -1811,7 +1818,9 @@ $4\r\nEXEC\r\n"
                 id: "1500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::Data(to_redis(&device::Value::Int(123)))
+                    redis::Value::BulkString(to_redis(&device::Value::Int(
+                        123
+                    )))
                 )])
             }),
             Ok(device::Reading {
@@ -1824,7 +1833,9 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::Data(to_redis(&device::Value::Int(-321)))
+                    redis::Value::BulkString(to_redis(&device::Value::Int(
+                        -321
+                    )))
                 )])
             }),
             Ok(device::Reading {
@@ -1837,7 +1848,9 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::Data(to_redis(&device::Value::Flt(1.0)))
+                    redis::Value::BulkString(to_redis(&device::Value::Flt(
+                        1.0
+                    )))
                 )])
             }),
             Ok(device::Reading {
@@ -1850,7 +1863,9 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::Data(to_redis(&device::Value::Flt(-1.0)))
+                    redis::Value::BulkString(to_redis(&device::Value::Flt(
+                        -1.0
+                    )))
                 )])
             }),
             Ok(device::Reading {
@@ -1863,7 +1878,9 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::Data(to_redis(&device::Value::Flt(1.0e100)))
+                    redis::Value::BulkString(to_redis(&device::Value::Flt(
+                        1.0e100
+                    )))
                 )])
             }),
             Ok(device::Reading {
@@ -1876,7 +1893,9 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::Data(to_redis(&device::Value::Flt(1.0e-100)))
+                    redis::Value::BulkString(to_redis(&device::Value::Flt(
+                        1.0e-100
+                    )))
                 )])
             }),
             Ok(device::Reading {
@@ -1889,7 +1908,7 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::Data(to_redis(&device::Value::Str(
+                    redis::Value::BulkString(to_redis(&device::Value::Str(
                         "Hello".into()
                     )))
                 )])

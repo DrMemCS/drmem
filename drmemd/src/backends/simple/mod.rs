@@ -9,12 +9,13 @@
 //! historical information but, instead, are doing real-time control
 //! with current values.
 
+use crate::backends::Store;
 use async_trait::async_trait;
 use chrono::*;
 use drmem_api::{
     client, device,
     driver::{self, ReportReading, RxDeviceSetting, TxDeviceSetting},
-    Error, Result, Store,
+    Error, Result,
 };
 use std::collections::{hash_map, HashMap};
 use std::{
@@ -470,7 +471,8 @@ impl Store for SimpleStore {
 #[cfg(test)]
 mod tests {
     use super::{mk_report_func, DeviceInfo, SimpleStore};
-    use drmem_api::{device, Store};
+    use crate::backends::Store;
+    use drmem_api::device;
     use std::{collections::HashMap, time};
     use tokio::sync::{mpsc::error::TryRecvError, oneshot};
     use tokio::time::interval;
