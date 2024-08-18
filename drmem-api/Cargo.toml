@@ -17,16 +17,24 @@ doctest = false
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-async-trait.workspace = true
+chrono.workspace = true
+chrono.default-features = false
 
 toml.workspace = true
-
-chrono.workspace = true
+toml.default-features = false
 
 tokio.workspace = true
+tokio.default-features = false
+
 tokio-stream.workspace = true
+tokio-stream.default-features = false
 
 serde.workspace = true
+serde.default-features = false
+
 serde_derive.workspace = true
+serde_derive.default-features = false
 
 palette.workspace = true
+palette.default-features = false
+palette.features = ["libm"]

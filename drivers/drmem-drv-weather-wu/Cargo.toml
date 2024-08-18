@@ -14,14 +14,26 @@ keywords = ["control-system", "automation"]
 doctest = false
 
 [dependencies]
+
 toml.workspace = true
+toml.default-features = false
 
-tokio = { workspace = true, features = ["net", "io-util"] }
+tokio.workspace = true
+tokio.default-features = false
+
 tracing.workspace = true
-tracing-futures.workspace = true
-tracing-subscriber.workspace = true
+tracing.default-features = false
 
-reqwest = { default-features = false, version = "0.11" }
-weather-underground = "0.1"
+tracing-futures.workspace = true
+tracing-futures.default-features = false
+
+tracing-subscriber.workspace = true
+tracing-subscriber.default-features = false
+
+reqwest.version = "0.11"
+reqwest.default-features = false
+
+weather-underground.version = "0.1"
+weather-underground.default-features = false
 
 drmem-api = { path = "../../drmem-api", version = "0.4" }

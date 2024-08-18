@@ -20,37 +20,72 @@ lrpar = "0.13"
 
 [dependencies]
 async-trait.workspace = true
+async-trait.default-features = false
 
 futures.workspace = true
+futures.default-features = false
+futures.features = ["alloc"]
 
-toml = { workspace = true, features = ["parse"] }
+toml.workspace = true
+toml.default-features = false
+toml.features = ["parse"]
 
-tokio = { workspace = true, features = ["rt-multi-thread", "time",
-"fs", "macros"] }
-tokio-stream = { workspace = true, features = ["net", "sync"] }
+tokio.workspace = true
+tokio.default-features = false
+tokio.features = ["rt-multi-thread", "time", "fs", "macros"]
+
+tokio-stream.workspace = true
+tokio-stream.default-features = false
+tokio-stream.features = ["net", "sync"]
+
 tracing.workspace = true
-tracing-futures = { workspace = true, features = ["std-future", "std"] }
-tracing-subscriber = { workspace = true, features = ["ansi"] }
+tracing.default-features = false
+tracing.features = ["attributes"]
+
+tracing-futures.workspace = true
+tracing-futures.default-features = false
+tracing-futures.features = ["std-future", "std"]
+
+tracing-subscriber.workspace = true
+tracing-subscriber.default-features = false
+tracing-subscriber.features = ["ansi"]
 
 serde.workspace = true
+serde.default-features = false
+
 serde_derive.workspace = true
+serde_derive.default-features = false
 
-clap = { version = "4", features = ["cargo"] }
+clap.version = "4"
+clap.default-features = false
+clap.features = ["cargo", "std"]
 
-chrono = { workspace = true, features = ["clock"] }
+chrono.workspace = true
+chrono.default-features = false
+chrono.features = ["clock"]
 
 palette.workspace = true
+palette.default-features = false
+palette.features = ["libm", "named", "named_from_str"]
 
-lazy_static = "1"
+lazy_static = { version = "1", default-features = false }
 
 drmem-api = { path = "../drmem-api", version = "0.4.1" }
 
-cfgrammar = "0.13"
-lrlex = "0.13"
-lrpar = "0.13"
+cfgrammar.version = "0.13"
+cfgrammar.default-features = false
+
+lrlex.version = "0.13"
+lrlex.default-features = false
+
+lrpar.version = "0.13"
+lrpar.default-features = false
 
 [dev-dependencies]
-tokio-stream = { workspace = true, features = ["sync", "time"] }
+
+tokio-stream.workspace = true
+tokio-stream.default-features = false
+tokio-stream.features = ["sync", "time"]
 
 # This section defines the driver dependencies. Most drivers are
 # optional, but a few drivers define common devices for a `drmem`
@@ -89,24 +124,29 @@ optional = true
 
 [dependencies.juniper]
 version = "0.16"
+default-features = false
 features = ["chrono"]
 optional = true
 
 [dependencies.juniper_warp]
 version = "0.8"
+default-features = false
 features = ["subscriptions"]
 optional = true
 
 [dependencies.juniper_graphql_ws]
 version = "0.4"
+default-features = false
 optional = true
 
 [dependencies.warp]
 version = "0.3"
+default-features = false
 optional = true
 
 [dependencies.libmdns]
 version = "0.8"
+default-features = false
 optional = true
 
 # These are features that can be enabled for drmem.

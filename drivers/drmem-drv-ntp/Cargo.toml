@@ -15,10 +15,19 @@ doctest = false
 
 [dependencies]
 toml.workspace = true
+toml.default-features = false
 
-tokio = { workspace = true, features = ["net", "io-util", "time", "macros"] }
+tokio.workspace = true
+tokio.default-features = false
+tokio.features = ["net", "time", "macros"]
+
 tracing.workspace = true
+tracing.default-features = false
+
 tracing-futures.workspace = true
+tracing-futures.default-features = false
+
 tracing-subscriber.workspace = true
+tracing-subscriber.default-features = false
 
 drmem-api = { path = "../../drmem-api", version = "0.4" }
