@@ -1,5 +1,5 @@
-use chrono::{Utc, DateTime};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use drmem_api::{client, device, driver, Result};
 
 // Defines the trait that a back-end needs to implement to provide
