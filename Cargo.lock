@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-ntp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "drmem-api",
  "tokio",
@@ -397,7 +397,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-sump"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "drmem-api",
  "socket2",
@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-tplink"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "drmem-api",
  "futures",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-weather-wu"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "drmem-api",
  "reqwest",
@@ -440,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "drmemd"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "cfgrammar",
