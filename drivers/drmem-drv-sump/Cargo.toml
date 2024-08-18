@@ -33,4 +33,4 @@ tracing-futures.default-features = false
 tracing-subscriber.workspace = true
 tracing-subscriber.default-features = false
 
-drmem-api = { path = "../../drmem-api", version = "0.4" }
+drmem-api = { path = "../../drmem-api", version = "0.5" }

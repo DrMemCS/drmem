@@ -70,7 +70,7 @@ palette.features = ["libm", "named", "named_from_str"]
 
 lazy_static = { version = "1", default-features = false }
 
-drmem-api = { path = "../drmem-api", version = "0.4.1" }
+drmem-api = { path = "../drmem-api", version = "0.5" }
 
 cfgrammar.version = "0.13"
 cfgrammar.default-features = false

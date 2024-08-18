@@ -3,7 +3,7 @@ use chrono::*;
 use drmem_api::{
     client, device,
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
-    Error, Result, Store,
+    Error, Result
 };
 use futures::task::{Context, Poll};
 use futures::Future;
@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{self, Stream, StreamExt};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
+use crate::backends::Store;
 
 type AioMplexConnection = aio::MultiplexedConnection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;

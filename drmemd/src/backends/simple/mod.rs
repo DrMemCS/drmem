@@ -14,7 +14,7 @@ use chrono::*;
 use drmem_api::{
     client, device,
     driver::{self, ReportReading, RxDeviceSetting, TxDeviceSetting},
-    Error, Result, Store,
+    Error, Result
 };
 use std::collections::{hash_map, HashMap};
 use std::{
@@ -27,6 +27,7 @@ use tokio_stream::{
     StreamExt,
 };
 use tracing::{error, warn};
+use crate::backends::Store;
 
 const CHAN_SIZE: usize = 20;
 
@@ -470,11 +471,12 @@ impl Store for SimpleStore {
 #[cfg(test)]
 mod tests {
     use super::{mk_report_func, DeviceInfo, SimpleStore};
-    use drmem_api::{device, Store};
+    use drmem_api::device;
     use std::{collections::HashMap, time};
     use tokio::sync::{mpsc::error::TryRecvError, oneshot};
     use tokio::time::interval;
     use tokio_stream::StreamExt;
+    use crate::backends::Store;
 
     #[test]
     fn test_timestamp() {
