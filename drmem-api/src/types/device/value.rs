@@ -1,5 +1,5 @@
 use crate::types::Error;
-use std::{convert::TryFrom, fmt};
+use std::{convert::TryFrom, fmt, sync::Arc};
 
 /// Defines fundamental types that can be associated with a device.
 /// Drivers set the type for each device they manage and, for devices
@@ -29,7 +29,7 @@ pub enum Value {
     /// Longer strings should be returned at a slower rate. If the
     /// system takes too much time serializing string data, it could
     /// throw other portions of DrMem out of "soft real-time".
-    Str(String),
+    Str(Arc<str>),
 
     /// For devices that render color values.
     Color(palette::LinSrgba<u8>),
@@ -162,6 +162,18 @@ impl TryFrom<Value> for String {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         if let Value::Str(v) = value {
+            Ok(v.to_string())
+        } else {
+            Err(Error::TypeError)
+        }
+    }
+}
+
+impl TryFrom<Value> for Arc<str> {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        if let Value::Str(v) = value {
             Ok(v)
         } else {
             Err(Error::TypeError)
@@ -171,6 +183,12 @@ impl TryFrom<Value> for String {
 
 impl From<String> for Value {
     fn from(value: String) -> Self {
+        Value::Str(value.into())
+    }
+}
+
+impl From<Arc<str>> for Value {
+    fn from(value: Arc<str>) -> Self {
         Value::Str(value)
     }
 }
@@ -249,10 +267,10 @@ impl TryFrom<&toml::value::Value> for Value {
                     if let Some(v) = parse_color(&tmp[1..]) {
                         Ok(v)
                     } else {
-                        Ok(Value::Str(v.clone()))
+                        Ok(Value::Str(v.to_owned().into()))
                     }
                 }
-                _ => Ok(Value::Str(v.clone())),
+                _ => Ok(Value::Str(v.to_owned().into())),
             },
             _ => Err(Error::TypeError),
         }
@@ -298,7 +316,7 @@ mod tests {
 
         assert_eq!(Value::Flt(5.0), Value::from(5.0f64));
 
-        assert_eq!(Value::Str(String::from("hello")), Value::from("hello"));
+        assert_eq!(Value::Str("hello".into()), "hello".into());
 
         // Cycle through 256 values.
 
@@ -322,7 +340,7 @@ mod tests {
         assert_eq!(bool::try_from(Value::Bool(true)), Ok(true));
         assert!(bool::try_from(Value::Int(0)).is_err());
         assert!(bool::try_from(Value::Flt(0.0)).is_err());
-        assert!(bool::try_from(Value::Str(String::from("hello"))).is_err());
+        assert!(bool::try_from(Value::Str("hello".into())).is_err());
 
         // Check that we can convert i32 values.
 
@@ -333,7 +351,7 @@ mod tests {
             Ok(-0x80000000i32)
         );
         assert!(i32::try_from(Value::Flt(0.0)).is_err());
-        assert!(i32::try_from(Value::Str(String::from("hello"))).is_err());
+        assert!(i32::try_from(Value::Str("hello".into())).is_err());
 
         // Check that we can convert i16 values.
 
@@ -343,7 +361,7 @@ mod tests {
         assert!(i16::try_from(Value::Int(0x8000i32)).is_err());
         assert!(i16::try_from(Value::Int(-0x8000i32 - 1i32)).is_err());
         assert!(i16::try_from(Value::Flt(0.0)).is_err());
-        assert!(i16::try_from(Value::Str(String::from("hello"))).is_err());
+        assert!(i16::try_from(Value::Str("hello".into())).is_err());
 
         // Check that we can convert u16 values.
 
@@ -353,7 +371,7 @@ mod tests {
         assert!(u16::try_from(Value::Int(0x10000i32)).is_err());
         assert!(u16::try_from(Value::Int(-1i32)).is_err());
         assert!(u16::try_from(Value::Flt(0.0)).is_err());
-        assert!(u16::try_from(Value::Str(String::from("hello"))).is_err());
+        assert!(u16::try_from(Value::Str("hello".into())).is_err());
     }
 
     #[test]

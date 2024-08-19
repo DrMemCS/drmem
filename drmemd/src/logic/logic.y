@@ -141,7 +141,7 @@ Factor -> Result<Expr>:
     {
 	let s = get_str("literal string", $1, $lexer)?;
 
-	Ok(Expr::Lit(device::Value::Str(s[1..s.len() - 1].to_string())))
+	Ok(Expr::Lit(device::Value::Str(s[1..s.len() - 1].into())))
     }
     | "COLOR"
     {

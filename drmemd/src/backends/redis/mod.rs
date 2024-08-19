@@ -143,7 +143,7 @@ fn decode_string(buf: &[u8]) -> Result<device::Value> {
             let str_vec = buf[4..4 + len].to_vec();
 
             return match String::from_utf8(str_vec) {
-                Ok(s) => Ok(device::Value::Str(s)),
+                Ok(s) => Ok(device::Value::Str(s.into())),
                 Err(_) => Err(Error::TypeError),
             };
         }
@@ -1353,7 +1353,7 @@ mod tests {
     #[test]
     fn test_string_encoder() {
         for (v, rv) in STR_TEST_CASES {
-            assert_eq!(*rv, to_redis(&device::Value::Str(String::from(*v))));
+            assert_eq!(*rv, to_redis(&device::Value::Str((*v).into())));
         }
     }
 
@@ -1378,10 +1378,7 @@ mod tests {
         for (v, rv) in STR_TEST_CASES {
             let data = redis::Value::BulkString(rv.to_vec());
 
-            assert_eq!(
-                Ok(device::Value::Str(String::from(*v))),
-                from_value(&data)
-            );
+            assert_eq!(Ok(device::Value::Str((*v).into())), from_value(&data));
         }
 
         // Verify proper response (both good and bad) when the buffer
@@ -1396,7 +1393,7 @@ mod tests {
         ]))
         .is_err());
         assert_eq!(
-            Ok(device::Value::Str(String::from("AB"))),
+            Ok(device::Value::Str("AB".into())),
             from_value(&redis::Value::BulkString(vec![
                 b'S', 0u8, 0u8, 0u8, 2u8, b'A', b'B', 0, 0
             ]))
