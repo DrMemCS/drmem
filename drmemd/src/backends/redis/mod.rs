@@ -877,7 +877,7 @@ impl RedisStore {
         &self,
         name: &str,
         max_history: Option<usize>,
-    ) -> ReportReading<device::Value> {
+    ) -> ReportReading {
         let db_con = self.db_con.clone();
         let name = String::from(name);
 
@@ -926,7 +926,7 @@ impl Store for RedisStore {
         name: &device::Name,
         units: Option<&String>,
         max_history: Option<usize>,
-    ) -> Result<(ReportReading<device::Value>, Option<device::Value>)> {
+    ) -> Result<(ReportReading, Option<device::Value>)> {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
@@ -948,11 +948,7 @@ impl Store for RedisStore {
         name: &device::Name,
         units: Option<&String>,
         max_history: Option<usize>,
-    ) -> Result<(
-        ReportReading<device::Value>,
-        RxDeviceSetting,
-        Option<device::Value>,
-    )> {
+    ) -> Result<(ReportReading, RxDeviceSetting, Option<device::Value>)> {
         let sname = name.to_string();
 
         debug!("registering '{}' as read-write", &sname);

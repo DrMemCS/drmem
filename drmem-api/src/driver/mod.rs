@@ -45,8 +45,46 @@ pub type SettingStream<T> =
     Pin<Box<dyn Stream<Item = (T, SettingReply<T>)> + Send + Sync>>;
 
 /// A function that drivers use to report updated values of a device.
-pub type ReportReading<T> =
-    Box<dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+pub type ReportReading = Box<
+    dyn Fn(device::Value) -> Pin<Box<dyn Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Represents a read-only device that uses a specified type for its
+/// reading. Any type that can be converted to a `device::Value` is
+/// acceptable.
+pub struct ReadOnlyDevice<T: Into<device::Value> + Clone> {
+    report_chan: ReportReading,
+    prev_val: Option<T>,
+}
+
+impl<T> ReadOnlyDevice<T>
+where
+    T: Into<device::Value> + Clone,
+{
+    /// Returns a new `ReadOnlyDevice` type.
+    pub fn new(report_chan: ReportReading, prev_val: Option<T>) -> Self {
+        ReadOnlyDevice {
+            report_chan,
+            prev_val,
+        }
+    }
+
+    /// Saves a new value, returned by the device, to the backend
+    /// storage.
+    pub async fn report_update(&mut self, value: T) {
+        self.prev_val = Some(value.clone());
+        (self.report_chan)(value.into()).await
+    }
+
+    /// Gets the last value of the device. If DrMem is built with
+    /// persistent storage, this value will be initialized with the
+    /// last value saved to storage.
+    pub fn get_last(&self) -> Option<&T> {
+        self.prev_val.as_ref()
+    }
+}
 
 /// Defines the requests that can be sent to core. Drivers don't use
 /// this type directly. They are indirectly used by `RequestChan`.
@@ -61,9 +99,8 @@ pub enum Request {
         dev_name: device::Name,
         dev_units: Option<String>,
         max_history: Option<usize>,
-        rpy_chan: oneshot::Sender<
-            Result<(ReportReading<device::Value>, Option<device::Value>)>,
-        >,
+        rpy_chan:
+            oneshot::Sender<Result<(ReportReading, Option<device::Value>)>>,
     },
 
     /// Registers a writable device with core.
@@ -78,11 +115,7 @@ pub enum Request {
         dev_units: Option<String>,
         max_history: Option<usize>,
         rpy_chan: oneshot::Sender<
-            Result<(
-                ReportReading<device::Value>,
-                RxDeviceSetting,
-                Option<device::Value>,
-            )>,
+            Result<(ReportReading, RxDeviceSetting, Option<device::Value>)>,
         >,
     },
 }
@@ -130,13 +163,13 @@ impl RequestChan {
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
     pub async fn add_ro_device<
-        T: Into<device::Value> + TryFrom<device::Value>,
+        T: Into<device::Value> + TryFrom<device::Value> + Clone,
     >(
         &self,
         name: device::Base,
         units: Option<&str>,
         max_history: Option<usize>,
-    ) -> super::Result<(ReportReading<T>, Option<T>)> {
+    ) -> super::Result<ReadOnlyDevice<T>> {
         // Create a location for the reply.
 
         let (tx, rx) = oneshot::channel();
@@ -160,8 +193,8 @@ impl RequestChan {
         if result.is_ok() {
             if let Ok(v) = rx.await {
                 return v.map(|(rr, prev)| {
-                    (
-                        Box::new(move |a: T| rr(a.into())) as ReportReading<T>,
+                    ReadOnlyDevice::new(
+                        rr,
                         prev.and_then(|v| T::try_from(v).ok()),
                     )
                 });
@@ -224,9 +257,9 @@ impl RequestChan {
         name: device::Base,
         units: Option<&str>,
         max_history: Option<usize>,
-    ) -> Result<(ReportReading<T>, SettingStream<T>, Option<T>)>
+    ) -> Result<(ReadOnlyDevice<T>, SettingStream<T>)>
     where
-        T: Into<device::Value> + TryFrom<device::Value>,
+        T: Into<device::Value> + TryFrom<device::Value> + Clone,
     {
         let (tx, rx) = oneshot::channel();
         let result = self
@@ -244,9 +277,11 @@ impl RequestChan {
             if let Ok(v) = rx.await {
                 return v.map(|(rr, rs, prev)| {
                     (
-                        Box::new(move |a: T| rr(a.into())) as ReportReading<T>,
+                        ReadOnlyDevice::new(
+                            rr,
+                            prev.and_then(|v| T::try_from(v).ok()),
+                        ),
                         RequestChan::create_setting_stream(rs),
-                        prev.and_then(|v| T::try_from(v).ok()),
                     )
                 });
             }

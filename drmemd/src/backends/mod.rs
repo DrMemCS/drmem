@@ -35,7 +35,7 @@ pub trait Store {
         name: &device::Name,
         units: Option<&String>,
         max_history: Option<usize>,
-    ) -> Result<(driver::ReportReading<device::Value>, Option<device::Value>)>;
+    ) -> Result<(driver::ReportReading, Option<device::Value>)>;
 
     // Called when a read-write device is to be registered with the
     // back-end.
@@ -67,7 +67,7 @@ pub trait Store {
         units: Option<&String>,
         max_history: Option<usize>,
     ) -> Result<(
-        driver::ReportReading<device::Value>,
+        driver::ReportReading,
         driver::RxDeviceSetting,
         Option<device::Value>,
     )>;

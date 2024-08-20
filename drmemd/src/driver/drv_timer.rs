@@ -28,8 +28,8 @@ pub struct Instance {
 }
 
 pub struct Devices {
-    d_output: driver::ReportReading<device::Value>,
-    d_enable: driver::ReportReading<bool>,
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_enable: driver::ReadOnlyDevice<bool>,
     s_enable: driver::SettingStream<bool>,
 }
 
@@ -206,14 +206,14 @@ impl driver::API for Instance {
             // it's not timing, this device's value with be
             // `!level`. While it's timing, `level`.
 
-            let (d_output, _) =
+            let d_output =
                 core.add_ro_device(output_name, None, max_history).await?;
 
             // This device is settable. Any time it transitions
             // from `false` to `true`, the timer begins a timing
             // cycle.
 
-            let (d_enable, rx_set, _) =
+            let (d_enable, rx_set) =
                 core.add_rw_device(enable_name, None, max_history).await?;
 
             Ok(Devices {
@@ -258,8 +258,11 @@ impl driver::API for Instance {
             let mut timeout = time::Instant::now();
             let mut devices = devices.lock().await;
 
-            (devices.d_enable)(false).await;
-            (devices.d_output)(self.inactive_value.clone()).await;
+            devices.d_enable.report_update(false).await;
+            devices
+                .d_output
+                .report_update(self.inactive_value.clone())
+                .await;
 
             loop {
                 info!("state {:?} : waiting for event", &self.state);
@@ -276,7 +279,7 @@ impl driver::API for Instance {
 			// set the output to the inactive value.
 
 			self.time_expired();
-			(devices.d_output)(self.inactive_value.clone()).await;
+			devices.d_output.report_update(self.inactive_value.clone()).await;
                     }
 
                     // Always look for settings. We're pattern
@@ -297,10 +300,10 @@ impl driver::API for Instance {
 			    timeout = tmo
                         }
 
-                        (devices.d_enable)(b).await;
+                        devices.d_enable.report_update(b).await;
 
                         if let Some(out) = out {
-			    (devices.d_output)(out).await;
+			    devices.d_output.report_update(out).await;
                         }
                     }
                 }

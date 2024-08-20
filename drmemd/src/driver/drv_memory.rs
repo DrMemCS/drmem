@@ -10,7 +10,7 @@ use tokio_stream::StreamExt;
 pub struct Instance;
 
 pub struct Devices {
-    d_memory: driver::ReportReading<device::Value>,
+    d_memory: driver::ReadOnlyDevice<device::Value>,
     s_memory: driver::SettingStream<device::Value>,
 }
 
@@ -74,14 +74,16 @@ impl driver::API for Instance {
             // This device is settable. Any setting is forwarded to
             // the backend.
 
-            let (d_memory, s_memory, _) =
+            let (mut d_memory, s_memory) =
                 core.add_rw_device(name, None, max_history).await?;
 
-            // If the user configured an initial value, immediately
-            // set it.
+            // If the user configured an initial value and there was
+            // no previous value, immediately set it.
 
-            if let Some(v) = init_value {
-                d_memory(v).await
+            if d_memory.get_last().is_none() {
+                if let Some(v) = init_value {
+                    d_memory.report_update(v).await
+                }
             }
 
             Ok(Devices { d_memory, s_memory })
@@ -109,7 +111,7 @@ impl driver::API for Instance {
 
             while let Some((v, reply)) = devices.s_memory.next().await {
                 reply(Ok(v.clone()));
-                (devices.d_memory)(v).await
+                devices.d_memory.report_update(v).await
             }
             panic!("can no longer receive settings");
         };

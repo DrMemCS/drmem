@@ -24,8 +24,8 @@ pub struct Instance {
 }
 
 pub struct Devices {
-    d_output: driver::ReportReading<device::Value>,
-    d_index: driver::ReportReading<i32>,
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_index: driver::ReadOnlyDevice<i32>,
     s_index: driver::SettingStream<i32>,
 }
 
@@ -220,13 +220,13 @@ impl driver::API for Instance {
             //
             // This first device is the output of the map.
 
-            let (d_output, _) =
+            let d_output =
                 core.add_ro_device(output_name, None, max_history).await?;
 
             // This device is settable. Any setting is forwarded to
             // the backend.
 
-            let (d_index, s_index, _) =
+            let (d_index, s_index) =
                 core.add_rw_device(index_name, None, max_history).await?;
 
             Ok(Devices {
@@ -265,10 +265,10 @@ impl driver::API for Instance {
             if let Some(idx) = self.init_index {
                 // Send the updated values to the backend.
 
-                (devices.d_output)(self.map_to(idx)).await;
-                (devices.d_index)(idx).await
+                devices.d_output.report_update(self.map_to(idx)).await;
+                devices.d_index.report_update(idx).await
             } else {
-                (devices.d_output)(self.def_val.clone()).await;
+                devices.d_output.report_update(self.def_val.clone()).await;
             }
 
             // The driver blocks, waiting for a new index. As long as
@@ -281,8 +281,8 @@ impl driver::API for Instance {
 
                 // Send the updated values to the backend.
 
-                (devices.d_output)(self.map_to(v)).await;
-                (devices.d_index)(v).await
+                devices.d_output.report_update(self.map_to(v)).await;
+                devices.d_index.report_update(v).await
             }
             panic!("can no longer receive settings");
         };

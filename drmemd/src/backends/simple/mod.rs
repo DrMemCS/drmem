@@ -75,10 +75,7 @@ pub async fn open(_cfg: &config::Config) -> Result<impl Store> {
 // Builds the `ReportReading` function. Drivers will call specialized
 // instances of this function to record the latest value of a device.
 
-fn mk_report_func(
-    di: &DeviceInfo,
-    name: &device::Name,
-) -> ReportReading<device::Value> {
+fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
     let reading = di.reading.clone();
     let name = name.to_string();
 
@@ -148,7 +145,7 @@ impl Store for SimpleStore {
         name: &device::Name,
         units: Option<&String>,
         _max_history: Option<usize>,
-    ) -> Result<(ReportReading<device::Value>, Option<device::Value>)> {
+    ) -> Result<(ReportReading, Option<device::Value>)> {
         // Check to see if the device name already exists.
 
         match self.0.entry((*name).clone()) {
@@ -206,11 +203,7 @@ impl Store for SimpleStore {
         name: &device::Name,
         units: Option<&String>,
         _max_history: Option<usize>,
-    ) -> Result<(
-        ReportReading<device::Value>,
-        RxDeviceSetting,
-        Option<device::Value>,
-    )> {
+    ) -> Result<(ReportReading, RxDeviceSetting, Option<device::Value>)> {
         // Check to see if the device name already exists.
 
         match self.0.entry((*name).clone()) {

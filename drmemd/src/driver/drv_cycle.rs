@@ -28,8 +28,8 @@ pub struct Instance {
 }
 
 pub struct Devices {
-    d_output: driver::ReportReading<device::Value>,
-    d_enable: driver::ReportReading<bool>,
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_enable: driver::ReadOnlyDevice<bool>,
     s_enable: driver::SettingStream<bool>,
 }
 
@@ -219,7 +219,7 @@ impl driver::API for Instance {
             // between `false` and `true` at a rate determined by
             // the `interval` config option.
 
-            let (d_output, _) =
+            let d_output =
                 core.add_ro_device(output_name, None, max_history).await?;
 
             // This device is settable. Any time it transitions
@@ -227,7 +227,7 @@ impl driver::API for Instance {
             // cycling.  When this device is set to `false`, the
             // device stops cycling.
 
-            let (d_enable, rx_set, _) =
+            let (d_enable, rx_set) =
                 core.add_rw_device(enable_name, None, max_history).await?;
 
             Ok(Devices {
@@ -268,11 +268,14 @@ impl driver::API for Instance {
 
             if self.enabled_at_boot {
                 self.state = CycleState::Cycling;
-                (devices.d_enable)(true).await;
-                (devices.d_output)(self.enabled[self.index].clone()).await;
+                devices.d_enable.report_update(true).await;
+                devices
+                    .d_output
+                    .report_update(self.enabled[self.index].clone())
+                    .await;
             } else {
-                (devices.d_enable)(false).await;
-                (devices.d_output)(self.disabled.clone()).await;
+                devices.d_enable.report_update(false).await;
+                devices.d_output.report_update(self.disabled.clone()).await;
             }
 
             loop {
@@ -291,7 +294,7 @@ impl driver::API for Instance {
 			if let Some(v) = self.time_expired() {
 			    debug!("state {:?} : timeout occurred -- output {}",
 				   &self.state, v);
-			    (devices.d_output)(v).await;
+			    devices.d_output.report_update(v).await;
 			}
                     }
 
@@ -314,10 +317,10 @@ impl driver::API for Instance {
                         debug!("state {:?} : new input -> {}",
 			       &self.state, b);
 
-                        (devices.d_enable)(b).await;
+                        devices.d_enable.report_update(b).await;
 
                         if let Some(out) = out {
-			    (devices.d_output)(out.clone()).await;
+			    devices.d_output.report_update(out.clone()).await;
                         }
                     }
                 }

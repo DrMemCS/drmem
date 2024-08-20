@@ -151,11 +151,11 @@ pub struct Instance {
 }
 
 pub struct Devices {
-    d_service: driver::ReportReading<bool>,
-    d_state: driver::ReportReading<bool>,
-    d_duty: driver::ReportReading<f64>,
-    d_inflow: driver::ReportReading<f64>,
-    d_duration: driver::ReportReading<f64>,
+    d_service: driver::ReadOnlyDevice<bool>,
+    d_state: driver::ReadOnlyDevice<bool>,
+    d_duty: driver::ReadOnlyDevice<f64>,
+    d_inflow: driver::ReadOnlyDevice<f64>,
+    d_duration: driver::ReadOnlyDevice<f64>,
 }
 
 impl Instance {
@@ -299,17 +299,17 @@ impl driver::API for Instance {
         Box::pin(async move {
             // Define the devices managed by this driver.
 
-            let (d_service, _) =
+            let d_service =
                 core.add_ro_device(service_name, None, max_history).await?;
-            let (d_state, _) =
+            let d_state =
                 core.add_ro_device(state_name, None, max_history).await?;
-            let (d_duty, _) = core
+            let d_duty = core
                 .add_ro_device(duty_name, Some("%"), max_history)
                 .await?;
-            let (d_inflow, _) = core
+            let d_inflow = core
                 .add_ro_device(in_flow_name, Some("gpm"), max_history)
                 .await?;
-            let (d_duration, _) = core
+            let d_duration = core
                 .add_ro_device(dur_name, Some("min"), max_history)
                 .await?;
 
@@ -371,15 +371,15 @@ impl driver::API for Instance {
                 Span::current().record("cfg", addr.as_str());
             }
 
-            let devices = devices.lock().await;
+            let mut devices = devices.lock().await;
 
-            (*devices.d_service)(true).await;
+            devices.d_service.report_update(true).await;
 
             loop {
                 match self.get_reading().await {
                     Ok((stamp, true)) => {
                         if self.state.on_event(stamp) {
-                            (devices.d_state)(true).await;
+                            devices.d_state.report_update(true).await;
                         }
                     }
 
@@ -396,19 +396,21 @@ impl driver::API for Instance {
                                 in_flow
                             );
 
-                            (devices.d_state)(false).await;
-                            (devices.d_duty)(duty).await;
-                            (devices.d_inflow)(in_flow).await;
-                            (devices.d_duration)(
-                                ((cycle as f64) / 600.0).round() / 100.0,
-                            )
-                            .await;
+                            devices.d_state.report_update(false).await;
+                            devices.d_duty.report_update(duty).await;
+                            devices.d_inflow.report_update(in_flow).await;
+                            devices
+                                .d_duration
+                                .report_update(
+                                    ((cycle as f64) / 600.0).round() / 100.0,
+                                )
+                                .await;
                         }
                     }
 
                     Err(e) => {
-                        (devices.d_state)(false).await;
-                        (devices.d_service)(false).await;
+                        devices.d_state.report_update(false).await;
+                        devices.d_service.report_update(false).await;
                         panic!("couldn't read sump state -- {:?}", e);
                     }
                 }

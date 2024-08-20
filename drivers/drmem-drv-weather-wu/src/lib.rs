@@ -170,21 +170,21 @@ pub struct Devices {
     station: String,
     units: wu::Unit,
 
-    d_dewpt: driver::ReportReading<f64>,
-    d_htidx: driver::ReportReading<f64>,
-    d_humidity: driver::ReportReading<f64>,
-    d_prec_rate: driver::ReportReading<f64>,
-    d_prec_total: driver::ReportReading<f64>,
-    d_prec_last_total: driver::ReportReading<f64>,
-    d_pressure: driver::ReportReading<f64>,
-    d_solrad: driver::ReportReading<f64>,
-    d_state: driver::ReportReading<bool>,
-    d_temp: driver::ReportReading<f64>,
-    d_uv: driver::ReportReading<f64>,
-    d_wndchl: driver::ReportReading<f64>,
-    d_wnddir: driver::ReportReading<f64>,
-    d_wndgst: driver::ReportReading<f64>,
-    d_wndspd: driver::ReportReading<f64>,
+    d_dewpt: driver::ReadOnlyDevice<f64>,
+    d_htidx: driver::ReadOnlyDevice<f64>,
+    d_humidity: driver::ReadOnlyDevice<f64>,
+    d_prec_rate: driver::ReadOnlyDevice<f64>,
+    d_prec_total: driver::ReadOnlyDevice<f64>,
+    d_prec_last_total: driver::ReadOnlyDevice<f64>,
+    d_pressure: driver::ReadOnlyDevice<f64>,
+    d_solrad: driver::ReadOnlyDevice<f64>,
+    d_state: driver::ReadOnlyDevice<bool>,
+    d_temp: driver::ReadOnlyDevice<f64>,
+    d_uv: driver::ReadOnlyDevice<f64>,
+    d_wndchl: driver::ReadOnlyDevice<f64>,
+    d_wnddir: driver::ReadOnlyDevice<f64>,
+    d_wndgst: driver::ReadOnlyDevice<f64>,
+    d_wndspd: driver::ReadOnlyDevice<f64>,
 }
 
 impl Instance {
@@ -277,7 +277,7 @@ impl Instance {
     async fn handle(
         &mut self,
         obs: &wu::Observation,
-        devices: &<Instance as driver::API>::DeviceSet,
+        devices: &mut <Instance as driver::API>::DeviceSet,
     ) {
         // Retreive all the parameters whose units can change between
         // English and Metric.
@@ -317,7 +317,7 @@ impl Instance {
 
         if let Some(dewpt) = dewpt {
             if (0.0..=200.0).contains(&dewpt) {
-                (devices.d_dewpt)(dewpt).await
+                devices.d_dewpt.report_update(dewpt).await
             } else {
                 warn!("ignoring bad dew point value: {:.1}", dewpt)
             }
@@ -325,7 +325,7 @@ impl Instance {
 
         if let Some(htidx) = htidx {
             if (0.0..=200.0).contains(&htidx) {
-                (devices.d_htidx)(htidx).await
+                devices.d_htidx.report_update(htidx).await
             } else {
                 warn!("ignoring bad heat index value: {:.1}", htidx)
             }
@@ -335,34 +335,34 @@ impl Instance {
             let (nrate, ntotal, nlast) =
                 self.precip.update(prate, ptotal, SystemTime::now());
 
-            (devices.d_prec_rate)(nrate).await;
-            (devices.d_prec_total)(ntotal).await;
+            devices.d_prec_rate.report_update(nrate).await;
+            devices.d_prec_total.report_update(ntotal).await;
 
             if let Some(last) = nlast {
-                (devices.d_prec_last_total)(last).await;
+                devices.d_prec_last_total.report_update(last).await;
             }
         } else {
             warn!("need both precip fields to update precip calculations")
         }
 
         if let Some(press) = press {
-            (devices.d_pressure)(press).await
+            devices.d_pressure.report_update(press).await
         }
 
         if let Some(temp) = temp {
-            (devices.d_temp)(temp).await
+            devices.d_temp.report_update(temp).await
         }
 
         if let Some(wndchl) = wndchl {
-            (devices.d_wndchl)(wndchl).await
+            devices.d_wndchl.report_update(wndchl).await
         }
 
         if let Some(wndgst) = wndgst {
-            (devices.d_wndgst)(wndgst).await
+            devices.d_wndgst.report_update(wndgst).await
         }
 
         if let Some(wndspd) = wndspd {
-            (devices.d_wndspd)(wndspd).await
+            devices.d_wndspd.report_update(wndspd).await
         }
 
         // If solar radiation readings are provided, report them.
@@ -374,7 +374,7 @@ impl Instance {
             // slightly inaccurate sensors won't be ignored.
 
             if (0.0..=1400.0).contains(&sol_rad) {
-                (devices.d_solrad)(sol_rad).await
+                devices.d_solrad.report_update(sol_rad).await
             } else {
                 warn!("ignoring bad solar radiation value: {:.1}", sol_rad)
             }
@@ -387,7 +387,7 @@ impl Instance {
             // doubtful there's a place on earth that gets that low.
 
             if (0.0..=100.0).contains(&humidity) {
-                (devices.d_humidity)(humidity).await
+                devices.d_humidity.report_update(humidity).await
             } else {
                 warn!("ignoring bad humidity value: {:.1}", humidity)
             }
@@ -396,7 +396,7 @@ impl Instance {
         // If UV readings are provided, report them.
 
         if let Some(uv) = obs.uv {
-            (devices.d_uv)(uv).await
+            devices.d_uv.report_update(uv).await
         }
 
         // If wind direction readings are provided, report them.
@@ -405,7 +405,7 @@ impl Instance {
             // Make sure the reading is in range.
 
             if (0.0..=360.0).contains(&winddir) {
-                (devices.d_wnddir)(winddir).await
+                devices.d_wnddir.report_update(winddir).await
             } else {
                 warn!("ignoring bad wind direction value: {:.1}", winddir)
             }
@@ -456,16 +456,16 @@ impl driver::API for Instance {
                 "km/h"
             });
 
-            let (d_dewpt, _) = core
+            let d_dewpt = core
                 .add_ro_device(dewpoint_name, temp_unit, max_history)
                 .await?;
-            let (d_htidx, _) = core
+            let d_htidx = core
                 .add_ro_device(heat_index_name, temp_unit, max_history)
                 .await?;
-            let (d_humidity, _) = core
+            let d_humidity = core
                 .add_ro_device(humidity_name, Some("%"), max_history)
                 .await?;
-            let (d_prec_rate, _) = core
+            let d_prec_rate = core
                 .add_ro_device(
                     precip_rate_name,
                     Some(if let wu::Unit::English = units {
@@ -477,7 +477,7 @@ impl driver::API for Instance {
                 )
                 .await?;
 
-            let (d_prec_total, _) = core
+            let d_prec_total = core
                 .add_ro_device(
                     precip_total_name,
                     Some(if let wu::Unit::English = units {
@@ -489,7 +489,7 @@ impl driver::API for Instance {
                 )
                 .await?;
 
-            let (d_prec_last_total, _) = core
+            let d_prec_last_total = core
                 .add_ro_device(
                     precip_last_total_name,
                     Some(if let wu::Unit::English = units {
@@ -501,7 +501,7 @@ impl driver::API for Instance {
                 )
                 .await?;
 
-            let (d_pressure, _) = core
+            let d_pressure = core
                 .add_ro_device(
                     pressure_name,
                     Some(if let wu::Unit::English = units {
@@ -513,26 +513,25 @@ impl driver::API for Instance {
                 )
                 .await?;
 
-            let (d_solrad, _) = core
+            let d_solrad = core
                 .add_ro_device(solar_rad_name, Some("W/m²"), max_history)
                 .await?;
-            let (d_state, _) =
+            let d_state =
                 core.add_ro_device(state_name, None, max_history).await?;
-            let (d_temp, _) = core
+            let d_temp = core
                 .add_ro_device(temperature_name, temp_unit, max_history)
                 .await?;
-            let (d_uv, _) =
-                core.add_ro_device(uv_name, None, max_history).await?;
-            let (d_wndchl, _) = core
+            let d_uv = core.add_ro_device(uv_name, None, max_history).await?;
+            let d_wndchl = core
                 .add_ro_device(wind_chill_name, temp_unit, max_history)
                 .await?;
-            let (d_wnddir, _) = core
+            let d_wnddir = core
                 .add_ro_device(wind_dir_name, Some("°"), max_history)
                 .await?;
-            let (d_wndgst, _) = core
+            let d_wndgst = core
                 .add_ro_device(wind_gust_name, speed_unit, max_history)
                 .await?;
-            let (d_wndspd, _) = core
+            let d_wndspd = core
                 .add_ro_device(wind_speed_name, speed_unit, max_history)
                 .await?;
 
@@ -605,7 +604,7 @@ impl driver::API for Instance {
         devices: Arc<Mutex<Self::DeviceSet>>,
     ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
         let fut = async move {
-            let devices = devices.lock().await;
+            let mut devices = devices.lock().await;
 
             Span::current().record("cfg", devices.station.as_str());
 
@@ -645,8 +644,12 @@ impl driver::API for Instance {
                                         if obs.len() > 1 {
                                             warn!("ignoring {} extra weather observations", obs.len() - 1);
                                         }
-                                        (devices.d_state)(true).await;
-                                        self.handle(&obs[0], &devices).await;
+                                        devices
+                                            .d_state
+                                            .report_update(true)
+                                            .await;
+                                        self.handle(&obs[0], &mut devices)
+                                            .await;
                                         continue;
                                     }
                                 }
@@ -654,19 +657,19 @@ impl driver::API for Instance {
                             }
 
                             Err(e) => {
-                                (devices.d_state)(false).await;
+                                devices.d_state.report_update(false).await;
                                 panic!("error response from Weather Underground -- {:?}", &e)
                             }
                         }
                     }
 
                     Ok(None) => {
-                        (devices.d_state)(false).await;
+                        devices.d_state.report_update(false).await;
                         panic!("no response from Weather Underground")
                     }
 
                     Err(e) => {
-                        (devices.d_state)(false).await;
+                        devices.d_state.report_update(false).await;
                         panic!(
                             "error accessing Weather Underground -- {:?}",
                             &e

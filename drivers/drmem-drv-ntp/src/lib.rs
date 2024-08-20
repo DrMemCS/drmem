@@ -111,10 +111,10 @@ pub struct Instance {
 }
 
 pub struct Devices {
-    d_state: driver::ReportReading<bool>,
-    d_source: driver::ReportReading<String>,
-    d_offset: driver::ReportReading<f64>,
-    d_delay: driver::ReportReading<f64>,
+    d_state: driver::ReadOnlyDevice<bool>,
+    d_source: driver::ReadOnlyDevice<String>,
+    d_offset: driver::ReadOnlyDevice<f64>,
+    d_delay: driver::ReadOnlyDevice<f64>,
 }
 
 impl Instance {
@@ -384,14 +384,14 @@ impl driver::API for Instance {
         Box::pin(async move {
             // Define the devices managed by this driver.
 
-            let (d_state, _) =
+            let d_state =
                 core.add_ro_device(state_name, None, max_history).await?;
-            let (d_source, _) =
+            let d_source =
                 core.add_ro_device(source_name, None, max_history).await?;
-            let (d_offset, _) = core
+            let d_offset = core
                 .add_ro_device(offset_name, Some("ms"), max_history)
                 .await?;
-            let (d_delay, _) = core
+            let d_delay = core
                 .add_ro_device(delay_name, Some("ms"), max_history)
                 .await?;
 
@@ -454,7 +454,7 @@ impl driver::API for Instance {
             let mut info = Some(server::Info::bad_value());
             let mut interval = time::interval(Duration::from_millis(20_000));
 
-            let devices = devices.lock().await;
+            let mut devices = devices.lock().await;
 
             loop {
                 interval.tick().await;
@@ -473,11 +473,19 @@ impl driver::API for Instance {
                                     tmp.get_offset(),
                                     tmp.get_delay()
                                 );
-                                (devices.d_source)(tmp.get_host().clone())
+                                devices
+                                    .d_source
+                                    .report_update(tmp.get_host().clone())
                                     .await;
-                                (devices.d_offset)(tmp.get_offset()).await;
-                                (devices.d_delay)(tmp.get_delay()).await;
-                                (devices.d_state)(true).await;
+                                devices
+                                    .d_offset
+                                    .report_update(tmp.get_offset())
+                                    .await;
+                                devices
+                                    .d_delay
+                                    .report_update(tmp.get_delay())
+                                    .await;
+                                devices.d_state.report_update(true).await;
                                 info = host_info;
                             }
                             continue;
@@ -486,14 +494,14 @@ impl driver::API for Instance {
                             if info.is_some() {
                                 warn!("no synced host information found");
                                 info = None;
-                                (devices.d_state)(false).await;
+                                devices.d_state.report_update(false).await;
                             }
                         }
                     }
                 } else if info.is_some() {
                     warn!("we're not synced to any host");
                     info = None;
-                    (devices.d_state)(false).await;
+                    devices.d_state.report_update(false).await;
                 }
             }
         };

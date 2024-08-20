@@ -57,10 +57,10 @@ pub struct Instance {
 }
 
 pub struct Devices {
-    d_error: driver::ReportReading<bool>,
-    d_brightness: driver::ReportReading<f64>,
+    d_error: driver::ReadOnlyDevice<bool>,
+    d_brightness: driver::ReadOnlyDevice<f64>,
     s_brightness: driver::SettingStream<f64>,
-    d_led: driver::ReportReading<bool>,
+    d_led: driver::ReadOnlyDevice<bool>,
     s_led: driver::SettingStream<bool>,
 }
 
@@ -363,7 +363,7 @@ impl Instance {
         s: &'a mut TcpStream,
         v: f64,
         reply: driver::SettingReply<f64>,
-        report: &'a driver::ReportReading<f64>,
+        report: &'a mut driver::ReadOnlyDevice<f64>,
     ) -> Result<Option<f64>> {
         if !v.is_nan() {
             // Clip incoming settings to the range 0.0..=100.0. Handle
@@ -387,7 +387,7 @@ impl Instance {
 
             match self.set_brightness(s, v).await {
                 Ok(()) => {
-                    report(v).await;
+                    report.report_update(v).await;
                     Ok(Some(v))
                 }
                 Err(e) => {
@@ -408,12 +408,12 @@ impl Instance {
         s: &'a mut TcpStream,
         v: bool,
         reply: driver::SettingReply<bool>,
-        report: &'a driver::ReportReading<bool>,
+        report: &'a mut driver::ReadOnlyDevice<bool>,
     ) -> Result<()> {
         reply(Ok(v));
         match self.led_state_rpc(s, v).await {
             Ok(()) => {
-                report(v).await;
+                report.report_update(v).await;
                 Ok(())
             }
             Err(e) => {
@@ -429,12 +429,12 @@ impl Instance {
 
     async fn sync_error_state(
         &mut self,
-        report: &driver::ReportReading<bool>,
+        report: &mut driver::ReadOnlyDevice<bool>,
         value: bool,
     ) {
         if self.reported_error != Some(value) {
             self.reported_error = Some(value);
-            report(value).await;
+            report.report_update(value).await;
         }
     }
 
@@ -455,7 +455,7 @@ impl Instance {
         // Main loop of the driver. This loop never ends.
 
         'main: loop {
-            self.sync_error_state(&devices.d_error, false).await;
+            self.sync_error_state(&mut devices.d_error, false).await;
 
             // Get mutable references to the setting channels.
 
@@ -484,7 +484,7 @@ impl Instance {
 			if current_led != led {
 			    debug!("external LED update: {}", led);
 			    current_led = led;
-			    (devices.d_led)(led).await;
+			    devices.d_led.report_update(led).await;
 			}
 
 			// If the brightness state has changed outside
@@ -493,7 +493,7 @@ impl Instance {
 			if current_brightness != br {
 			    debug!("external brightness update: {}", br);
 			    current_brightness = br;
-			    (devices.d_brightness)(br).await;
+			    devices.d_brightness.report_update(br).await;
 			}
 		    } else {
 			break 'main
@@ -509,7 +509,7 @@ impl Instance {
 
 		    if current_brightness != v {
 			match self.handle_brightness_setting(
-			    s, v, reply, &devices.d_brightness
+			    s, v, reply, &mut devices.d_brightness
 			).await {
 			    Ok(Some(v)) => current_brightness = v,
 			    Ok(None) => (),
@@ -522,7 +522,7 @@ impl Instance {
 			// to log the setting and return a reply to
 			// the client.
 
-			(devices.d_brightness)(v).await;
+			devices.d_brightness.report_update(v).await;
 			reply(Ok(v))
 		    }
                 }
@@ -537,7 +537,7 @@ impl Instance {
 
 		    if current_led != v {
 			if self.handle_led_setting(
-			    s, v, reply, &devices.d_led
+			    s, v, reply, &mut devices.d_led
 			).await == Ok(()) {
 			    current_led = v;
 			} else {
@@ -550,7 +550,7 @@ impl Instance {
 			// to log the setting and return a reply to
 			// the client.
 
-			(devices.d_led)(v).await;
+			devices.d_led.report_update(v).await;
 			reply(Ok(v))
 		    }
                 }
@@ -582,12 +582,12 @@ impl driver::API for Instance {
         Box::pin(async move {
             // Define the devices managed by this driver.
 
-            let (d_error, _) =
+            let d_error =
                 core.add_ro_device(error_name, None, max_history).await?;
-            let (d_brightness, s_brightness, _) = core
+            let (d_brightness, s_brightness) = core
                 .add_rw_device(brightness_name, None, max_history)
                 .await?;
-            let (d_led, s_led, _) =
+            let (d_led, s_led) =
                 core.add_rw_device(led_name, None, max_history).await?;
 
             Ok(Devices {
@@ -651,7 +651,7 @@ impl driver::API for Instance {
                     }
                 }
 
-                self.sync_error_state(&devices.d_error, true).await;
+                self.sync_error_state(&mut devices.d_error, true).await;
 
                 // Log the error and then sleep for 10 seconds.
                 // Hopefully the device will be available then.
