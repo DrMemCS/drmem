@@ -1,6 +1,6 @@
 [package]
 name = "drmemd"
-version = "0.4.1"
+version = "0.5.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 description = "Main process of the DrMem control system"
@@ -93,22 +93,22 @@ tokio-stream.features = ["sync", "time"]
 
 [dependencies.drmem-drv-ntp]
 path = "../drivers/drmem-drv-ntp"
-version = "0.4"
+version = "0.5"
 optional = true
 
 [dependencies.drmem-drv-sump]
 path = "../drivers/drmem-drv-sump"
-version = "0.4"
+version = "0.5"
 optional = true
 
 [dependencies.drmem-drv-tplink]
 path = "../drivers/drmem-drv-tplink"
-version = "0.2"
+version = "0.5"
 optional = true
 
 [dependencies.drmem-drv-weather-wu]
 path = "../drivers/drmem-drv-weather-wu"
-version = "0.4"
+version = "0.5"
 optional = true
 
 # This section defines the optional dependencies for backend storage.

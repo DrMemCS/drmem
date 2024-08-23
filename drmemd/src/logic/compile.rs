@@ -1090,7 +1090,7 @@ mod tests {
         assert_eq!(
             Program::compile("\"Hello, world!\" -> {bulb}", &env),
             Ok(Program(
-                Expr::Lit(device::Value::Str("Hello, world!".to_string())),
+                Expr::Lit(device::Value::Str("Hello, world!".into())),
                 0
             ))
         );
@@ -1529,12 +1529,8 @@ mod tests {
         assert_eq!(
             eval(
                 &Expr::Eq(
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "same"
-                    )))),
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "same"
-                    ))))
+                    Box::new(Expr::Lit(device::Value::Str("same".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("same".into())))
                 ),
                 &[],
                 &time,
@@ -1545,12 +1541,8 @@ mod tests {
         assert_eq!(
             eval(
                 &Expr::Eq(
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "same"
-                    )))),
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "not same"
-                    ))))
+                    Box::new(Expr::Lit(device::Value::Str("same".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("not same".into())))
                 ),
                 &[],
                 &time,
@@ -1644,12 +1636,8 @@ mod tests {
         assert_eq!(
             eval(
                 &Expr::Lt(
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abc"
-                    )))),
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abc"
-                    ))))
+                    Box::new(Expr::Lit(device::Value::Str("abc".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("abc".into())))
                 ),
                 &[],
                 &time,
@@ -1660,12 +1648,8 @@ mod tests {
         assert_eq!(
             eval(
                 &Expr::Lt(
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abc"
-                    )))),
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abcd"
-                    ))))
+                    Box::new(Expr::Lit(device::Value::Str("abc".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("abcd".into())))
                 ),
                 &[],
                 &time,
@@ -1762,12 +1746,8 @@ mod tests {
         assert_eq!(
             eval(
                 &Expr::LtEq(
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abcd"
-                    )))),
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abc"
-                    ))))
+                    Box::new(Expr::Lit(device::Value::Str("abcd".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("abc".into())))
                 ),
                 &[],
                 &time,
@@ -1778,12 +1758,8 @@ mod tests {
         assert_eq!(
             eval(
                 &Expr::LtEq(
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abc"
-                    )))),
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abc"
-                    ))))
+                    Box::new(Expr::Lit(device::Value::Str("abc".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("abc".into())))
                 ),
                 &[],
                 &time,
@@ -1794,12 +1770,8 @@ mod tests {
         assert_eq!(
             eval(
                 &Expr::LtEq(
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abc"
-                    )))),
-                    Box::new(Expr::Lit(device::Value::Str(String::from(
-                        "abcd"
-                    ))))
+                    Box::new(Expr::Lit(device::Value::Str("abc".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("abcd".into())))
                 ),
                 &[],
                 &time,
@@ -2490,7 +2462,7 @@ mod tests {
         assert_eq!(
             optimize(Expr::And(
                 Box::new(Expr::Lit(device::Value::Bool(false))),
-                Box::new(Expr::Lit(device::Value::Str(String::from("test"))))
+                Box::new(Expr::Lit(device::Value::Str("test".into())))
             )),
             Expr::Lit(device::Value::Bool(false))
         );
@@ -2511,9 +2483,9 @@ mod tests {
         assert_eq!(
             optimize(Expr::And(
                 Box::new(Expr::Lit(device::Value::Bool(true))),
-                Box::new(Expr::Lit(device::Value::Str(String::from("test"))))
+                Box::new(Expr::Lit(device::Value::Str("test".into())))
             )),
-            Expr::Lit(device::Value::Str(String::from("test")))
+            Expr::Lit(device::Value::Str("test".into()))
         );
 
         assert_eq!(
@@ -2578,9 +2550,9 @@ mod tests {
         assert_eq!(
             optimize(Expr::Or(
                 Box::new(Expr::Lit(device::Value::Bool(false))),
-                Box::new(Expr::Lit(device::Value::Str(String::from("test"))))
+                Box::new(Expr::Lit(device::Value::Str("test".into())))
             )),
-            Expr::Lit(device::Value::Str(String::from("test")))
+            Expr::Lit(device::Value::Str("test".into()))
         );
         assert_eq!(
             optimize(Expr::Or(
@@ -2599,7 +2571,7 @@ mod tests {
         assert_eq!(
             optimize(Expr::Or(
                 Box::new(Expr::Lit(device::Value::Bool(true))),
-                Box::new(Expr::Lit(device::Value::Str(String::from("test"))))
+                Box::new(Expr::Lit(device::Value::Str("test".into())))
             )),
             Expr::Lit(device::Value::Bool(true))
         );

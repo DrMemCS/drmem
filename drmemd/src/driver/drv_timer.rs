@@ -5,7 +5,6 @@ use drmem_api::{
 };
 use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 use tokio::{sync::Mutex, time};
-use tokio_stream::StreamExt;
 use tracing::{debug, info};
 
 // This enum represents the four states in which the timer can
@@ -28,9 +27,8 @@ pub struct Instance {
 }
 
 pub struct Devices {
-    d_output: driver::ReportReading<device::Value>,
-    d_enable: driver::ReportReading<bool>,
-    s_enable: driver::SettingStream<bool>,
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_enable: driver::ReadWriteDevice<bool>,
 }
 
 impl Instance {
@@ -206,21 +204,17 @@ impl driver::API for Instance {
             // it's not timing, this device's value with be
             // `!level`. While it's timing, `level`.
 
-            let (d_output, _) =
+            let d_output =
                 core.add_ro_device(output_name, None, max_history).await?;
 
             // This device is settable. Any time it transitions
             // from `false` to `true`, the timer begins a timing
             // cycle.
 
-            let (d_enable, rx_set, _) =
+            let d_enable =
                 core.add_rw_device(enable_name, None, max_history).await?;
 
-            Ok(Devices {
-                d_output,
-                d_enable,
-                s_enable: rx_set,
-            })
+            Ok(Devices { d_output, d_enable })
         })
     }
 
@@ -258,8 +252,13 @@ impl driver::API for Instance {
             let mut timeout = time::Instant::now();
             let mut devices = devices.lock().await;
 
-            (devices.d_enable)(false).await;
-            (devices.d_output)(self.inactive_value.clone()).await;
+            // Initialize the reported state of the timer.
+
+            devices.d_enable.report_update(false).await;
+            devices
+                .d_output
+                .report_update(self.inactive_value.clone())
+                .await;
 
             loop {
                 info!("state {:?} : waiting for event", &self.state);
@@ -276,7 +275,7 @@ impl driver::API for Instance {
 			// set the output to the inactive value.
 
 			self.time_expired();
-			(devices.d_output)(self.inactive_value.clone()).await;
+			devices.d_output.report_update(self.inactive_value.clone()).await;
                     }
 
                     // Always look for settings. We're pattern
@@ -286,7 +285,7 @@ impl driver::API for Instance {
                     // handle is saved in the device look-up
                     // table. All other handles are cloned from it.
 
-                    Some((b, reply)) = devices.s_enable.next() => {
+                    Some((b, reply)) = devices.d_enable.next_setting() => {
                         let (out, tmo) = self.update_state(b);
 
                         reply(Ok(b));
@@ -297,10 +296,10 @@ impl driver::API for Instance {
 			    timeout = tmo
                         }
 
-                        (devices.d_enable)(b).await;
+                        devices.d_enable.report_update(b).await;
 
                         if let Some(out) = out {
-			    (devices.d_output)(out).await;
+			    devices.d_output.report_update(out).await;
                         }
                     }
                 }

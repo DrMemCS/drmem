@@ -143,7 +143,7 @@ fn decode_string(buf: &[u8]) -> Result<device::Value> {
             let str_vec = buf[4..4 + len].to_vec();
 
             return match String::from_utf8(str_vec) {
-                Ok(s) => Ok(device::Value::Str(s)),
+                Ok(s) => Ok(device::Value::Str(s.into())),
                 Err(_) => Err(Error::TypeError),
             };
         }
@@ -877,7 +877,7 @@ impl RedisStore {
         &self,
         name: &str,
         max_history: Option<usize>,
-    ) -> ReportReading<device::Value> {
+    ) -> ReportReading {
         let db_con = self.db_con.clone();
         let name = String::from(name);
 
@@ -926,7 +926,7 @@ impl Store for RedisStore {
         name: &device::Name,
         units: Option<&String>,
         max_history: Option<usize>,
-    ) -> Result<(ReportReading<device::Value>, Option<device::Value>)> {
+    ) -> Result<ReportReading> {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
@@ -936,10 +936,7 @@ impl Store for RedisStore {
 
             info!("'{}' has been successfully created", &name);
         }
-        Ok((
-            self.mk_report_func(&name, max_history),
-            self.last_value(&name).await.map(|v| v.value),
-        ))
+        Ok(self.mk_report_func(&name, max_history))
     }
 
     async fn register_read_write_device(
@@ -948,11 +945,7 @@ impl Store for RedisStore {
         name: &device::Name,
         units: Option<&String>,
         max_history: Option<usize>,
-    ) -> Result<(
-        ReportReading<device::Value>,
-        RxDeviceSetting,
-        Option<device::Value>,
-    )> {
+    ) -> Result<(ReportReading, RxDeviceSetting, Option<device::Value>)> {
         let sname = name.to_string();
 
         debug!("registering '{}' as read-write", &sname);
@@ -1353,7 +1346,7 @@ mod tests {
     #[test]
     fn test_string_encoder() {
         for (v, rv) in STR_TEST_CASES {
-            assert_eq!(*rv, to_redis(&device::Value::Str(String::from(*v))));
+            assert_eq!(*rv, to_redis(&device::Value::Str((*v).into())));
         }
     }
 
@@ -1378,10 +1371,7 @@ mod tests {
         for (v, rv) in STR_TEST_CASES {
             let data = redis::Value::BulkString(rv.to_vec());
 
-            assert_eq!(
-                Ok(device::Value::Str(String::from(*v))),
-                from_value(&data)
-            );
+            assert_eq!(Ok(device::Value::Str((*v).into())), from_value(&data));
         }
 
         // Verify proper response (both good and bad) when the buffer
@@ -1396,7 +1386,7 @@ mod tests {
         ]))
         .is_err());
         assert_eq!(
-            Ok(device::Value::Str(String::from("AB"))),
+            Ok(device::Value::Str("AB".into())),
             from_value(&redis::Value::BulkString(vec![
                 b'S', 0u8, 0u8, 0u8, 2u8, b'A', b'B', 0, 0
             ]))

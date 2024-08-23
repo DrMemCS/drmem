@@ -393,7 +393,7 @@ impl Control {
             int_value: None,
             float_value: None,
             bool_value: None,
-            string_value: Some(v),
+            string_value: Some(v.into()),
             color_value: None,
         }
     }
@@ -578,7 +578,7 @@ struct Reading {
     #[graphql(description = "Placeholder for boolean values.")]
     bool_value: Option<bool>,
     #[graphql(description = "Placeholder for string values.")]
-    string_value: Option<String>,
+    string_value: Option<Arc<str>>,
     #[graphql(
         description = "Placeholder for color values. Values are a 3-element \
 		       array holding red, green, and blue values or a \
@@ -624,7 +624,7 @@ impl From<&device::Reading> for Reading {
                 int_value: None,
                 float_value: None,
                 bool_value: None,
-                string_value: Some(v.to_string()),
+                string_value: Some(v.clone()),
                 color_value: None,
             },
             device::Value::Color(v) if v.alpha == 255 => Reading {
@@ -677,7 +677,7 @@ impl Subscription {
                 device::Value::Bool(v) => reading.bool_value = Some(v),
                 device::Value::Int(v) => reading.int_value = Some(v),
                 device::Value::Flt(v) => reading.float_value = Some(v),
-                device::Value::Str(v) => reading.string_value = Some(v),
+                device::Value::Str(v) => reading.string_value = Some(v.clone()),
                 device::Value::Color(v) if v.alpha == 255 => {
                     reading.color_value =
                         Some(vec![v.red as i32, v.green as i32, v.blue as i32])
