@@ -34,7 +34,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use futures::{Future, FutureExt, StreamExt};
+use futures::{Future, FutureExt};
 use std::net::SocketAddrV4;
 use std::sync::Arc;
 use std::{convert::Infallible, pin::Pin};
@@ -58,10 +58,8 @@ pub struct Instance {
 
 pub struct Devices {
     d_error: driver::ReadOnlyDevice<bool>,
-    d_brightness: driver::ReadOnlyDevice<f64>,
-    s_brightness: driver::SettingStream<f64>,
-    d_led: driver::ReadOnlyDevice<bool>,
-    s_led: driver::SettingStream<bool>,
+    d_brightness: driver::ReadWriteDevice<f64>,
+    d_led: driver::ReadWriteDevice<bool>,
 }
 
 impl Instance {
@@ -363,7 +361,7 @@ impl Instance {
         s: &'a mut TcpStream,
         v: f64,
         reply: driver::SettingReply<f64>,
-        report: &'a mut driver::ReadOnlyDevice<f64>,
+        report: &'a mut driver::ReadWriteDevice<f64>,
     ) -> Result<Option<f64>> {
         if !v.is_nan() {
             // Clip incoming settings to the range 0.0..=100.0. Handle
@@ -408,7 +406,7 @@ impl Instance {
         s: &'a mut TcpStream,
         v: bool,
         reply: driver::SettingReply<bool>,
-        report: &'a mut driver::ReadOnlyDevice<bool>,
+        report: &'a mut driver::ReadWriteDevice<bool>,
     ) -> Result<()> {
         reply(Ok(v));
         match self.led_state_rpc(s, v).await {
@@ -460,12 +458,12 @@ impl Instance {
             // Get mutable references to the setting channels.
 
             let Devices {
-                s_brightness: ref mut s_b,
-                s_led: ref mut s_l,
+                d_brightness: ref mut d_b,
+                d_led: ref mut d_l,
                 ..
             } = **devices;
 
-            // Now wait for one of two events to occur.
+            // Now wait for one of three events to occur.
 
             #[rustfmt::skip]
             tokio::select! {
@@ -484,7 +482,7 @@ impl Instance {
 			if current_led != led {
 			    debug!("external LED update: {}", led);
 			    current_led = led;
-			    devices.d_led.report_update(led).await;
+			    d_l.report_update(led).await;
 			}
 
 			// If the brightness state has changed outside
@@ -502,14 +500,14 @@ impl Instance {
 
 		// Handle settings to the brightness device.
 
-                Some((v, reply)) = s_b.next() => {
+                Some((v, reply)) = d_b.next_setting() => {
 
 		    // If the settings matches the current state, then
 		    // don't actually control the hardware.
 
 		    if current_brightness != v {
 			match self.handle_brightness_setting(
-			    s, v, reply, &mut devices.d_brightness
+			    s, v, reply, d_b
 			).await {
 			    Ok(Some(v)) => current_brightness = v,
 			    Ok(None) => (),
@@ -522,14 +520,14 @@ impl Instance {
 			// to log the setting and return a reply to
 			// the client.
 
-			devices.d_brightness.report_update(v).await;
+			d_b.report_update(v).await;
 			reply(Ok(v))
 		    }
                 }
 
 		// Handle settings to the LED indicator device.
 
-                Some((v, reply)) = s_l.next() => {
+                Some((v, reply)) = d_l.next_setting() => {
 		    debug!("led setting -> {}", &v);
 
 		    // If the settings matches the current state, then
@@ -550,7 +548,7 @@ impl Instance {
 			// to log the setting and return a reply to
 			// the client.
 
-			devices.d_led.report_update(v).await;
+			d_l.report_update(v).await;
 			reply(Ok(v))
 		    }
                 }
@@ -584,18 +582,15 @@ impl driver::API for Instance {
 
             let d_error =
                 core.add_ro_device(error_name, None, max_history).await?;
-            let (d_brightness, s_brightness) = core
+            let d_brightness = core
                 .add_rw_device(brightness_name, None, max_history)
                 .await?;
-            let (d_led, s_led) =
-                core.add_rw_device(led_name, None, max_history).await?;
+            let d_led = core.add_rw_device(led_name, None, max_history).await?;
 
             Ok(Devices {
                 d_error,
                 d_brightness,
-                s_brightness,
                 d_led,
-                s_led,
             })
         })
     }

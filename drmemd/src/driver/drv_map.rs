@@ -8,7 +8,6 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::Mutex;
-use tokio_stream::StreamExt;
 
 #[derive(Debug, PartialEq)]
 struct Entry(RangeInclusive<i32>, device::Value);
@@ -25,8 +24,7 @@ pub struct Instance {
 
 pub struct Devices {
     d_output: driver::ReadOnlyDevice<device::Value>,
-    d_index: driver::ReadOnlyDevice<i32>,
-    s_index: driver::SettingStream<i32>,
+    d_index: driver::ReadWriteDevice<i32>,
 }
 
 impl Instance {
@@ -226,14 +224,10 @@ impl driver::API for Instance {
             // This device is settable. Any setting is forwarded to
             // the backend.
 
-            let (d_index, s_index) =
+            let d_index =
                 core.add_rw_device(index_name, None, max_history).await?;
 
-            Ok(Devices {
-                d_output,
-                d_index,
-                s_index,
-            })
+            Ok(Devices { d_output, d_index })
         })
     }
 
@@ -274,7 +268,7 @@ impl driver::API for Instance {
             // The driver blocks, waiting for a new index. As long as
             // our setting channel is healthy, we handle each setting.
 
-            while let Some((v, reply)) = devices.s_index.next().await {
+            while let Some((v, reply)) = devices.d_index.next_setting().await {
                 // Send the reply to the setter.
 
                 reply(Ok(v));

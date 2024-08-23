@@ -5,13 +5,11 @@ use drmem_api::{
 };
 use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
-use tokio_stream::StreamExt;
 
 pub struct Instance;
 
 pub struct Devices {
-    d_memory: driver::ReadOnlyDevice<device::Value>,
-    s_memory: driver::SettingStream<device::Value>,
+    d_memory: driver::ReadWriteDevice<device::Value>,
 }
 
 impl Instance {
@@ -74,7 +72,7 @@ impl driver::API for Instance {
             // This device is settable. Any setting is forwarded to
             // the backend.
 
-            let (mut d_memory, s_memory) =
+            let mut d_memory =
                 core.add_rw_device(name, None, max_history).await?;
 
             // If the user configured an initial value and there was
@@ -86,7 +84,7 @@ impl driver::API for Instance {
                 }
             }
 
-            Ok(Devices { d_memory, s_memory })
+            Ok(Devices { d_memory })
         })
     }
 
@@ -109,7 +107,7 @@ impl driver::API for Instance {
         let fut = async move {
             let mut devices = devices.lock().await;
 
-            while let Some((v, reply)) = devices.s_memory.next().await {
+            while let Some((v, reply)) = devices.d_memory.next_setting().await {
                 reply(Ok(v.clone()));
                 devices.d_memory.report_update(v).await
             }

@@ -5,7 +5,6 @@ use drmem_api::{
 };
 use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 use tokio::{sync::Mutex, time};
-use tokio_stream::StreamExt;
 use tracing::{self, debug};
 
 // This enum represents the three states in which the device can be.
@@ -29,8 +28,7 @@ pub struct Instance {
 
 pub struct Devices {
     d_output: driver::ReadOnlyDevice<device::Value>,
-    d_enable: driver::ReadOnlyDevice<bool>,
-    s_enable: driver::SettingStream<bool>,
+    d_enable: driver::ReadWriteDevice<bool>,
 }
 
 impl Instance {
@@ -227,14 +225,10 @@ impl driver::API for Instance {
             // cycling.  When this device is set to `false`, the
             // device stops cycling.
 
-            let (d_enable, rx_set) =
+            let d_enable =
                 core.add_rw_device(enable_name, None, max_history).await?;
 
-            Ok(Devices {
-                d_output,
-                d_enable,
-                s_enable: rx_set,
-            })
+            Ok(Devices { d_output, d_enable })
         })
     }
 
@@ -305,7 +299,7 @@ impl driver::API for Instance {
                     // handle is saved in the device look-up
                     // table. All other handles are cloned from it.
 
-                    Some((b, reply)) = devices.s_enable.next() => {
+                    Some((b, reply)) = devices.d_enable.next_setting() => {
                         let (reset, out) = self.update_state(b);
 
                         if reset {

@@ -5,7 +5,6 @@ use drmem_api::{
 };
 use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 use tokio::{sync::Mutex, time};
-use tokio_stream::StreamExt;
 use tracing::{debug, info};
 
 // This enum represents the four states in which the timer can
@@ -29,8 +28,7 @@ pub struct Instance {
 
 pub struct Devices {
     d_output: driver::ReadOnlyDevice<device::Value>,
-    d_enable: driver::ReadOnlyDevice<bool>,
-    s_enable: driver::SettingStream<bool>,
+    d_enable: driver::ReadWriteDevice<bool>,
 }
 
 impl Instance {
@@ -213,14 +211,10 @@ impl driver::API for Instance {
             // from `false` to `true`, the timer begins a timing
             // cycle.
 
-            let (d_enable, rx_set) =
+            let d_enable =
                 core.add_rw_device(enable_name, None, max_history).await?;
 
-            Ok(Devices {
-                d_output,
-                d_enable,
-                s_enable: rx_set,
-            })
+            Ok(Devices { d_output, d_enable })
         })
     }
 
@@ -258,6 +252,8 @@ impl driver::API for Instance {
             let mut timeout = time::Instant::now();
             let mut devices = devices.lock().await;
 
+            // Initialize the reported state of the timer.
+
             devices.d_enable.report_update(false).await;
             devices
                 .d_output
@@ -289,7 +285,7 @@ impl driver::API for Instance {
                     // handle is saved in the device look-up
                     // table. All other handles are cloned from it.
 
-                    Some((b, reply)) = devices.s_enable.next() => {
+                    Some((b, reply)) = devices.d_enable.next_setting() => {
                         let (out, tmo) = self.update_state(b);
 
                         reply(Ok(b));
