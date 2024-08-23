@@ -926,7 +926,7 @@ impl Store for RedisStore {
         name: &device::Name,
         units: Option<&String>,
         max_history: Option<usize>,
-    ) -> Result<(ReportReading, Option<device::Value>)> {
+    ) -> Result<ReportReading> {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
@@ -936,10 +936,7 @@ impl Store for RedisStore {
 
             info!("'{}' has been successfully created", &name);
         }
-        Ok((
-            self.mk_report_func(&name, max_history),
-            self.last_value(&name).await.map(|v| v.value),
-        ))
+        Ok(self.mk_report_func(&name, max_history))
     }
 
     async fn register_read_write_device(

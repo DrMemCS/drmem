@@ -145,7 +145,7 @@ impl Store for SimpleStore {
         name: &device::Name,
         units: Option<&String>,
         _max_history: Option<usize>,
-    ) -> Result<(ReportReading, Option<device::Value>)> {
+    ) -> Result<ReportReading> {
         // Check to see if the device name already exists.
 
         match self.0.entry((*name).clone()) {
@@ -163,7 +163,7 @@ impl Store for SimpleStore {
                 // Create and return the closure that the driver will
                 // use to report updates.
 
-                Ok((mk_report_func(di, name), None))
+                Ok(mk_report_func(di, name))
             }
 
             // The device already exists. If it was created from a
@@ -174,18 +174,8 @@ impl Store for SimpleStore {
 
                 if dev_info.owner.as_ref() == driver {
                     let func = mk_report_func(dev_info, name);
-                    let guard = dev_info.reading.lock();
 
-                    Ok((
-                        func,
-                        if let Ok(data) = guard {
-                            data.1.as_ref().map(
-                                |device::Reading { value, .. }| value.clone(),
-                            )
-                        } else {
-                            None
-                        },
-                    ))
+                    Ok(func)
                 } else {
                     Err(Error::InUse)
                 }
@@ -483,7 +473,7 @@ mod tests {
         let mut db = SimpleStore(HashMap::new());
         let name = "test:device".parse::<device::Name>().unwrap();
 
-        if let Ok((f, None)) = db
+        if let Ok(f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -567,7 +557,7 @@ mod tests {
         let mut db = SimpleStore(HashMap::new());
         let name = "test:device".parse::<device::Name>().unwrap();
 
-        if let Ok((f, None)) = db
+        if let Ok(f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -654,7 +644,7 @@ mod tests {
         let mut db = SimpleStore(HashMap::new());
         let name = "test:device".parse::<device::Name>().unwrap();
 
-        if let Ok((f, None)) = db
+        if let Ok(f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -698,7 +688,7 @@ mod tests {
         let mut db = SimpleStore(HashMap::new());
         let name = "test:device".parse::<device::Name>().unwrap();
 
-        if let Ok((f, None)) = db
+        if let Ok(f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -887,7 +877,7 @@ mod tests {
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
 
-        if let Ok((f, None)) = db
+        if let Ok(f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -922,7 +912,7 @@ mod tests {
             // Assert that re-registering this device with the same
             // driver name is successful.
 
-            if let Ok((f, Some(device::Value::Int(1)))) = db
+            if let Ok(f) = db
                 .register_read_only_device("test", &name, None, None)
                 .await
             {

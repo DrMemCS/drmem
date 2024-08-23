@@ -42,8 +42,7 @@ pub enum Request {
         dev_name: device::Name,
         dev_units: Option<String>,
         max_history: Option<usize>,
-        rpy_chan:
-            oneshot::Sender<Result<(ReportReading, Option<device::Value>)>>,
+        rpy_chan: oneshot::Sender<Result<ReportReading>>,
     },
 
     /// Registers a writable device with core.
@@ -135,12 +134,7 @@ impl RequestChan {
 
         if result.is_ok() {
             if let Ok(v) = rx.await {
-                return v.map(|(rr, prev)| {
-                    ReadOnlyDevice::new(
-                        rr,
-                        prev.and_then(|v| T::try_from(v).ok()),
-                    )
-                });
+                return v.map(|rr| ReadOnlyDevice::new(rr));
             }
         }
 
