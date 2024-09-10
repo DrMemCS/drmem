@@ -18,8 +18,8 @@ to run. It also routes device settings to the appropriate drivers.
 `drmemd` contains a web server which provides a GraphQL interface for
 clients to use. This interface gives clients these abilities:
 
-- [ ] Get latest value of a device.
-- [ ] Get time range of data for a device.
+- [X] Get latest value of a device.
+- [X] Get time range of data for a device.
 - [X] Receive stream of updates from a device.
 - [X] Send settings to devices.
 - [X] Get device info.
