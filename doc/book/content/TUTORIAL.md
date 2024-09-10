@@ -5,7 +5,7 @@ this version, we'll use the simple backend, no external drivers, and
 include the GraphQL interface. We'll also enable the built-in GraphQL
 editing interface.
 
-This tutorial is based on v0.4.0.
+This tutorial is based on v0.5.0.
 
 ## Build `drmemd`
 
