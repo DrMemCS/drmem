@@ -11,7 +11,7 @@ use libmdns::Responder;
 use std::{result, sync::Arc, time::Duration};
 use tracing::{info, info_span};
 use tracing_futures::Instrument;
-use warp::Filter;
+use warp::{Filter, Rejection, Reply};
 
 pub mod config;
 
@@ -764,19 +764,17 @@ mod paths {
     }
 }
 
-pub fn server(
-    cfg: &config::Config,
+// Build `warp::Filter`s that define the entire webspace.
+
+fn build_site(
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
-) -> impl Future<Output = ()> {
-    #[cfg(feature = "graphiql")]
-    use juniper_warp::playground_filter;
-
+) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     let context = ConfigDb(db, cchan);
+    let ctxt = context.clone();
 
     // Create filter that handles GraphQL queries and mutations.
 
-    let ctxt = context.clone();
     let state = warp::any().map(move || ctxt.clone());
     let query_filter = warp::path(paths::QUERY)
         .and(warp::path::end())
@@ -787,10 +785,11 @@ pub fn server(
     // service is found at the BASE path.
 
     #[cfg(feature = "graphiql")]
-    let graphiql_filter = warp::path::end().and(playground_filter(
-        &*paths::FULL_QUERY,
-        Some(&*paths::FULL_SUBSCRIBE),
-    ));
+    let graphiql_filter =
+        warp::path::end().and(juniper_warp::playground_filter(
+            &*paths::FULL_QUERY,
+            Some(&*paths::FULL_SUBSCRIBE),
+        ));
 
     // Create the filter that handles subscriptions.
 
@@ -832,7 +831,7 @@ pub fn server(
     // Stitch the filters together to build the map of the web
     // interface.
 
-    let filter = warp::path(paths::BASE)
+    warp::path(paths::BASE)
         .and(site)
         .with(warp::log("gql::drmem"))
         .with(
@@ -844,15 +843,39 @@ pub fn server(
                 ])
                 .allow_methods(vec!["OPTIONS", "GET", "POST"])
                 .max_age(Duration::from_secs(3_600)),
-        );
+        )
+}
+
+pub fn server(
+    cfg: &config::Config,
+    db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
+) -> impl Future<Output = ()> {
+    let site = build_site(db, cchan);
 
     // Create the background mDNS task.
 
     let (resp, task) = Responder::with_default_handle().unwrap();
 
+    // let auth: Box<
+    //     dyn Fn(
+    //         Option<String>,
+    //     ) -> Pin<Box<dyn Future<Output = Result<(), Rejection>> + Clone>>,
+    // > = if let Some(gql_cfg) = &cfg.security {
+    //     Box::new(|_| Box::pin(futures::future::ready(Ok(()))))
+    // } else {
+    //     Box::new(|_| Box::pin(futures::future::ready(Ok(()))))
+    // };
+
     // Bind to the address.
 
-    let (addr, http_task) = warp::serve(filter).bind_ephemeral(cfg.addr);
+    let (addr, http_task) = warp::serve(
+        warp::header::optional::<String>("X-DrMem-Client")
+            .and_then(|_| async { Ok::<(), Rejection>(()) })
+            .untuple_one()
+            .and(site),
+    )
+    .bind_ephemeral(cfg.addr);
 
     // Get the boot-time and store it in the mDNS payload.
 

@@ -18,6 +18,13 @@ fn def_pref_port() -> u16 {
 }
 
 #[derive(Deserialize)]
+pub struct Security {
+    pub clients: Vec<String>,
+    pub cert_file: String,
+    pub key_file: String,
+}
+
+#[derive(Deserialize)]
 pub struct Config {
     #[serde(default = "def_name")]
     pub name: String,
@@ -28,6 +35,7 @@ pub struct Config {
     pub pref_host: Option<String>,
     #[serde(default = "def_pref_port")]
     pub pref_port: u16,
+    pub security: Option<Security>,
 }
 
 impl Default for Config {
@@ -38,6 +46,7 @@ impl Default for Config {
             addr: def_address(),
             pref_host: None,
             pref_port: def_pref_port(),
+            security: None,
         }
     }
 }
