@@ -8,7 +8,7 @@ use juniper::{
 use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::subscriptions::serve_graphql_ws;
 use libmdns::Responder;
-use std::{result, sync::Arc, time::Duration};
+use std::{pin::Pin, result, sync::Arc, time::Duration};
 use tracing::{info, info_span};
 use tracing_futures::Instrument;
 use warp::{Filter, Rejection, Reply};
@@ -846,6 +846,32 @@ fn build_site(
         )
 }
 
+fn build_server(
+    cfg: &config::Config,
+    site: impl Filter<Extract = (impl Reply,), Error = Rejection>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    match &cfg.security {
+        None => Box::pin(warp::serve(site).bind(cfg.addr))
+            as Pin<Box<dyn Future<Output = ()> + Send>>,
+        Some(security) => Box::pin(
+            warp::serve(
+                warp::header::optional::<String>("X-DrMem-Client")
+                    .and_then(|_| async { Ok::<(), Rejection>(()) })
+                    .untuple_one()
+                    .and(site),
+            )
+            .tls()
+            .key_path(security.key_file.clone())
+            .cert_path(security.cert_file.clone())
+            .bind(cfg.addr),
+        ) as Pin<Box<dyn Future<Output = ()> + Send>>,
+    }
+}
+
 pub fn server(
     cfg: &config::Config,
     db: crate::driver::DriverDb,
@@ -857,25 +883,9 @@ pub fn server(
 
     let (resp, task) = Responder::with_default_handle().unwrap();
 
-    // let auth: Box<
-    //     dyn Fn(
-    //         Option<String>,
-    //     ) -> Pin<Box<dyn Future<Output = Result<(), Rejection>> + Clone>>,
-    // > = if let Some(gql_cfg) = &cfg.security {
-    //     Box::new(|_| Box::pin(futures::future::ready(Ok(()))))
-    // } else {
-    //     Box::new(|_| Box::pin(futures::future::ready(Ok(()))))
-    // };
+    // Create the http task.
 
-    // Bind to the address.
-
-    let (addr, http_task) = warp::serve(
-        warp::header::optional::<String>("X-DrMem-Client")
-            .and_then(|_| async { Ok::<(), Rejection>(()) })
-            .untuple_one()
-            .and(site),
-    )
-    .bind_ephemeral(cfg.addr);
+    let http_task = build_server(cfg, site);
 
     // Get the boot-time and store it in the mDNS payload.
 
@@ -912,7 +922,7 @@ pub fn server(
     let service = resp.register(
         "_drmem._tcp".into(),
         cfg.name.clone(),
-        addr.port(),
+        cfg.addr.port(),
         &payload.iter().map(String::as_str).collect::<Vec<&str>>(),
     );
 

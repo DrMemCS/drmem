@@ -1,12 +1,16 @@
 use serde_derive::Deserialize;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    path::Path,
+    sync::Arc,
+};
 
 fn def_name() -> String {
-    String::from("unknown name")
+    "unknown name".into()
 }
 
-fn def_location() -> String {
-    String::from("unknown location")
+fn def_location() -> Arc<str> {
+    "unknown location".into()
 }
 
 fn def_address() -> SocketAddr {
@@ -19,9 +23,9 @@ fn def_pref_port() -> u16 {
 
 #[derive(Deserialize)]
 pub struct Security {
-    pub clients: Vec<String>,
-    pub cert_file: String,
-    pub key_file: String,
+    pub clients: Arc<[String]>,
+    pub cert_file: Arc<Path>,
+    pub key_file: Arc<Path>,
 }
 
 #[derive(Deserialize)]
@@ -32,7 +36,7 @@ pub struct Config {
     pub location: String,
     #[serde(default = "def_address")]
     pub addr: SocketAddr,
-    pub pref_host: Option<String>,
+    pub pref_host: Option<Arc<str>>,
     #[serde(default = "def_pref_port")]
     pub pref_port: u16,
     pub security: Option<Security>,
