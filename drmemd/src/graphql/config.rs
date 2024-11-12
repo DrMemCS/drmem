@@ -33,7 +33,7 @@ pub struct Config {
     #[serde(default = "def_name")]
     pub name: String,
     #[serde(default = "def_location")]
-    pub location: String,
+    pub location: Arc<str>,
     #[serde(default = "def_address")]
     pub addr: SocketAddr,
     pub pref_host: Option<Arc<str>>,

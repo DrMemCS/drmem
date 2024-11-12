@@ -342,7 +342,7 @@ longitude = 45.0
         ) {
             Ok(cfg) => {
                 assert_eq!(cfg.graphql.name, "unknown name");
-                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(cfg.graphql.location, "unknown location".into());
                 assert_eq!(
                     cfg.graphql.addr,
                     (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
@@ -362,7 +362,7 @@ longitude = 45.0
         ) {
             Ok(cfg) => {
                 assert_eq!(cfg.graphql.name, "unknown name");
-                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(cfg.graphql.location, "unknown location".into());
                 assert_eq!(
                     cfg.graphql.addr,
                     (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
@@ -384,7 +384,7 @@ name = "primary-node"
         ) {
             Ok(cfg) => {
                 assert_eq!(cfg.graphql.name, "primary-node");
-                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(cfg.graphql.location, "unknown location".into());
                 assert_eq!(
                     cfg.graphql.addr,
                     (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
@@ -406,7 +406,7 @@ location = "basement"
         ) {
             Ok(cfg) => {
                 assert_eq!(cfg.graphql.name, "unknown name");
-                assert_eq!(cfg.graphql.location, "basement");
+                assert_eq!(cfg.graphql.location, "basement".into());
                 assert_eq!(
                     cfg.graphql.addr,
                     (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
@@ -426,7 +426,7 @@ addr = "10.1.1.0:1234"
         ) {
             Ok(cfg) => {
                 assert_eq!(cfg.graphql.name, "unknown name");
-                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(cfg.graphql.location, "unknown location".into());
                 assert_eq!(
                     cfg.graphql.addr,
                     (Ipv4Addr::new(10, 1, 1, 0), 1234).into()
@@ -449,14 +449,14 @@ pref_port = 4000
         ) {
             Ok(cfg) => {
                 assert_eq!(cfg.graphql.name, "unknown name");
-                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(cfg.graphql.location, "unknown location".into());
                 assert_eq!(
                     cfg.graphql.addr,
                     (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
                 );
                 assert_eq!(
                     cfg.graphql.pref_host,
-                    Some(String::from("www.google.com"))
+                    Some("www.google.com".into())
                 );
                 assert_eq!(cfg.graphql.pref_port, 4000)
             }
@@ -474,14 +474,14 @@ pref_host = "www.google.com"
         ) {
             Ok(cfg) => {
                 assert_eq!(cfg.graphql.name, "unknown name");
-                assert_eq!(cfg.graphql.location, "unknown location");
+                assert_eq!(cfg.graphql.location, "unknown location".into());
                 assert_eq!(
                     cfg.graphql.addr,
                     (Ipv4Addr::new(0, 0, 0, 0), 3000).into()
                 );
                 assert_eq!(
                     cfg.graphql.pref_host,
-                    Some(String::from("www.google.com"))
+                    Some("www.google.com".into())
                 );
                 assert_eq!(cfg.graphql.pref_port, 3000)
             }
