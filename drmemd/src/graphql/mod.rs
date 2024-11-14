@@ -846,6 +846,30 @@ fn build_site(
         )
 }
 
+
+
+fn sanitize<T>(ii: T) -> impl Iterator<Item = char>
+where
+    T: Iterator<Item = char>,
+{
+    ii.filter(char::is_ascii_hexdigit)
+        .map(|v| v.to_ascii_uppercase())
+}
+
+fn cmp_fprints(a: &str, b: &str) -> bool
+{
+    let mut a = sanitize(a.chars());
+    let mut b = sanitize(b.chars());
+
+    loop {
+        match (a.next(), b.next()) {
+            (None, None) => break true,
+            (Some(a), Some(b)) if a == b => continue,
+            (_, _) => break false,
+        }
+    }
+}
+
 fn build_server(
     cfg: &config::Config,
     site: impl Filter<Extract = (impl Reply,), Error = Rejection>
@@ -936,4 +960,36 @@ pub fn server(
     std::mem::drop(jh);
 
     http_task.instrument(info_span!("http"))
+}
+
+#[cfg(test)]
+mod test {
+    use super::{cmp_fprints, sanitize};
+
+    #[test]
+    fn test_sanitizer() {
+        assert_eq!(sanitize("1234".chars()).collect::<String>(), "1234");
+        assert_eq!(
+            sanitize("0123456789abcdefABCDEF".chars()).collect::<String>(),
+            "0123456789ABCDEFABCDEF"
+        );
+        assert_eq!(sanitize("01:ff:45".chars()).collect::<String>(), "01FF45");
+    }
+
+    #[test]
+    fn test_fprint_comparisons() {
+	assert_eq!(cmp_fprints("", ""), true);
+	assert_eq!(cmp_fprints("z", ""), true);
+	assert_eq!(cmp_fprints("", "z"), true);
+
+	assert_eq!(cmp_fprints("a", ""), false);
+	assert_eq!(cmp_fprints("", "a"), false);
+
+	assert_eq!(cmp_fprints("1234", "1234"), true);
+	assert_eq!(cmp_fprints("abcd", "ABCD"), true);
+	assert_eq!(cmp_fprints("1234", "ABCD"), false);
+
+	assert_eq!(cmp_fprints("12:34", "1234"), true);
+	assert_eq!(cmp_fprints("a:b:c:d", "AB:CD"), true);
+    }
 }
