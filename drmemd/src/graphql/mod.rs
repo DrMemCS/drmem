@@ -1013,18 +1013,18 @@ mod test {
 
     #[test]
     fn test_fprint_comparisons() {
-	assert_eq!(cmp_fprints("", ""), true);
-	assert_eq!(cmp_fprints("z", ""), true);
-	assert_eq!(cmp_fprints("", "z"), true);
+        assert_eq!(cmp_fprints("", ""), true);
+        assert_eq!(cmp_fprints("z", ""), true);
+        assert_eq!(cmp_fprints("", "z"), true);
 
-	assert_eq!(cmp_fprints("a", ""), false);
-	assert_eq!(cmp_fprints("", "a"), false);
+        assert_eq!(cmp_fprints("a", ""), false);
+        assert_eq!(cmp_fprints("", "a"), false);
 
-	assert_eq!(cmp_fprints("1234", "1234"), true);
-	assert_eq!(cmp_fprints("abcd", "ABCD"), true);
-	assert_eq!(cmp_fprints("1234", "ABCD"), false);
+        assert_eq!(cmp_fprints("1234", "1234"), true);
+        assert_eq!(cmp_fprints("abcd", "ABCD"), true);
+        assert_eq!(cmp_fprints("1234", "ABCD"), false);
 
-	assert_eq!(cmp_fprints("12:34", "1234"), true);
-	assert_eq!(cmp_fprints("a:b:c:d", "AB:CD"), true);
+        assert_eq!(cmp_fprints("12:34", "1234"), true);
+        assert_eq!(cmp_fprints("a:b:c:d", "AB:CD"), true);
     }
 }
