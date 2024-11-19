@@ -846,7 +846,8 @@ fn build_site(
         )
 }
 
-
+// "Sanitizes" a string containing a digital fingerprint by returning
+// an Iterator that only returns the hex digits in uppercase.
 
 fn sanitize<T>(ii: T) -> impl Iterator<Item = char>
 where
@@ -856,8 +857,9 @@ where
         .map(|v| v.to_ascii_uppercase())
 }
 
-fn cmp_fprints(a: &str, b: &str) -> bool
-{
+// Compares two `str`s as if they held digital fingerprints.
+
+fn cmp_fprints(a: &str, b: &str) -> bool {
     let mut a = sanitize(a.chars());
     let mut b = sanitize(b.chars());
 
@@ -870,6 +872,10 @@ fn cmp_fprints(a: &str, b: &str) -> bool
     }
 }
 
+// Builds the server object that will handle GraphQL requests. If the
+// configuration contains the `security` key, the server will require
+// TLS connections.
+
 fn build_server(
     cfg: &config::Config,
     site: impl Filter<Extract = (impl Reply,), Error = Rejection>
@@ -879,20 +885,49 @@ fn build_server(
         + 'static,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     match &cfg.security {
+        // If there isn't security configuration, return an
+        // unencrypted server.
         None => Box::pin(warp::serve(site).bind(cfg.addr))
             as Pin<Box<dyn Future<Output = ()> + Send>>,
-        Some(security) => Box::pin(
-            warp::serve(
-                warp::header::optional::<String>("X-DrMem-Client")
-                    .and_then(|_| async { Ok::<(), Rejection>(()) })
-                    .untuple_one()
-                    .and(site),
-            )
-            .tls()
-            .key_path(security.key_file.clone())
-            .cert_path(security.cert_file.clone())
-            .bind(cfg.addr),
-        ) as Pin<Box<dyn Future<Output = ()> + Send>>,
+
+        // If security is required, this section adds additional
+        // processing to the connection to validate the user.
+        Some(security) => {
+            // Clone the table of clients that are allowed in to the
+            // system.
+
+            let clients: Arc<[String]> = Arc::clone(&security.clients);
+
+            // Create a closure that validates the client. It takes a
+            // client fingerprint as an argument and checks to see if
+            // it exists in the list of clients in the configuration.
+
+            let check_client = move |client: String| {
+                use futures::future::ready;
+
+                for fp in &clients[..] {
+                    if cmp_fprints(&fp, &client) {
+                        return ready(Ok::<(), Rejection>(()));
+                    }
+                }
+                ready(Ok::<(), Rejection>(()))
+            };
+
+            // Build the TLS server.
+
+            Box::pin(
+                warp::serve(
+                    warp::header::<String>("X-DrMem-Client")
+                        .and_then(check_client)
+                        .untuple_one()
+                        .and(site),
+                )
+                .tls()
+                .key_path(security.key_file.clone())
+                .cert_path(security.cert_file.clone())
+                .bind(cfg.addr),
+            ) as Pin<Box<dyn Future<Output = ()> + Send>>
+        }
     }
 }
 
