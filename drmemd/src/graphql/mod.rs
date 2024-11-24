@@ -906,7 +906,7 @@ fn build_server(
                 use futures::future::ready;
 
                 for fp in &clients[..] {
-                    if cmp_fprints(&fp, &client) {
+                    if cmp_fprints(fp, &client) {
                         return ready(Ok::<(), Rejection>(()));
                     }
                 }
