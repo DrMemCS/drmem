@@ -132,7 +132,9 @@ impl Node {
                     // which entry to update.
 
                     in_stream.insert(inputs.len(), s);
-                    inputs.push(vv.clone())
+                    inputs.push(vv.clone());
+
+                    debug!("inp[{}] = {}", inputs.len(), &dev)
                 }
                 Err(e) => {
                     error!("error mapping '{}' to '{}': {}", &vv, &dev, &e);
@@ -166,6 +168,8 @@ impl Node {
                 &env,
             )?;
 
+            debug!("inp[{}] = {}", result.1, &result.0);
+
             // Add the program to the list of programs.
 
             def_exprs.push(result);
@@ -192,7 +196,9 @@ impl Node {
                     // which entry to update.
 
                     out_chans.push(Output::create(ch));
-                    outputs.push(vv.clone())
+                    outputs.push(vv.clone());
+
+                    debug!("out[{}] controls {}", outputs.len(), &dev)
                 }
                 Err(e) => {
                     error!("error mapping '{}' to '{}': {}", &vv, &dev, &e);
@@ -318,7 +324,7 @@ impl Node {
                     .map(compile::Program::optimize)
             })
             .inspect(|e| match e {
-                Ok(ex) => info!("loaded : {}", &ex),
+                Ok(ex) => debug!("out[{}] = {}", ex.1, &ex.0),
                 Err(e) => error!("{}", &e),
             })
             .collect();
