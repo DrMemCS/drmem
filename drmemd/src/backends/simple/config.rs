@@ -13,6 +13,6 @@ pub static DEF: Config = Config::new();
 
 impl Default for Config {
     fn default() -> Self {
-	Self::new()
+        Self::new()
     }
 }
