@@ -656,14 +656,14 @@ impl RedisStore {
             // If a "units" field exists and it's a string, we can
             // save it in the `units` field of the reply.
 
-            let units = hmap.get("units").map(String::clone);
+            let units = hmap.get("units").cloned();
 
             // If a "driver" field exists and it's a string, save it
             // in the "drivers" field of the reply.
 
             let driver = hmap
                 .get("driver")
-                .map(String::clone)
+                .cloned()
                 .unwrap_or_else(|| String::from("*missing*"));
 
             Ok(client::DevInfoReply {
