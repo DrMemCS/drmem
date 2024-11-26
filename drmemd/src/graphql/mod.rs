@@ -917,7 +917,7 @@ fn build_server(
 
             Box::pin(
                 warp::serve(
-                    warp::header::<String>("X-DrMem-Client")
+                    warp::header::<String>("X-DrMem-Client-Id")
                         .and_then(check_client)
                         .untuple_one()
                         .and(site),
