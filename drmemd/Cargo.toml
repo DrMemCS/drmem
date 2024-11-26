@@ -114,7 +114,7 @@ optional = true
 # This section defines the optional dependencies for backend storage.
 
 [dependencies.redis]
-version = "0.26"
+version = "0.27"
 default-features = false
 features = ["tokio-comp", "streams"]
 optional = true
@@ -146,7 +146,7 @@ features = ["tls"]
 optional = true
 
 [dependencies.libmdns]
-version = "0.8"
+version = "0.9"
 default-features = false
 optional = true
 
