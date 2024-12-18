@@ -9,11 +9,16 @@ use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::subscriptions::serve_graphql_ws;
 use libmdns::Responder;
 use std::{pin::Pin, result, sync::Arc, time::Duration};
-use tracing::{info, info_span};
+use tracing::{error, info, info_span};
 use tracing_futures::Instrument;
-use warp::{Filter, Rejection, Reply};
+use warp::{http::StatusCode, reject, reply, Filter, Rejection, Reply};
 
 pub mod config;
+
+#[derive(Debug)]
+struct NoAuthorization;
+
+impl reject::Reject for NoAuthorization {}
 
 // The Context parameter for Queries.
 
@@ -907,10 +912,10 @@ fn build_server(
 
                 for fp in &clients[..] {
                     if cmp_fprints(fp, &client) {
-                        return ready(Ok::<(), Rejection>(()));
+                        return ready(Ok(()));
                     }
                 }
-                ready(Ok::<(), Rejection>(()))
+                ready(Err(reject::custom(NoAuthorization)))
             };
 
             // Build the TLS server.
@@ -920,7 +925,8 @@ fn build_server(
                     warp::header::<String>("X-DrMem-Client-Id")
                         .and_then(check_client)
                         .untuple_one()
-                        .and(site),
+                        .and(site)
+                        .recover(handle_rejection),
                 )
                 .tls()
                 .key_path(security.key_file.clone())
@@ -928,6 +934,22 @@ fn build_server(
                 .bind(cfg.addr),
             ) as Pin<Box<dyn Future<Output = ()> + Send>>
         }
+    }
+}
+
+async fn handle_rejection(
+    err: Rejection,
+) -> Result<impl Reply, std::convert::Infallible> {
+    if err.is_not_found() {
+        Ok(reply::with_status("NOT_FOUND", StatusCode::NOT_FOUND))
+    } else if let Some(_) = err.find::<NoAuthorization>() {
+        Ok(reply::with_status("FORBIDDEN", StatusCode::FORBIDDEN))
+    } else {
+        error!("unhandled rejection: {:?}", err);
+        Ok(reply::with_status(
+            "INTERNAL_SERVER_ERROR",
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ))
     }
 }
 
