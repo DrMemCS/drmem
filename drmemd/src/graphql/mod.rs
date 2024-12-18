@@ -771,7 +771,7 @@ mod paths {
 
 // Build `warp::Filter`s that define the entire webspace.
 
-fn build_site(
+fn build_base_site(
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
@@ -851,6 +851,40 @@ fn build_site(
         )
 }
 
+fn build_secure_site(
+    cfg: &config::Security,
+    db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
+) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
+{
+    // Clone the table of clients that are allowed in to the system.
+
+    let clients: Arc<[String]> = Arc::clone(&cfg.clients);
+
+    // Create a closure that validates the client. It takes a client
+    // fingerprint as an argument and checks to see if it exists in
+    // the list of clients in the configuration.
+
+    let check_client = move |client: String| {
+        use futures::future::ready;
+
+        for fp in &clients[..] {
+            if cmp_fprints(fp, &client) {
+                return ready(Ok(()));
+            }
+        }
+        ready(Err(reject::custom(NoAuthorization)))
+    };
+
+    // Build the TLS server.
+
+    warp::header::<String>("X-DrMem-Client-Id")
+        .and_then(check_client)
+        .untuple_one()
+        .and(build_base_site(db, cchan))
+        .recover(handle_rejection)
+}
+
 // "Sanitizes" a string containing a digital fingerprint by returning
 // an Iterator that only returns the hex digits in uppercase.
 
@@ -883,57 +917,20 @@ fn cmp_fprints(a: &str, b: &str) -> bool {
 
 fn build_server(
     cfg: &config::Config,
-    site: impl Filter<Extract = (impl Reply,), Error = Rejection>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-    match &cfg.security {
-        // If there isn't security configuration, return an
-        // unencrypted server.
-        None => Box::pin(warp::serve(site).bind(cfg.addr))
-            as Pin<Box<dyn Future<Output = ()> + Send>>,
-
-        // If security is required, this section adds additional
-        // processing to the connection to validate the user.
-        Some(security) => {
-            // Clone the table of clients that are allowed in to the
-            // system.
-
-            let clients: Arc<[String]> = Arc::clone(&security.clients);
-
-            // Create a closure that validates the client. It takes a
-            // client fingerprint as an argument and checks to see if
-            // it exists in the list of clients in the configuration.
-
-            let check_client = move |client: String| {
-                use futures::future::ready;
-
-                for fp in &clients[..] {
-                    if cmp_fprints(fp, &client) {
-                        return ready(Ok(()));
-                    }
-                }
-                ready(Err(reject::custom(NoAuthorization)))
-            };
-
-            // Build the TLS server.
-
-            Box::pin(
-                warp::serve(
-                    warp::header::<String>("X-DrMem-Client-Id")
-                        .and_then(check_client)
-                        .untuple_one()
-                        .and(site)
-                        .recover(handle_rejection),
-                )
+    if let Some(security) = &cfg.security {
+        Box::pin(
+            warp::serve(build_secure_site(security, db, cchan))
                 .tls()
                 .key_path(security.key_file.clone())
                 .cert_path(security.cert_file.clone())
                 .bind(cfg.addr),
-            ) as Pin<Box<dyn Future<Output = ()> + Send>>
-        }
+        ) as Pin<Box<dyn Future<Output = ()> + Send>>
+    } else {
+        Box::pin(warp::serve(build_base_site(db, cchan)).bind(cfg.addr))
+            as Pin<Box<dyn Future<Output = ()> + Send>>
     }
 }
 
@@ -942,7 +939,7 @@ async fn handle_rejection(
 ) -> Result<impl Reply, std::convert::Infallible> {
     if err.is_not_found() {
         Ok(reply::with_status("NOT_FOUND", StatusCode::NOT_FOUND))
-    } else if let Some(_) = err.find::<NoAuthorization>() {
+    } else if err.find::<NoAuthorization>().is_some() {
         Ok(reply::with_status("FORBIDDEN", StatusCode::FORBIDDEN))
     } else {
         error!("unhandled rejection: {:?}", err);
@@ -958,15 +955,13 @@ pub fn server(
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
-    let site = build_site(db, cchan);
-
     // Create the background mDNS task.
 
     let (resp, task) = Responder::with_default_handle().unwrap();
 
     // Create the http task.
 
-    let http_task = build_server(cfg, site);
+    let http_task = build_server(cfg, db, cchan);
 
     // Get the boot-time and store it in the mDNS payload.
 
