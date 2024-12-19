@@ -851,6 +851,14 @@ fn build_base_site(
         )
 }
 
+fn build_site(
+    db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
+) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
+{
+    build_base_site(db, cchan).recover(handle_rejection)
+}
+
 fn build_secure_site(
     cfg: &config::Security,
     db: crate::driver::DriverDb,
@@ -929,7 +937,7 @@ fn build_server(
                 .bind(cfg.addr),
         ) as Pin<Box<dyn Future<Output = ()> + Send>>
     } else {
-        Box::pin(warp::serve(build_base_site(db, cchan)).bind(cfg.addr))
+        Box::pin(warp::serve(build_site(db, cchan)).bind(cfg.addr))
             as Pin<Box<dyn Future<Output = ()> + Send>>
     }
 }
@@ -939,7 +947,9 @@ async fn handle_rejection(
 ) -> Result<impl Reply, std::convert::Infallible> {
     if err.is_not_found() {
         Ok(reply::with_status("NOT_FOUND", StatusCode::NOT_FOUND))
-    } else if err.find::<NoAuthorization>().is_some() {
+    } else if err.find::<NoAuthorization>().is_some()
+        || err.find::<reject::MissingHeader>().is_some()
+    {
         Ok(reply::with_status("FORBIDDEN", StatusCode::FORBIDDEN))
     } else {
         error!("unhandled rejection: {:?}", err);
@@ -1043,5 +1053,113 @@ mod test {
 
         assert_eq!(cmp_fprints("12:34", "1234"), true);
         assert_eq!(cmp_fprints("a:b:c:d", "AB:CD"), true);
+    }
+
+    #[tokio::test]
+    async fn test_base_site() {
+        use super::build_site;
+        use crate::driver::DriverDb;
+        use drmem_api::client::RequestChan;
+        use tokio::sync::mpsc;
+
+        let (tx, _) = mpsc::channel(100);
+        let filter = build_site(DriverDb::create(), RequestChan::new(tx));
+
+        #[cfg(not(feature = "graphiql"))]
+        {
+            let value = warp::test::request().path("/").reply(&filter).await;
+
+            assert_eq!(value.status(), 404);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_site_security() {
+        use super::{build_secure_site, config::Security};
+        use crate::driver::DriverDb;
+        use drmem_api::client::RequestChan;
+        use std::{path::Path, sync::Arc};
+        use tokio::sync::mpsc;
+
+        let (tx, _) = mpsc::channel(100);
+        let cfg = Security {
+            clients: Arc::new([
+                "00:11:22:33:44:55:66:77".into(),
+                "11:11:11:11:11:11:11:11".into(),
+            ]),
+            cert_file: Path::new("").into(),
+            key_file: Path::new("").into(),
+        };
+        let filter =
+            build_secure_site(&cfg, DriverDb::create(), RequestChan::new(tx));
+
+        // Test a client that didn't define the Client ID
+        // header. Should generate a FORBIDDEN status.
+
+        {
+            let value = warp::test::request().path("/").reply(&filter).await;
+
+            assert_eq!(value.status(), 403);
+        }
+
+        // Test a client that presents a client ID not in our list of
+        // valid clients. Should return a FORBIDDEN status.
+
+        {
+            let value = warp::test::request()
+                .header("X-DrMem-Client-Id", "77:66:55:44:33:22:11:00")
+                .path("/")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 403);
+        }
+
+        // Test a valid client that asks for a URL that doesn't have
+        // any handler. Should return a NOT_FOUND status.
+
+        {
+            let value = warp::test::request()
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 404);
+        }
+
+        // Test a valid client that asks for a valid path, but is
+        // using the incorrect method or a valid path and method but
+        // no body or all present but the body content isn't
+        // valid. Should return a BAD_REQUEST status.
+
+        {
+            let value = warp::test::request()
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/q")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+
+            let value = warp::test::request()
+                .method("POST")
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/q")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+
+            let value = warp::test::request()
+                .method("POST")
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/q")
+                .body("query { }")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+        }
     }
 }
