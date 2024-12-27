@@ -1071,6 +1071,65 @@ mod test {
 
             assert_eq!(value.status(), 404);
         }
+
+        // Test a client that asks for a valid path, but is using the
+        // incorrect method or a valid path and method but no body or
+        // all present but the body content isn't valid. Should return
+        // a BAD_REQUEST status.
+
+        {
+            let value =
+                warp::test::request().path("/drmem/q").reply(&filter).await;
+
+            assert_eq!(value.status(), 400);
+
+            let value = warp::test::request()
+                .method("POST")
+                .path("/drmem/q")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+
+            let value = warp::test::request()
+                .method("POST")
+                .path("/drmem/q")
+                .body("query { }")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+        }
+
+        // Handle a perfect query.
+
+        {
+            let value = warp::test::request()
+                .method("POST")
+                .path("/drmem/q")
+                .body(
+                    "{
+    \"query\": \"query { driverInfo { name } }\",
+    \"variables\": {},
+    \"operationName\": null
+}",
+                )
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 200);
+        }
+
+        // Test clients using the WebSocket interface.
+
+        {
+            let (tx, _) = mpsc::channel(100);
+            let filter = build_site(DriverDb::create(), RequestChan::new(tx));
+            let client =
+                warp::test::ws().path("/drmem/s").handshake(filter).await;
+
+            assert!(client.is_ok());
+        }
     }
 
     #[tokio::test]
@@ -1160,6 +1219,73 @@ mod test {
                 .await;
 
             assert_eq!(value.status(), 400);
+        }
+
+        // Handle a perfect, secure query.
+
+        {
+            let value = warp::test::request()
+                .method("POST")
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/q")
+                .body(
+                    "{
+    \"query\": \"query { driverInfo { name } }\",
+    \"variables\": {},
+    \"operationName\": null
+}",
+                )
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 200);
+        }
+
+        // Test clients using the WebSocket interface.
+
+        {
+            let (tx, _) = mpsc::channel(100);
+            let filter = build_secure_site(
+                &cfg,
+                DriverDb::create(),
+                RequestChan::new(tx),
+            );
+            let client =
+                warp::test::ws().path("/drmem/s").handshake(filter).await;
+
+            assert!(client.is_err());
+        }
+
+        {
+            let (tx, _) = mpsc::channel(100);
+            let filter = build_secure_site(
+                &cfg,
+                DriverDb::create(),
+                RequestChan::new(tx),
+            );
+            let client = warp::test::ws()
+                .header("X-DrMem-Client-Id", "77:66:55:44:33:22:11:00")
+                .path("/drmem/s")
+                .handshake(filter)
+                .await;
+
+            assert!(client.is_err());
+        }
+
+        {
+            let (tx, _) = mpsc::channel(100);
+            let filter = build_secure_site(
+                &cfg,
+                DriverDb::create(),
+                RequestChan::new(tx),
+            );
+            let client = warp::test::ws()
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/s")
+                .handshake(filter)
+                .await;
+
+            assert!(client.is_ok());
         }
     }
 }
