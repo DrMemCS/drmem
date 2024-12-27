@@ -358,7 +358,7 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
 	    CAT_UTC, TimeField::Day, get_utc_day
         )),
 	(CAT_UTC, FLD_DOW) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::DOW, get_utc_day_of_week
+            CAT_UTC, TimeField::DoW, get_utc_day_of_week
         )),
 	(CAT_UTC, FLD_MONTH) => Ok(Expr::TimeVal(
             CAT_UTC, TimeField::Month, get_utc_month
@@ -367,7 +367,7 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
             CAT_UTC, TimeField::Year, get_utc_year
         )),
 	(CAT_UTC, FLD_DOY) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::DOY, get_utc_day_of_year
+            CAT_UTC, TimeField::DoY, get_utc_day_of_year
         )),
 	(CAT_LOCAL, FLD_SECOND) => Ok(Expr::TimeVal(
             CAT_LOCAL, TimeField::Second, get_local_second
@@ -382,7 +382,7 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
             CAT_LOCAL, TimeField::Day, get_local_day
         )),
 	(CAT_LOCAL, FLD_DOW) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::DOW, get_local_day_of_week
+            CAT_LOCAL, TimeField::DoW, get_local_day_of_week
         )),
 	(CAT_LOCAL, FLD_MONTH) => Ok(Expr::TimeVal(
             CAT_LOCAL, TimeField::Month, get_local_month
@@ -391,7 +391,7 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
             CAT_LOCAL, TimeField::Year, get_local_year
         )),
 	(CAT_LOCAL, FLD_DOY) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::DOY, get_local_day_of_year
+            CAT_LOCAL, TimeField::DoY, get_local_day_of_year
         )),
 	(CAT_SOLAR, FLD_ALT) => Ok(Expr::SolarVal(
 	    SolarField::Elevation, get_solar_altitude

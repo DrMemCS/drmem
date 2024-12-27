@@ -8,12 +8,17 @@ use juniper::{
 use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::subscriptions::serve_graphql_ws;
 use libmdns::Responder;
-use std::{result, sync::Arc, time::Duration};
-use tracing::{info, info_span};
+use std::{pin::Pin, result, sync::Arc, time::Duration};
+use tracing::{error, info, info_span};
 use tracing_futures::Instrument;
-use warp::Filter;
+use warp::{http::StatusCode, reject, reply, Filter, Rejection, Reply};
 
 pub mod config;
+
+#[derive(Debug)]
+struct NoAuthorization;
+
+impl reject::Reject for NoAuthorization {}
 
 // The Context parameter for Queries.
 
@@ -764,19 +769,17 @@ mod paths {
     }
 }
 
-pub fn server(
-    cfg: &config::Config,
+// Build `warp::Filter`s that define the entire webspace.
+
+fn build_base_site(
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
-) -> impl Future<Output = ()> {
-    #[cfg(feature = "graphiql")]
-    use juniper_warp::playground_filter;
-
+) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     let context = ConfigDb(db, cchan);
+    let ctxt = context.clone();
 
     // Create filter that handles GraphQL queries and mutations.
 
-    let ctxt = context.clone();
     let state = warp::any().map(move || ctxt.clone());
     let query_filter = warp::path(paths::QUERY)
         .and(warp::path::end())
@@ -787,10 +790,11 @@ pub fn server(
     // service is found at the BASE path.
 
     #[cfg(feature = "graphiql")]
-    let graphiql_filter = warp::path::end().and(playground_filter(
-        &*paths::FULL_QUERY,
-        Some(&*paths::FULL_SUBSCRIBE),
-    ));
+    let graphiql_filter =
+        warp::path::end().and(juniper_warp::playground_filter(
+            &*paths::FULL_QUERY,
+            Some(&*paths::FULL_SUBSCRIBE),
+        ));
 
     // Create the filter that handles subscriptions.
 
@@ -832,7 +836,7 @@ pub fn server(
     // Stitch the filters together to build the map of the web
     // interface.
 
-    let filter = warp::path(paths::BASE)
+    warp::path(paths::BASE)
         .and(site)
         .with(warp::log("gql::drmem"))
         .with(
@@ -844,15 +848,130 @@ pub fn server(
                 ])
                 .allow_methods(vec!["OPTIONS", "GET", "POST"])
                 .max_age(Duration::from_secs(3_600)),
-        );
+        )
+}
 
+fn build_site(
+    db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
+) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
+{
+    build_base_site(db, cchan).recover(handle_rejection)
+}
+
+fn build_secure_site(
+    cfg: &config::Security,
+    db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
+) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
+{
+    // Clone the table of clients that are allowed in to the system.
+
+    let clients: Arc<[String]> = Arc::clone(&cfg.clients);
+
+    // Create a closure that validates the client. It takes a client
+    // fingerprint as an argument and checks to see if it exists in
+    // the list of clients in the configuration.
+
+    let check_client = move |client: String| {
+        use futures::future::ready;
+
+        for fp in &clients[..] {
+            if cmp_fprints(fp, &client) {
+                return ready(Ok(()));
+            }
+        }
+        ready(Err(reject::custom(NoAuthorization)))
+    };
+
+    // Build the TLS server.
+
+    warp::header::<String>("X-DrMem-Client-Id")
+        .and_then(check_client)
+        .untuple_one()
+        .and(build_base_site(db, cchan))
+        .recover(handle_rejection)
+}
+
+// "Sanitizes" a string containing a digital fingerprint by returning
+// an Iterator that only returns the hex digits in uppercase.
+
+fn sanitize<T>(ii: T) -> impl Iterator<Item = char>
+where
+    T: Iterator<Item = char>,
+{
+    ii.filter(char::is_ascii_hexdigit)
+        .map(|v| v.to_ascii_uppercase())
+}
+
+// Compares two `str`s as if they held digital fingerprints.
+
+fn cmp_fprints(a: &str, b: &str) -> bool {
+    let mut a = sanitize(a.chars());
+    let mut b = sanitize(b.chars());
+
+    loop {
+        match (a.next(), b.next()) {
+            (None, None) => break true,
+            (Some(a), Some(b)) if a == b => continue,
+            (_, _) => break false,
+        }
+    }
+}
+
+// Builds the server object that will handle GraphQL requests. If the
+// configuration contains the `security` key, the server will require
+// TLS connections.
+
+fn build_server(
+    cfg: &config::Config,
+    db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    if let Some(security) = &cfg.security {
+        Box::pin(
+            warp::serve(build_secure_site(security, db, cchan))
+                .tls()
+                .key_path(security.key_file.clone())
+                .cert_path(security.cert_file.clone())
+                .bind(cfg.addr),
+        ) as Pin<Box<dyn Future<Output = ()> + Send>>
+    } else {
+        Box::pin(warp::serve(build_site(db, cchan)).bind(cfg.addr))
+            as Pin<Box<dyn Future<Output = ()> + Send>>
+    }
+}
+
+async fn handle_rejection(
+    err: Rejection,
+) -> Result<impl Reply, std::convert::Infallible> {
+    if err.is_not_found() {
+        Ok(reply::with_status("NOT_FOUND", StatusCode::NOT_FOUND))
+    } else if err.find::<NoAuthorization>().is_some()
+        || err.find::<reject::MissingHeader>().is_some()
+    {
+        Ok(reply::with_status("FORBIDDEN", StatusCode::FORBIDDEN))
+    } else {
+        error!("unhandled rejection: {:?}", err);
+        Ok(reply::with_status(
+            "INTERNAL_SERVER_ERROR",
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ))
+    }
+}
+
+pub fn server(
+    cfg: &config::Config,
+    db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
+) -> impl Future<Output = ()> {
     // Create the background mDNS task.
 
     let (resp, task) = Responder::with_default_handle().unwrap();
 
-    // Bind to the address.
+    // Create the http task.
 
-    let (addr, http_task) = warp::serve(filter).bind_ephemeral(cfg.addr);
+    let http_task = build_server(cfg, db, cchan);
 
     // Get the boot-time and store it in the mDNS payload.
 
@@ -889,7 +1008,7 @@ pub fn server(
     let service = resp.register(
         "_drmem._tcp".into(),
         cfg.name.clone(),
-        addr.port(),
+        cfg.addr.port(),
         &payload.iter().map(String::as_str).collect::<Vec<&str>>(),
     );
 
@@ -903,4 +1022,270 @@ pub fn server(
     std::mem::drop(jh);
 
     http_task.instrument(info_span!("http"))
+}
+
+#[cfg(test)]
+mod test {
+    use super::{cmp_fprints, sanitize};
+
+    #[test]
+    fn test_sanitizer() {
+        assert_eq!(sanitize("1234".chars()).collect::<String>(), "1234");
+        assert_eq!(
+            sanitize("0123456789abcdefABCDEF".chars()).collect::<String>(),
+            "0123456789ABCDEFABCDEF"
+        );
+        assert_eq!(sanitize("01:ff:45".chars()).collect::<String>(), "01FF45");
+    }
+
+    #[test]
+    fn test_fprint_comparisons() {
+        assert_eq!(cmp_fprints("", ""), true);
+        assert_eq!(cmp_fprints("z", ""), true);
+        assert_eq!(cmp_fprints("", "z"), true);
+
+        assert_eq!(cmp_fprints("a", ""), false);
+        assert_eq!(cmp_fprints("", "a"), false);
+
+        assert_eq!(cmp_fprints("1234", "1234"), true);
+        assert_eq!(cmp_fprints("abcd", "ABCD"), true);
+        assert_eq!(cmp_fprints("1234", "ABCD"), false);
+
+        assert_eq!(cmp_fprints("12:34", "1234"), true);
+        assert_eq!(cmp_fprints("a:b:c:d", "AB:CD"), true);
+    }
+
+    #[tokio::test]
+    async fn test_base_site() {
+        use super::build_site;
+        use crate::driver::DriverDb;
+        use drmem_api::client::RequestChan;
+        use tokio::sync::mpsc;
+
+        let (tx, _) = mpsc::channel(100);
+        let filter = build_site(DriverDb::create(), RequestChan::new(tx));
+
+        #[cfg(not(feature = "graphiql"))]
+        {
+            let value = warp::test::request().path("/").reply(&filter).await;
+
+            assert_eq!(value.status(), 404);
+        }
+
+        // Test a client that asks for a valid path, but is using the
+        // incorrect method or a valid path and method but no body or
+        // all present but the body content isn't valid. Should return
+        // a BAD_REQUEST status.
+
+        {
+            let value =
+                warp::test::request().path("/drmem/q").reply(&filter).await;
+
+            assert_eq!(value.status(), 400);
+
+            let value = warp::test::request()
+                .method("POST")
+                .path("/drmem/q")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+
+            let value = warp::test::request()
+                .method("POST")
+                .path("/drmem/q")
+                .body("query { }")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+        }
+
+        // Handle a perfect query.
+
+        {
+            let value = warp::test::request()
+                .method("POST")
+                .path("/drmem/q")
+                .body(
+                    "{
+    \"query\": \"query { driverInfo { name } }\",
+    \"variables\": {},
+    \"operationName\": null
+}",
+                )
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 200);
+        }
+
+        // Test clients using the WebSocket interface.
+
+        {
+            let (tx, _) = mpsc::channel(100);
+            let filter = build_site(DriverDb::create(), RequestChan::new(tx));
+            let client =
+                warp::test::ws().path("/drmem/s").handshake(filter).await;
+
+            assert!(client.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_site_security() {
+        use super::{build_secure_site, config::Security};
+        use crate::driver::DriverDb;
+        use drmem_api::client::RequestChan;
+        use std::{path::Path, sync::Arc};
+        use tokio::sync::mpsc;
+
+        let (tx, _) = mpsc::channel(100);
+        let cfg = Security {
+            clients: Arc::new([
+                "00:11:22:33:44:55:66:77".into(),
+                "11:11:11:11:11:11:11:11".into(),
+            ]),
+            cert_file: Path::new("").into(),
+            key_file: Path::new("").into(),
+        };
+        let filter =
+            build_secure_site(&cfg, DriverDb::create(), RequestChan::new(tx));
+
+        // Test a client that didn't define the Client ID
+        // header. Should generate a FORBIDDEN status.
+
+        {
+            let value = warp::test::request().path("/").reply(&filter).await;
+
+            assert_eq!(value.status(), 403);
+        }
+
+        // Test a client that presents a client ID not in our list of
+        // valid clients. Should return a FORBIDDEN status.
+
+        {
+            let value = warp::test::request()
+                .header("X-DrMem-Client-Id", "77:66:55:44:33:22:11:00")
+                .path("/")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 403);
+        }
+
+        // Test a valid client that asks for a URL that doesn't have
+        // any handler. Should return a NOT_FOUND status.
+
+        {
+            let value = warp::test::request()
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 404);
+        }
+
+        // Test a valid client that asks for a valid path, but is
+        // using the incorrect method or a valid path and method but
+        // no body or all present but the body content isn't
+        // valid. Should return a BAD_REQUEST status.
+
+        {
+            let value = warp::test::request()
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/q")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+
+            let value = warp::test::request()
+                .method("POST")
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/q")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+
+            let value = warp::test::request()
+                .method("POST")
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/q")
+                .body("query { }")
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 400);
+        }
+
+        // Handle a perfect, secure query.
+
+        {
+            let value = warp::test::request()
+                .method("POST")
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/q")
+                .body(
+                    "{
+    \"query\": \"query { driverInfo { name } }\",
+    \"variables\": {},
+    \"operationName\": null
+}",
+                )
+                .reply(&filter)
+                .await;
+
+            assert_eq!(value.status(), 200);
+        }
+
+        // Test clients using the WebSocket interface.
+
+        {
+            let (tx, _) = mpsc::channel(100);
+            let filter = build_secure_site(
+                &cfg,
+                DriverDb::create(),
+                RequestChan::new(tx),
+            );
+            let client =
+                warp::test::ws().path("/drmem/s").handshake(filter).await;
+
+            assert!(client.is_err());
+        }
+
+        {
+            let (tx, _) = mpsc::channel(100);
+            let filter = build_secure_site(
+                &cfg,
+                DriverDb::create(),
+                RequestChan::new(tx),
+            );
+            let client = warp::test::ws()
+                .header("X-DrMem-Client-Id", "77:66:55:44:33:22:11:00")
+                .path("/drmem/s")
+                .handshake(filter)
+                .await;
+
+            assert!(client.is_err());
+        }
+
+        {
+            let (tx, _) = mpsc::channel(100);
+            let filter = build_secure_site(
+                &cfg,
+                DriverDb::create(),
+                RequestChan::new(tx),
+            );
+            let client = warp::test::ws()
+                .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")
+                .path("/drmem/s")
+                .handshake(filter)
+                .await;
+
+            assert!(client.is_ok());
+        }
+    }
 }

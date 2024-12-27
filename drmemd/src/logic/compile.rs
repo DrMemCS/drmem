@@ -76,8 +76,8 @@ pub enum TimeField {
     Minute,
     Hour,
     Day,
-    DOW,
-    DOY,
+    DoW,
+    DoY,
     Month,
     Year,
 }
@@ -92,10 +92,10 @@ impl std::fmt::Display for TimeField {
             TimeField::Minute => write!(f, "minute"),
             TimeField::Hour => write!(f, "hour"),
             TimeField::Day => write!(f, "day"),
-            TimeField::DOW => write!(f, "DOW"),
+            TimeField::DoW => write!(f, "DOW"),
             TimeField::Month => write!(f, "month"),
             TimeField::Year => write!(f, "year"),
-            TimeField::DOY => write!(f, "DOY"),
+            TimeField::DoY => write!(f, "DOY"),
         }
     }
 }
@@ -177,8 +177,8 @@ impl Expr {
             }
             Expr::TimeVal(_, TimeField::Hour, _) => Some(tod::TimeField::Hour),
             Expr::TimeVal(_, TimeField::Day, _)
-            | Expr::TimeVal(_, TimeField::DOW, _)
-            | Expr::TimeVal(_, TimeField::DOY, _) => Some(tod::TimeField::Day),
+            | Expr::TimeVal(_, TimeField::DoW, _)
+            | Expr::TimeVal(_, TimeField::DoY, _) => Some(tod::TimeField::Day),
             Expr::TimeVal(_, TimeField::Month, _) => {
                 Some(tod::TimeField::Month)
             }
