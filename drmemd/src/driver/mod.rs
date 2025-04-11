@@ -51,38 +51,42 @@ where
             let result = T::create_instance(&cfg)
                 .instrument(info_span!("init", cfg = field::Empty));
 
-            if let Ok(mut instance) = result.await {
-                let name = name.clone();
-                let devices = devices.clone();
+            match result.await {
+                Ok(mut instance) => {
+                    let name = name.clone();
+                    let devices = devices.clone();
 
-                restart_delay = START_DELAY;
+                    restart_delay = START_DELAY;
 
-                // Start the driver instance as a background task and
-                // monitor the return value.
+                    // Start the driver instance as a background task
+                    // and monitor the return value.
 
-                let task = tokio::spawn(async move {
-                    instance
-                        .run(devices)
-                        .instrument(info_span!(
-                            "driver",
-                            name = name.as_ref(),
-                            cfg = field::Empty
-                        ))
-                        .await
-                });
+                    let task = tokio::spawn(async move {
+                        instance
+                            .run(devices)
+                            .instrument(info_span!(
+                                "driver",
+                                name = name.as_ref(),
+                                cfg = field::Empty
+                            ))
+                            .await
+                    });
 
-                // Drivers are never supposed to exit so the JoinHandle
-                // will never return an `Ok()` value. We can't stop
-                // drivers from panicking, however, so we have to look for
-                // an `Err()` value.
-                //
-                // (When Rust officially supports the `!` type, we will be
-                // able to convert this from an `if-statement` to a simple
-                // assignment.)
+                    // Drivers are never supposed to exit so the
+                    // JoinHandle will never return an `Ok()`
+                    // value. We can't stop drivers from panicking,
+                    // however, so we have to look for an `Err()`
+                    // value.
+                    //
+                    // (When Rust officially supports the `!` type, we
+                    // will be able to convert this from an
+                    // `if-statement` to a simple assignment.)
 
-                if let Err(e) = task.await {
-                    error!("driver exited unexpectedly -- {}", e)
+                    let Err(e) = task.await;
+
+                    error!("driver exited unexpectedly -- {e}")
                 }
+                Err(e) => error!("{e}"),
             }
 
             // Delay before restarting the driver. This prevents the

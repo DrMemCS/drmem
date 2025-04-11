@@ -150,6 +150,21 @@ version = "0.9"
 default-features = false
 optional = true
 
+[dependencies.rustls-pki-types]
+version = "1.11"
+default-features = false
+optional = true
+
+[dependencies.ring]
+version = "0.17"
+default-features = false
+optional = true
+
+[dependencies.rustls-pemfile]
+version = "1"
+default-features = false
+optional = true
+
 # These are features that can be enabled for drmem.
 
 [features]
@@ -164,7 +179,8 @@ redis-backend = ["dep:redis"]
 
 no-client = []
 graphql = ["dep:warp", "dep:juniper", "dep:juniper_graphql_ws",
-           "dep:juniper_warp", "dep:libmdns"]
+           "dep:juniper_warp", "dep:libmdns", "dep:rustls-pki-types",
+           "dep:ring", "dep:rustls-pemfile"]
 graphiql = ["graphql"]
 
 # Drivers
