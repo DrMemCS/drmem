@@ -114,7 +114,7 @@ optional = true
 # This section defines the optional dependencies for backend storage.
 
 [dependencies.redis]
-version = "0.27"
+version = "0.28"
 default-features = false
 features = ["tokio-comp", "streams"]
 optional = true
@@ -142,11 +142,26 @@ optional = true
 [dependencies.warp]
 version = "0.3"
 default-features = false
-features = ["tls"]
+features = ["tls", "compression-gzip"]
 optional = true
 
 [dependencies.libmdns]
 version = "0.9"
+default-features = false
+optional = true
+
+[dependencies.rustls-pki-types]
+version = "1.11"
+default-features = false
+optional = true
+
+[dependencies.ring]
+version = "0.17"
+default-features = false
+optional = true
+
+[dependencies.rustls-pemfile]
+version = "1"
 default-features = false
 optional = true
 
@@ -164,7 +179,8 @@ redis-backend = ["dep:redis"]
 
 no-client = []
 graphql = ["dep:warp", "dep:juniper", "dep:juniper_graphql_ws",
-           "dep:juniper_warp", "dep:libmdns"]
+           "dep:juniper_warp", "dep:libmdns", "dep:rustls-pki-types",
+           "dep:ring", "dep:rustls-pemfile"]
 graphiql = ["graphql"]
 
 # Drivers

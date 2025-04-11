@@ -258,6 +258,7 @@ const FLD_MONTH: &str = "month";
 const FLD_YEAR: &str = "year";
 const FLD_DOW: &str = "DOW";
 const FLD_DOY: &str = "DOY";
+const FLD_LY: &str = "LY";
 const FLD_ALT: &str = "alt";
 const FLD_AZ: &str = "az";
 const FLD_RA: &str = "ra";
@@ -291,6 +292,13 @@ fn get_utc_year(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.year())
 }
 
+fn get_utc_leap_year(info: &tod::Info) -> device::Value {
+    let year = info.0.year();
+
+    device::Value::Bool(((year % 4 == 0) && (year % 100 != 0)) ||
+			(year % 400 == 0))
+}
+
 fn get_utc_day_of_year(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.ordinal0() as i32)
 }
@@ -321,6 +329,13 @@ fn get_local_month(info: &tod::Info) -> device::Value {
 
 fn get_local_year(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.year())
+}
+
+fn get_local_leap_year(info: &tod::Info) -> device::Value {
+    let year = info.1.year();
+
+    device::Value::Bool(((year % 4 == 0) && (year % 100 != 0)) ||
+			(year % 400 == 0))
 }
 
 fn get_local_day_of_year(info: &tod::Info) -> device::Value {
@@ -366,6 +381,9 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
 	(CAT_UTC, FLD_YEAR) => Ok(Expr::TimeVal(
             CAT_UTC, TimeField::Year, get_utc_year
         )),
+	(CAT_UTC, FLD_LY) => Ok(Expr::TimeVal(
+            CAT_UTC, TimeField::LeapYear, get_utc_leap_year
+        )),
 	(CAT_UTC, FLD_DOY) => Ok(Expr::TimeVal(
             CAT_UTC, TimeField::DoY, get_utc_day_of_year
         )),
@@ -389,6 +407,9 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
         )),
 	(CAT_LOCAL, FLD_YEAR) => Ok(Expr::TimeVal(
             CAT_LOCAL, TimeField::Year, get_local_year
+        )),
+	(CAT_LOCAL, FLD_LY) => Ok(Expr::TimeVal(
+            CAT_LOCAL, TimeField::LeapYear, get_local_leap_year
         )),
 	(CAT_LOCAL, FLD_DOY) => Ok(Expr::TimeVal(
             CAT_LOCAL, TimeField::DoY, get_local_day_of_year

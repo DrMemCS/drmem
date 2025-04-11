@@ -133,7 +133,7 @@ async fn run(tx: broadcast::Sender<Info>) {
         time::Duration::from_secs(1),
     );
 
-    info!("starting time-of-day task");
+    info!("starting task");
 
     while tx
         .send(Arc::new((chrono::Utc::now(), chrono::Local::now())))

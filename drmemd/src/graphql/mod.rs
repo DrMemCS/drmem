@@ -839,6 +839,7 @@ fn build_base_site(
     warp::path(paths::BASE)
         .and(site)
         .with(warp::log("gql::drmem"))
+        .with(warp::filters::compression::gzip())
         .with(
             warp::cors()
                 .allow_any_origin()
@@ -960,19 +961,25 @@ async fn handle_rejection(
     }
 }
 
-pub fn server(
-    cfg: &config::Config,
-    db: crate::driver::DriverDb,
-    cchan: client::RequestChan,
-) -> impl Future<Output = ()> {
-    // Create the background mDNS task.
+fn calc_fingerprint(cert: &[u8]) -> String {
+    use ring::digest::{Context, Digest, SHA256};
 
-    let (resp, task) = Responder::with_default_handle().unwrap();
+    let mut context = Context::new(&SHA256);
 
-    // Create the http task.
+    context.update(&cert);
 
-    let http_task = build_server(cfg, db, cchan);
+    let digest: Digest = context.finish();
 
+    // Format the fingerprint as a hexadecimal string.
+
+    digest
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{:02X}", byte))
+        .collect::<String>()
+}
+
+fn build_mdns_payload(cfg: &config::Config) -> Result<Vec<String>, Error> {
     // Get the boot-time and store it in the mDNS payload.
 
     let boot_time: DateTime<Utc> = Utc::now();
@@ -993,6 +1000,39 @@ pub fn server(
         format!("subscriptions={}", &*paths::FULL_SUBSCRIBE),
     ];
 
+    // If security is specified, this section of code adds the digital
+    // signature of the certificate to the payload.
+
+    if let Some(sec) = &cfg.security {
+        use rustls_pki_types::{pem::PemObject, CertificateDer};
+
+        match CertificateDer::pem_file_iter(sec.cert_file.clone()) {
+            Ok(mut certs) => match certs.next() {
+                Some(Ok(cert)) => {
+                    payload.push(format!("sig_sha={}", calc_fingerprint(&cert)))
+                }
+                Some(Err(e)) => {
+                    return Err(Error::ConfigError(format!(
+                        "couldn't parse certificate : {e}"
+                    )))
+                }
+                None => {
+                    return Err(Error::ConfigError(format!(
+                        "no certificate(s) found in {}",
+                        sec.cert_file.display()
+                    )))
+                }
+            },
+            Err(e) => {
+                return Err(Error::ConfigError(format!(
+                    "error accessing certificate file '{}' : {}",
+                    &sec.cert_file.display(),
+                    e
+                )))
+            }
+        }
+    }
+
     // If the configuration specifies a preferred address to use, add
     // it to the payload.
 
@@ -1001,27 +1041,45 @@ pub fn server(
         payload.push(format!("pref-addr={}:{}", &host, cfg.pref_port))
     }
 
-    // Register DrMem's mDNS entry. In the properties field, inform
-    // the client with which paths to use for each GraphQL query
-    // type.
+    Ok(payload)
+}
 
-    let service = resp.register(
-        "_drmem._tcp".into(),
-        cfg.name.clone(),
-        cfg.addr.port(),
-        &payload.iter().map(String::as_str).collect::<Vec<&str>>(),
-    );
+pub fn server(
+    cfg: &config::Config,
+    db: crate::driver::DriverDb,
+    cchan: client::RequestChan,
+) -> impl Future<Output = ()> {
+    let (resp, task) = Responder::with_default_handle().unwrap();
+    let http_task = build_server(cfg, db, cchan);
 
-    // Make mDNS run in the background.
+    match build_mdns_payload(cfg) {
+        Ok(payload) => {
+            // Register DrMem's mDNS entry. In the properties field,
+            // inform the client with which paths to use for each
+            // GraphQL query type.
 
-    let jh = tokio::spawn(async move {
-        task.await;
-        drop(service)
-    });
+            let service = resp.register(
+                "_drmem._tcp".into(),
+                cfg.name.clone(),
+                cfg.addr.port(),
+                &payload.iter().map(String::as_str).collect::<Vec<&str>>(),
+            );
 
-    std::mem::drop(jh);
+            // Make mDNS run in the background.
 
-    http_task.instrument(info_span!("http"))
+            let jh = tokio::spawn(async move {
+                task.await;
+                drop(service)
+            });
+
+            std::mem::drop(jh);
+
+            http_task.instrument(info_span!("http"))
+        }
+        Err(e) => {
+            panic!("GraphQL config error : {e}")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1287,5 +1345,44 @@ mod test {
 
             assert!(client.is_ok());
         }
+    }
+
+    #[test]
+    fn test_digital_fingerprint() {
+        use rustls_pki_types::{pem::PemObject, CertificateDer};
+
+        // Expired Mozilla certificate.
+
+        const CERT: &[u8] = b"-----BEGIN CERTIFICATE-----
+MIIDujCCAqKgAwIBAgILBAAAAAABD4Ym5g0wDQYJKoZIhvcNAQEFBQAwTDEgMB4G
+A1UECxMXR2xvYmFsU2lnbiBSb290IENBIC0gUjIxEzARBgNVBAoTCkdsb2JhbFNp
+Z24xEzARBgNVBAMTCkdsb2JhbFNpZ24wHhcNMDYxMjE1MDgwMDAwWhcNMjExMjE1
+MDgwMDAwWjBMMSAwHgYDVQQLExdHbG9iYWxTaWduIFJvb3QgQ0EgLSBSMjETMBEG
+A1UEChMKR2xvYmFsU2lnbjETMBEGA1UEAxMKR2xvYmFsU2lnbjCCASIwDQYJKoZI
+hvcNAQEBBQADggEPADCCAQoCggEBAKbPJA6+Lm8omUVCxKs+IVSbC9N/hHD6ErPL
+v4dfxn+G07IwXNb9rfF73OX4YJYJkhD10FPe+3t+c4isUoh7SqbKSaZeqKeMWhG8
+eoLrvozps6yWJQeXSpkqBy+0Hne/ig+1AnwblrjFuTosvNYSuetZfeLQBoZfXklq
+tTleiDTsvHgMCJiEbKjNS7SgfQx5TfC4LcshytVsW33hoCmEofnTlEnLJGKRILzd
+C9XZzPnqJworc5HGnRusyMvo4KD0L5CLTfuwNhv2GXqF4G3yYROIXJ/gkwpRl4pa
+zq+r1feqCapgvdzZX99yqWATXgAByUr6P6TqBwMhAo6CygPCm48CAwEAAaOBnDCB
+mTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUm+IH
+V2ccHsBqBt5ZtJot39wZhi4wNgYDVR0fBC8wLTAroCmgJ4YlaHR0cDovL2NybC5n
+bG9iYWxzaWduLm5ldC9yb290LXIyLmNybDAfBgNVHSMEGDAWgBSb4gdXZxwewGoG
+3lm0mi3f3BmGLjANBgkqhkiG9w0BAQUFAAOCAQEAmYFThxxol4aR7OBKuEQLq4Gs
+J0/WwbgcQ3izDJr86iw8bmEbTUsp9Z8FHSbBuOmDAGJFtqkIk7mpM0sYmsL4h4hO
+291xNBrBVNpGP+DTKqttVCL1OmLNIG+6KYnX3ZHu01yiPqFbQfXf5WRDLenVOavS
+ot+3i9DAgBkcRcAtjOj4LaR0VknFBbVPFd5uRHg5h6h+u/N5GJG79G+dwfCMNYxd
+AfvDbbnvRG15RjF+Cv6pgsH/76tuIMRQyV+dTZsXjAzlAcmgQWpzU/qlULRuJQ/7
+TBj0/VLZjmmx6BEP3ojY+x1J96relc8geMJgEtslQIxq/H5COEBkEveegeGTLg==
+-----END CERTIFICATE-----";
+
+        let cert = CertificateDer::from_pem_slice(CERT).unwrap();
+
+        assert!(
+	    super::cmp_fprints(
+		&super::calc_fingerprint(&cert),
+		"CA:42:DD:41:74:5F:D0:B8:1E:B9:02:36:2C:F9:D8:BF:71:9D:A1:BD:1B:1E:FC:94:6F:5B:4C:99:F4:2C:1B:9E"
+	    )
+	);
     }
 }

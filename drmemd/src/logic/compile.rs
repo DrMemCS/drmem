@@ -23,6 +23,7 @@
 //     {utc:year}
 //     {utc:DOW}	day of week (Monday = 0, Sunday = 6)
 //     {utc:DOY}	day of year from 0 to 365
+//     {utc:LY}		true if it's a leap year
 //
 //     {local:second}
 //     {local:minute}
@@ -32,6 +33,7 @@
 //     {local:year}
 //     {local:DOW}	day of week (Monday = 0, Sunday = 6)
 //     {local:DOY}	day of year from 0 to 365
+//     {local:LY}	true if it's a leap year
 //
 // There is a built-in type, "solar", that provides solar position in
 // the sky.
@@ -80,6 +82,7 @@ pub enum TimeField {
     DoY,
     Month,
     Year,
+    LeapYear,
 }
 
 impl std::fmt::Display for TimeField {
@@ -96,6 +99,7 @@ impl std::fmt::Display for TimeField {
             TimeField::Month => write!(f, "month"),
             TimeField::Year => write!(f, "year"),
             TimeField::DoY => write!(f, "DOY"),
+            TimeField::LeapYear => write!(f, "LY"),
         }
     }
 }
@@ -182,7 +186,10 @@ impl Expr {
             Expr::TimeVal(_, TimeField::Month, _) => {
                 Some(tod::TimeField::Month)
             }
-            Expr::TimeVal(_, TimeField::Year, _) => Some(tod::TimeField::Year),
+            Expr::TimeVal(_, TimeField::Year, _)
+            | Expr::TimeVal(_, TimeField::LeapYear, _) => {
+                Some(tod::TimeField::Year)
+            }
             Expr::SolarVal(..) | Expr::Lit(_) | Expr::Var(_) => None,
             Expr::Not(e) => e.uses_time(),
             Expr::Mul(a, b)
@@ -880,6 +887,7 @@ mod tests {
         assert!(Program::compile("{utc:year} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{utc:DOW} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{utc:DOY} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:LY} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:second} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:minute} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:hour} -> {bulb}", &env).is_ok());
@@ -888,6 +896,7 @@ mod tests {
         assert!(Program::compile("{local:year} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:DOW} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:DOY} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:LY} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{solar:alt} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{solar:az} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{solar:ra} -> {bulb}", &env).is_ok());
@@ -2856,6 +2865,54 @@ mod tests {
             evaluate("{solar:dec}", &time, Some(&solar)),
             Some(device::Value::Flt(4.0))
         );
+
+        const LY_TESTS: &[(i32, bool)] = &[
+            (1964, true),
+            (1996, true),
+            (1997, false),
+            (1998, false),
+            (1999, false),
+            (2000, true),
+            (2001, false),
+            (2002, false),
+            (2003, false),
+            (2004, true),
+            (2096, true),
+            (2097, false),
+            (2098, false),
+            (2099, false),
+            (2100, false),
+            (2101, false),
+            (2102, false),
+            (2103, false),
+            (2104, true),
+        ];
+
+        for (year, is_ly) in LY_TESTS {
+            let time = Arc::new((
+                chrono::Utc
+                    .with_ymd_and_hms(*year, 1, 2, 3, 4, 5)
+                    .single()
+                    .unwrap(),
+                chrono::Local
+                    .with_ymd_and_hms(*year, 6, 7, 8, 9, 10)
+                    .single()
+                    .unwrap(),
+            ));
+
+            assert_eq!(
+                evaluate("{utc:LY}", &time, None),
+                Some(device::Value::Bool(*is_ly)),
+                "failed on UTC year {}",
+                year
+            );
+            assert_eq!(
+                evaluate("{local:LY}", &time, None),
+                Some(device::Value::Bool(*is_ly)),
+                "failed on local year {}",
+                year
+            );
+        }
     }
 
     #[test]
@@ -2879,6 +2936,7 @@ mod tests {
             ("{utc:DOY}", Some(tod::TimeField::Day)),
             ("{utc:month}", Some(tod::TimeField::Month)),
             ("{utc:year}", Some(tod::TimeField::Year)),
+            ("{utc:LY}", Some(tod::TimeField::Year)),
             ("{local:second}", Some(tod::TimeField::Second)),
             ("{local:minute}", Some(tod::TimeField::Minute)),
             ("{local:hour}", Some(tod::TimeField::Hour)),
@@ -2887,6 +2945,7 @@ mod tests {
             ("{local:DOY}", Some(tod::TimeField::Day)),
             ("{local:month}", Some(tod::TimeField::Month)),
             ("{local:year}", Some(tod::TimeField::Year)),
+            ("{local:LY}", Some(tod::TimeField::Year)),
             // Now test more complicated expressions to make sure each
             // subtree is correctly compared.
             ("not (2 > 3)", None),
