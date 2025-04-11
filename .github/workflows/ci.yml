@@ -24,12 +24,12 @@ jobs:
         backend: [simple-backend, redis-backend]
         client: [no-client, graphql]
 
-	# Redis without a client API to retrieve it is useless. Disable
-	# that combination.
+        # Redis without a client API to retrieve it is useless. Disable
+        # that combination.
 
-	exclude:
-	  - backend: redis-backend
-	    client: no-client
+        exclude:
+          - backend: redis-backend
+            client: no-client
 
     runs-on: ubuntu-latest
 
