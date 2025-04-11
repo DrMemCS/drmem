@@ -173,7 +173,7 @@ default = []
 # Backends
 
 simple-backend = []
-redis-backend = ["dep:redis"]
+redis-backend = ["dep:redis", "graphql"]
 
 # Client APIs
 
