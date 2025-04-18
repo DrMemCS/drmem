@@ -8,6 +8,9 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+// Defines the signature if a function that validates a
+// `device::Value`'s type.
+
 type TypeChecker = fn(&device::Value) -> bool;
 
 // Returns a function that returns `true` when passed a value of the
@@ -37,18 +40,49 @@ pub struct Devices {
 impl Future for Devices {
     type Output = (usize, device::Value);
 
+    // Making `Devices` a `Future` allows efficient monitoring of the
+    // set of memory device handles. Ideally this future would return
+    // the reference to the ReadWriteDevice channel but returning a
+    // reference to a value in a future that's wrapping in a mutex is
+    // beyond my abilities.
+    //
+    // Since this isn't a public `Future`, I can return the index to
+    // the channel and have the outer algorithm use it properly.
+
     fn poll(
         mut self: Pin<&mut Self>,
         ctxt: &mut std::task::Context<'_>,
     ) -> std::task::Poll<<Self as futures::Future>::Output> {
         use std::task::Poll;
 
+        // Loop through all the devices. Get the index, the device
+        // channel, and the function to verify any incoming setting on
+        // that channel.
+
         for (idx, (dev, is_good)) in self.set.iter_mut().enumerate() {
+            // Now that we have a device to look at, we enter a
+            // loop. The loop is necessary because we need to leave
+            // the stream in a state primed to wake us up which only
+            // happens when it returns Poll::Pending.
+
             loop {
+                // Get a future that gets the next value from the
+                // stream. We "pin" it, since that's a requirement of
+                // futures.
+
                 let mut fut = std::pin::pin!(dev.next_setting());
 
+                // See if there's a value to read.
+
                 match fut.as_mut().poll(ctxt) {
+                    // Got a value. Process it.
                     Poll::Ready(Some((val, reply))) => {
+                        // Is the setting value of the correct type?
+                        // If so, echo it back to the client (wrapped
+                        // in Ok().) Return the idx of the device and
+                        // the value so it can be processed by the
+                        // caller.
+
                         if is_good(&val) {
                             reply(Ok(val.clone()));
                             return Poll::Ready((idx, val));
@@ -56,10 +90,18 @@ impl Future for Devices {
                             reply(Err(Error::TypeError))
                         }
                     }
+
+                    // Stream is empty. Break out the loop to check
+                    // the next device.
                     Poll::Ready(None) | Poll::Pending => break,
                 }
             }
         }
+
+        // If we exit the for-loop, then all streams were pending
+        // (which also means they've all registered their wakers so
+        // we'll poll again when a setting arrives.)
+
         Poll::Pending
     }
 }
