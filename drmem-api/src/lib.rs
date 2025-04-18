@@ -12,7 +12,6 @@ pub use types::Error;
 
 /// A specialization of `std::result::Result<>` where the error value
 /// is `types::Error`.
-
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub mod client;

@@ -177,7 +177,6 @@ impl fmt::Display for Base {
 /// paths. The paths provide a naming convention to organize devices.
 /// The client API supports looking up device names using patterns, so
 /// a logical path hierarchy can make those searches more productive.
-
 #[derive(Debug, PartialEq, Hash, Eq, Clone, Deserialize)]
 #[serde(try_from = "String")]
 pub struct Name {
@@ -188,7 +187,6 @@ pub struct Name {
 impl Name {
     /// Creates an instance of `Name`, if the provided string
     /// describes a well-formed device name.
-
     pub fn create(s: &str) -> Result<Name> {
         match s
             .split(':')
@@ -207,19 +205,16 @@ impl Name {
     }
 
     /// Builds a device name from `Path` and `Base` components.
-
     pub fn build(path: Path, base: Base) -> Name {
         Name { path, base }
     }
 
     /// Returns the path of the device name without the trailing ':'.
-
     pub fn get_path(&self) -> Path {
         self.path.clone()
     }
 
     /// Returns the base name of the device.
-
     pub fn get_name(&self) -> Base {
         self.base.clone()
     }

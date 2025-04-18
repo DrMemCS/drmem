@@ -41,7 +41,6 @@ impl Instance {
 
     /// Creates a new `Instance` instance. It is assumed the external
     /// input is `false` so the initial timer state is `Armed`.
-
     pub fn new(
         active_value: device::Value,
         inactive_value: device::Value,

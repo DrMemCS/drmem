@@ -963,20 +963,20 @@ async fn handle_rejection(
 
 fn calc_fingerprint(cert: &[u8]) -> String {
     use ring::digest::{Context, Digest, SHA256};
+    use std::fmt::Write;
 
     let mut context = Context::new(&SHA256);
 
-    context.update(&cert);
+    context.update(cert);
 
     let digest: Digest = context.finish();
 
     // Format the fingerprint as a hexadecimal string.
 
-    digest
-        .as_ref()
-        .iter()
-        .map(|byte| format!("{:02X}", byte))
-        .collect::<String>()
+    digest.as_ref().iter().fold(String::new(), |mut output, b| {
+        let _ = write!(output, "{b:02X}");
+        output
+    })
 }
 
 fn build_mdns_payload(cfg: &config::Config) -> Result<Vec<String>, Error> {
