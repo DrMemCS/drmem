@@ -28,9 +28,9 @@ lets the user decide. The configuration parameter for this driver is:
     no history for the device, this initial value will be used.
 
 If you change the type of the memory device (i.e. you modify the
-configuration paramters so its `initial` value is of a different type)
-then the driver will ignore any previous value from the history and
-will set the device to the specified, initial value.
+configuration parameters so its `initial` value is of a different
+type) then the driver will ignore any previous value from the history
+and will set the device to the specified, initial value.
 
 ## Devices
 
