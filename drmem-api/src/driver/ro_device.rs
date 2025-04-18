@@ -32,7 +32,10 @@ where
 
     /// Saves a new value, returned by the device, to the backend
     /// storage.
-    pub async fn report_update(&mut self, value: T) {
-        (self.report_chan)(value.into()).await
+    pub fn report_update(
+        &mut self,
+        value: T,
+    ) -> impl Future<Output = ()> + use<'_, T> {
+        (self.report_chan)(value.into())
     }
 }

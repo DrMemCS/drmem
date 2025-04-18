@@ -1,5 +1,5 @@
 use crate::{device, driver::ReportReading, Error, Result};
-use std::pin::Pin;
+use std::{future::Future, pin::Pin};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 
@@ -83,9 +83,12 @@ where
 
     /// Saves a new value, returned by the device, to the backend
     /// storage.
-    pub async fn report_update(&mut self, value: T) {
+    pub fn report_update(
+        &mut self,
+        value: T,
+    ) -> impl Future<Output = ()> + use<'_, T> {
         self.prev_val = Some(value.clone());
-        (self.report_chan)(value.into()).await
+        (self.report_chan)(value.into())
     }
 
     /// Gets the last value of the device. If DrMem is built with
@@ -95,8 +98,10 @@ where
         self.prev_val.as_ref()
     }
 
-    pub async fn next_setting(&mut self) -> Option<SettingTransaction<T>> {
-        self.set_stream.next().await
+    pub fn next_setting(
+        &mut self,
+    ) -> impl Future<Output = Option<SettingTransaction<T>>> + use<'_, T> {
+        self.set_stream.next()
     }
 }
 
