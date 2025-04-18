@@ -211,7 +211,7 @@ impl driver::API for Instance {
             loop {
                 let (idx, val) = devices.deref_mut().await;
 
-                (*devices).set[idx].0.report_update(val).await
+                devices.set[idx].0.report_update(val).await
             }
         })
     }
