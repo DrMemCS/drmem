@@ -44,7 +44,6 @@ use tokio::sync::{mpsc, oneshot};
 /// information in any way it sees fit. However, it is returned for
 /// GraphQL queries, so it should be reasonably efficient to assemble
 /// this reply.
-
 #[derive(Debug, PartialEq)]
 pub struct DevInfoReply {
     /// The full name of the device.
@@ -108,7 +107,6 @@ impl RequestChan {
     ///
     /// If sucessful, a stream is returned which yields device
     /// readings as the device is updated.
-
     pub async fn monitor_device(
         &self,
         name: device::Name,
@@ -146,7 +144,6 @@ impl RequestChan {
     /// value is unusable, the driver may return an error or clip the
     /// value to something valid. The driver's documentation should
     /// indicate how it handles invalid settings.
-
     pub async fn set_device<
         T: Into<device::Value> + TryFrom<device::Value, Error = Error>,
     >(
@@ -201,7 +198,6 @@ impl RequestChan {
 
     /// Requests device information for devices whose name matches the
     /// provided pattern.
-
     pub async fn get_device_info(
         &self,
         pattern: Option<String>,

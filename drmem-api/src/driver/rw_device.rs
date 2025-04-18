@@ -17,7 +17,6 @@ pub type RxDeviceSetting = mpsc::Receiver<SettingRequest>;
 /// A closure type that defines how a driver replies to a setting
 /// request. It can return `Ok()` to show what value was actually used
 /// or `Err()` to indicate the setting failed.
-
 pub type SettingReply<T> = Box<dyn FnOnce(Result<T>) + Send>;
 
 pub type SettingTransaction<T> = (T, SettingReply<T>);

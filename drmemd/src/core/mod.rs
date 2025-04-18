@@ -162,7 +162,6 @@ impl State {
 
 /// Starts the core task. Returns an `mpsc::Sender<>` handle so other
 /// tasks can send requests to it.
-
 pub async fn start(
     cfg: &super::config::Config,
 ) -> Result<(

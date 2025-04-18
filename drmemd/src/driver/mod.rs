@@ -271,7 +271,6 @@ impl DriverDb {
 
     /// Searches the map for a driver with the specified name. If
     /// present, the driver's information is returned.
-
     pub fn get_driver(&self, key: &str) -> Option<&DriverInfo> {
         self.0.get(key)
     }
@@ -279,7 +278,6 @@ impl DriverDb {
     /// Searches the map for a driver with the specified name. If
     /// found, it extracts the information needed for the GraphQL
     /// query and returns it.
-
     #[cfg(feature = "graphql")]
     pub fn find(
         &self,
@@ -291,7 +289,6 @@ impl DriverDb {
 
     /// Similar to `.find()`, but returns all the drivers'
     /// information.
-
     #[cfg(feature = "graphql")]
     pub fn get_all(
         &self,

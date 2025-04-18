@@ -74,7 +74,6 @@ impl Instance {
     pub const DESCRIPTION: &'static str = include_str!("drv_memory.md");
 
     /// Creates a new `Instance` instance.
-
     pub fn new() -> Instance {
         Instance {}
     }

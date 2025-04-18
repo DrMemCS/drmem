@@ -500,7 +500,6 @@ impl RedisStore {
     /// The parameters in `cfg` will be used to locate the `redis`
     /// instance. If `name` and `pword` are not `None`, they will be
     /// used for credentials when connecting to `redis`.
-
     pub async fn new(
         cfg: &config::Config,
         name: Option<String>,

@@ -40,7 +40,6 @@ impl Instance {
     pub const DESCRIPTION: &'static str = include_str!("drv_cycle.md");
 
     /// Creates a new, idle `Instance`.
-
     pub fn new(
         enabled_at_boot: bool,
         millis: time::Duration,

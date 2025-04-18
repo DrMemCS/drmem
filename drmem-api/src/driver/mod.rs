@@ -10,7 +10,6 @@ use toml::value;
 use super::Result;
 
 /// Represents the type used to specify the name of a driver.
-
 pub type Name = Arc<str>;
 
 /// Represents how configuration information is given to a driver.
@@ -200,7 +199,6 @@ impl RequestChan {
 }
 
 /// Defines a boxed type that supports the `driver::API` trait.
-
 pub type DriverType<T> = Box<dyn API<DeviceSet = <T as API>::DeviceSet>>;
 
 /// All drivers implement the `driver::API` trait.
@@ -208,7 +206,6 @@ pub type DriverType<T> = Box<dyn API<DeviceSet = <T as API>::DeviceSet>>;
 /// The `API` trait defines methods that are expected to be available
 /// from a driver instance. By supporting this API, the framework can
 /// create driver instances and monitor them as they run.
-
 pub trait API: Send {
     type DeviceSet: Send + Sync;
 
@@ -244,7 +241,6 @@ pub trait API: Send {
     /// redis won't prune the history to less than the limit. However
     /// there may be more than the limit -- it just won't grow without
     /// bound.
-
     fn create_instance(
         cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>>
@@ -259,7 +255,6 @@ pub trait API: Send {
     /// and if a driver panics or returns an error from this method,
     /// it gets reported in the log and then, after a short delay, the
     /// driver is restarted.
-
     fn run<'a>(
         &'a mut self,
         devices: Arc<Mutex<Self::DeviceSet>>,
