@@ -966,7 +966,7 @@ fn calc_fingerprint(cert: &[u8]) -> String {
 
     let mut context = Context::new(&SHA256);
 
-    context.update(&cert);
+    context.update(cert);
 
     let digest: Digest = context.finish();
 
