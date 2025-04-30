@@ -126,8 +126,8 @@ impl Instance {
                 if let v @ Ok(_) = name.parse::<device::Base>() {
                     v
                 } else {
-                    Err(Error::ConfigError(String::from(
-                        "'name' isn't a proper, base name for a device",
+                    Err(Error::ConfigError(format!(
+                        "'{name}' isn't a proper, base name for a device"
                     )))
                 }
             }
