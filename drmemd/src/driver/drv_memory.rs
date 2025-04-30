@@ -254,4 +254,133 @@ impl driver::API for Instance {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    #[test]
+    fn test_validators() {
+        use super::device::Value;
+        use super::get_validator;
+
+        {
+            let f = get_validator(&Value::Bool(true));
+
+            assert!(f(&Value::Bool(false)));
+            assert!(!f(&Value::Int(10)));
+            assert!(!f(&Value::Flt(20.0)));
+            assert!(!f(&Value::Str("Hello".into())));
+            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+        }
+        {
+            let f = get_validator(&Value::Int(5));
+
+            assert!(!f(&Value::Bool(false)));
+            assert!(f(&Value::Int(10)));
+            assert!(!f(&Value::Flt(20.0)));
+            assert!(!f(&Value::Str("Hello".into())));
+            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+        }
+        {
+            let f = get_validator(&Value::Flt(2.0));
+
+            assert!(!f(&Value::Bool(false)));
+            assert!(!f(&Value::Int(10)));
+            assert!(f(&Value::Flt(20.0)));
+            assert!(!f(&Value::Str("Hello".into())));
+            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+        }
+        {
+            let f = get_validator(&Value::Str("World".into()));
+
+            assert!(!f(&Value::Bool(false)));
+            assert!(!f(&Value::Int(10)));
+            assert!(!f(&Value::Flt(20.0)));
+            assert!(f(&Value::Str("Hello".into())));
+            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+        }
+        {
+            let f = get_validator(&Value::Color(palette::LinSrgba::new(
+                100, 100, 100, 100,
+            )));
+
+            assert!(!f(&Value::Bool(false)));
+            assert!(!f(&Value::Int(10)));
+            assert!(!f(&Value::Flt(20.0)));
+            assert!(!f(&Value::Str("Hello".into())));
+            assert!(f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+        }
+    }
+
+    #[test]
+    fn test_configuration() {
+        use super::device;
+        use super::Instance;
+        use toml::{map::Map, Table, Value};
+
+        // Test for an empty Map or a Map that doesn't have the "vars"
+        // key or a map with "vars" whose value isn't a map or is a
+        // map but is empty or has a value, but it's not an array. All
+        // of these are errors.
+
+        {
+            let mut map = Map::new();
+
+            assert!(Instance::get_cfg_vars(&map).is_err());
+
+            let _ = map.insert("junk".into(), Value::Boolean(true));
+
+            assert!(Instance::get_cfg_vars(&map).is_err());
+
+            let _ = map.insert("vars".into(), Value::Boolean(true));
+
+            assert!(Instance::get_cfg_vars(&map).is_err());
+
+            let _ = map.insert("vars".into(), Value::Table(Table::new()));
+
+            assert!(Instance::get_cfg_vars(&map).is_err());
+
+            let _ = map.insert("vars".into(), Value::Array(vec![]));
+
+            assert!(Instance::get_cfg_vars(&map).is_err());
+        }
+
+        // Now make sure the config code creates a single memory
+        // device correctly. We'll deal with sets later.
+
+        {
+            let mut map = Map::new();
+
+            let test_set: &[(&'static str, Value, device::Value)] = &[
+                ("flag", Value::Boolean(true), device::Value::Bool(true)),
+                ("int-val", Value::Integer(100), device::Value::Int(100)),
+                ("flt-val", Value::Float(50.0), device::Value::Flt(50.0)),
+                (
+                    "str-val",
+                    Value::String("Hello".into()),
+                    device::Value::Str("Hello".into()),
+                ),
+                (
+                    "clr-val",
+                    Value::String("#ffffff".into()),
+                    device::Value::Color(palette::LinSrgba::new(
+                        255, 255, 255, 255,
+                    )),
+                ),
+            ];
+
+            for entry in &test_set[..] {
+                let mut tbl = Table::new();
+                let _ = tbl.insert("name".into(), entry.0.into());
+                let _ = tbl.insert("initial".into(), entry.1.clone());
+                let _ = map.insert(
+                    "vars".into(),
+                    Value::Array(vec![Value::Table(tbl)]),
+                );
+
+                let result = Instance::get_cfg_vars(&map).unwrap();
+
+                assert!(result.len() == 1);
+                assert_eq!(result[0].0.to_string(), entry.0);
+                assert_eq!(result[0].1, entry.2);
+            }
+        }
+    }
+}
