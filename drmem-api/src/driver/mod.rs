@@ -133,7 +133,7 @@ impl RequestChan {
 
         if result.is_ok() {
             if let Ok(v) = rx.await {
-                return v.map(|rr| ReadOnlyDevice::new(rr));
+                return v.map(ReadOnlyDevice::new);
             }
         }
 
