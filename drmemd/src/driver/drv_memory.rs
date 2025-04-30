@@ -234,13 +234,7 @@ impl driver::API for Instance {
     fn create_instance(
         _cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
-        let fut = async move {
-            // Build and return the future.
-
-            Ok(Box::new(Instance::new()))
-        };
-
-        Box::pin(fut)
+        Box::pin(async move { Ok(Box::new(Instance::new())) })
     }
 
     fn run<'a>(
