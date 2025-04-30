@@ -59,9 +59,9 @@ impl DriverInfo {
     }
 
     #[graphql(description = "Detailed information about the driver: the \
-			     configuration parameters; the devices it \
-			     registers; and other pertinent information. \
-			     This information is formatted in Markdown.")]
+                             configuration parameters; the devices it \
+                             registers; and other pertinent information. \
+                             This information is formatted in Markdown.")]
     fn description(&self) -> &str {
         self.description
     }
