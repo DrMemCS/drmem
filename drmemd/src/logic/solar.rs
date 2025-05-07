@@ -21,9 +21,9 @@ pub type Info = Arc<SolarInfo>;
 
 // Compute the sun's position information based on the latitude
 // (degrees), longitude (degrees), and time-of-day. The formulas used
-// in this function were obtained from a paper link to from the
+// in this function were obtained from a paper linked from the
 // Wikipedia page. The paper included FORTRAN code to perform the
-// calculations. That code was used as a reference to built this
+// calculations.  That code was used as a reference to build this
 // function.
 
 fn get_solar_position(
