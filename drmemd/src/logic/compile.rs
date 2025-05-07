@@ -22,7 +22,8 @@
 //     {utc:month}
 //     {utc:year}
 //     {utc:DOW}	day of week (Monday = 0, Sunday = 6)
-//     {utc:DOY}	day of year from 0 to 365
+//     {utc:DOY}	day of year from 0 to 364 -- this ignores leap
+//                      years and treats Feb 29th as Feb 28th
 //     {utc:LY}		true if it's a leap year
 //
 //     {local:second}
@@ -32,7 +33,8 @@
 //     {local:month}
 //     {local:year}
 //     {local:DOW}	day of week (Monday = 0, Sunday = 6)
-//     {local:DOY}	day of year from 0 to 365
+//     {local:DOY}	day of year from 0 to 364 -- this ignores leap
+//                      years and treats Feb 29th as Feb 28th
 //     {local:LY}	true if it's a leap year
 //
 // There is a built-in type, "solar", that provides solar position in
@@ -2807,10 +2809,6 @@ mod tests {
             Some(device::Value::Int(6))
         );
         assert_eq!(
-            evaluate("{utc:DOY}", &time, None),
-            Some(device::Value::Int(1))
-        );
-        assert_eq!(
             evaluate("{local:second}", &time, None),
             Some(device::Value::Int(10))
         );
@@ -2837,10 +2835,6 @@ mod tests {
         assert_eq!(
             evaluate("{local:DOW}", &time, None),
             Some(device::Value::Int(3))
-        );
-        assert_eq!(
-            evaluate("{local:DOY}", &time, None),
-            Some(device::Value::Int(157))
         );
 
         // Verify the solar variable are working correctly.
@@ -2911,6 +2905,50 @@ mod tests {
                 Some(device::Value::Bool(*is_ly)),
                 "failed on local year {}",
                 year
+            );
+        }
+
+        const DOY_TESTS: &[(i32, u32, u32, i32)] = &[
+            (1970, 1, 1, 0),
+            (1970, 2, 28, 58),
+            (1970, 3, 1, 59),
+            (1970, 3, 2, 60),
+            (1970, 12, 31, 364),
+            (1980, 1, 1, 0),
+            (1980, 2, 28, 58),
+            (1980, 2, 29, 58),
+            (1980, 3, 1, 59),
+            (1980, 3, 2, 60),
+            (1980, 12, 31, 364),
+        ];
+
+        for (year, month, day, doy) in DOY_TESTS {
+            let time = Arc::new((
+                chrono::Utc
+                    .with_ymd_and_hms(*year, *month, *day, 12, 0, 0)
+                    .single()
+                    .unwrap(),
+                chrono::Local
+                    .with_ymd_and_hms(*year, *month, *day, 12, 0, 0)
+                    .single()
+                    .unwrap(),
+            ));
+
+            assert_eq!(
+                evaluate("{utc:DOY}", &time, None),
+                Some(device::Value::Int(*doy)),
+                "incorrect DOY for {:02}-{:02}-{:04} UTC",
+                *month,
+                *day,
+                *year
+            );
+            assert_eq!(
+                evaluate("{local:DOY}", &time, None),
+                Some(device::Value::Int(*doy)),
+                "incorrect DOY for {:02}-{:02}-{:04} LOCAL",
+                *month,
+                *day,
+                *year
             );
         }
     }

@@ -264,6 +264,10 @@ const FLD_AZ: &str = "az";
 const FLD_RA: &str = "ra";
 const FLD_DEC: &str = "dec";
 
+fn is_leap_year(year: u32) -> bool {
+    ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0)
+}
+
 fn get_utc_second(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.second() as i32)
 }
@@ -300,7 +304,10 @@ fn get_utc_leap_year(info: &tod::Info) -> device::Value {
 }
 
 fn get_utc_day_of_year(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.0.ordinal0() as i32)
+    let doy = info.0.ordinal0() as i32;
+    let offset = (doy > 58 && is_leap_year(info.0.year() as u32)) as i32;
+
+    device::Value::Int(doy - offset)
 }
 
 fn get_local_second(info: &tod::Info) -> device::Value {
@@ -339,7 +346,10 @@ fn get_local_leap_year(info: &tod::Info) -> device::Value {
 }
 
 fn get_local_day_of_year(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.1.ordinal0() as i32)
+    let doy = info.1.ordinal0() as i32;
+    let offset = (doy > 58 && is_leap_year(info.1.year() as u32)) as i32;
+
+    device::Value::Int(doy - offset)
 }
 
 fn get_solar_altitude(info: &solar::Info) -> device::Value {
