@@ -66,10 +66,11 @@ currently supported features:
   - A back-end which writes device information to a Redis server
 - A client API which uses GraphQL
 - Drivers which implement devices
-  - 4 built-in drivers
+  - 5 built-in drivers
     - Memory devices
 	- Cycling device
 	- Timer device
+    - Latch device
 	- Map device (maps ranges of integers to values)
   - 4 external drivers
     - Weather Underground data

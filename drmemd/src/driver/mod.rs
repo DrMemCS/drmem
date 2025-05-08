@@ -7,6 +7,7 @@ use tracing::{error, field, info, info_span, warn};
 use tracing_futures::Instrument;
 
 mod drv_cycle;
+mod drv_latch;
 mod drv_map;
 mod drv_memory;
 mod drv_timer;
@@ -152,6 +153,19 @@ impl DriverDb {
 
         {
             use drv_memory::Instance;
+
+            table.insert(
+                Instance::NAME.into(),
+                (
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    manage_instance::<Instance>,
+                ),
+            );
+        }
+
+        {
+            use drv_latch::Instance;
 
             table.insert(
                 Instance::NAME.into(),
