@@ -875,14 +875,13 @@ fn build_secure_site(
     // the list of clients in the configuration.
 
     let check_client = move |client: String| {
-        use futures::future::ready;
-
-        for fp in &clients[..] {
-            if cmp_fprints(fp, &client) {
-                return ready(Ok(()));
-            }
-        }
-        ready(Err(reject::custom(NoAuthorization)))
+        futures::future::ready(
+            if clients.iter().any(|v| cmp_fprints(v, &client)) {
+                Ok(())
+            } else {
+                Err(reject::custom(NoAuthorization))
+            },
+        )
     };
 
     // Build the TLS server.
