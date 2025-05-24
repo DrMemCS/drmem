@@ -59,9 +59,9 @@ impl DriverInfo {
     }
 
     #[graphql(description = "Detailed information about the driver: the \
-			     configuration parameters; the devices it \
-			     registers; and other pertinent information. \
-			     This information is formatted in Markdown.")]
+                             configuration parameters; the devices it \
+                             registers; and other pertinent information. \
+                             This information is formatted in Markdown.")]
     fn description(&self) -> &str {
         self.description
     }
@@ -875,14 +875,13 @@ fn build_secure_site(
     // the list of clients in the configuration.
 
     let check_client = move |client: String| {
-        use futures::future::ready;
-
-        for fp in &clients[..] {
-            if cmp_fprints(fp, &client) {
-                return ready(Ok(()));
-            }
-        }
-        ready(Err(reject::custom(NoAuthorization)))
+        futures::future::ready(
+            if clients.iter().any(|v| cmp_fprints(v, &client)) {
+                Ok(())
+            } else {
+                Err(reject::custom(NoAuthorization))
+            },
+        )
     };
 
     // Build the TLS server.
@@ -963,20 +962,20 @@ async fn handle_rejection(
 
 fn calc_fingerprint(cert: &[u8]) -> String {
     use ring::digest::{Context, Digest, SHA256};
+    use std::fmt::Write;
 
     let mut context = Context::new(&SHA256);
 
-    context.update(&cert);
+    context.update(cert);
 
     let digest: Digest = context.finish();
 
     // Format the fingerprint as a hexadecimal string.
 
-    digest
-        .as_ref()
-        .iter()
-        .map(|byte| format!("{:02X}", byte))
-        .collect::<String>()
+    digest.as_ref().iter().fold(String::new(), |mut output, b| {
+        let _ = write!(output, "{b:02X}");
+        output
+    })
 }
 
 fn build_mdns_payload(cfg: &config::Config) -> Result<Vec<String>, Error> {

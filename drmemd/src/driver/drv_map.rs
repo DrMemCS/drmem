@@ -35,7 +35,6 @@ impl Instance {
     pub const DESCRIPTION: &'static str = include_str!("drv_map.md");
 
     /// Creates a new `Instance` instance.
-
     fn new(
         init_index: Option<i32>,
         def_val: device::Value,
