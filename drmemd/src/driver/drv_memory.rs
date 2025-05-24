@@ -37,72 +37,64 @@ pub struct Devices {
     set: Vec<(driver::ReadWriteDevice<device::Value>, TypeChecker)>,
 }
 
-impl Future for Devices {
-    type Output = (usize, device::Value);
+impl Devices {
+    pub fn get_next(
+        &mut self,
+    ) -> impl Future<Output = (usize, device::Value)> + use<'_> {
+        use std::future::poll_fn;
 
-    // Making `Devices` a `Future` allows efficient monitoring of the
-    // set of memory device handles. Ideally this future would return
-    // the reference to the ReadWriteDevice channel but returning a
-    // reference to a value in a future that's wrapping in a mutex is
-    // beyond my abilities.
-    //
-    // Since this isn't a public `Future`, I can return the index to
-    // the channel and have the outer algorithm use it properly.
+        poll_fn(move |ctxt| {
+            use std::task::Poll;
 
-    fn poll(
-        mut self: Pin<&mut Self>,
-        ctxt: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<<Self as futures::Future>::Output> {
-        use std::task::Poll;
+            // Loop through all the devices. Get the index, the device
+            // channel, and the function to verify any incoming
+            // setting on that channel.
 
-        // Loop through all the devices. Get the index, the device
-        // channel, and the function to verify any incoming setting on
-        // that channel.
+            for (idx, (dev, is_good)) in self.set.iter_mut().enumerate() {
+                // Now that we have a device to look at, we enter a
+                // loop. The loop is necessary because we need to
+                // leave the stream in a state primed to wake us up
+                // which only happens when it returns Poll::Pending.
 
-        for (idx, (dev, is_good)) in self.set.iter_mut().enumerate() {
-            // Now that we have a device to look at, we enter a
-            // loop. The loop is necessary because we need to leave
-            // the stream in a state primed to wake us up which only
-            // happens when it returns Poll::Pending.
+                loop {
+                    // Get a future that gets the next value from the
+                    // stream. We "pin" it, since that's a requirement
+                    // of futures.
 
-            loop {
-                // Get a future that gets the next value from the
-                // stream. We "pin" it, since that's a requirement of
-                // futures.
+                    let mut fut = std::pin::pin!(dev.next_setting());
 
-                let mut fut = std::pin::pin!(dev.next_setting());
+                    // See if there's a value to read.
 
-                // See if there's a value to read.
+                    match fut.as_mut().poll(ctxt) {
+                        // Got a value. Process it.
+                        Poll::Ready(Some((val, reply))) => {
+                            // Is the setting value of the correct
+                            // type? If so, echo it back to the client
+                            // (wrapped in Ok().) Return the idx of
+                            // the device and the value so it can be
+                            // processed by the caller.
 
-                match fut.as_mut().poll(ctxt) {
-                    // Got a value. Process it.
-                    Poll::Ready(Some((val, reply))) => {
-                        // Is the setting value of the correct type?
-                        // If so, echo it back to the client (wrapped
-                        // in Ok().) Return the idx of the device and
-                        // the value so it can be processed by the
-                        // caller.
-
-                        if is_good(&val) {
-                            reply(Ok(val.clone()));
-                            return Poll::Ready((idx, val));
-                        } else {
-                            reply(Err(Error::TypeError))
+                            if is_good(&val) {
+                                reply(Ok(val.clone()));
+                                return Poll::Ready((idx, val));
+                            } else {
+                                reply(Err(Error::TypeError))
+                            }
                         }
-                    }
 
-                    // Stream is empty. Break out the loop to check
-                    // the next device.
-                    Poll::Ready(None) | Poll::Pending => break,
+                        // Stream is empty. Break out the loop to
+                        // check the next device.
+                        Poll::Ready(None) | Poll::Pending => break,
+                    }
                 }
             }
-        }
 
-        // If we exit the for-loop, then all streams were pending
-        // (which also means they've all registered their wakers so
-        // we'll poll again when a setting arrives.)
+            // If we exit the for-loop, then all streams were pending
+            // (which also means they've all registered their wakers
+            // so we'll poll again when a setting arrives.)
 
-        Poll::Pending
+            Poll::Pending
+        })
     }
 }
 
@@ -245,7 +237,7 @@ impl driver::API for Instance {
             let mut devices = devices.lock().await;
 
             loop {
-                let (idx, val) = devices.deref_mut().await;
+                let (idx, val) = devices.get_next().await;
 
                 devices.set[idx].0.report_update(val).await
             }
@@ -422,34 +414,39 @@ mod tests {
         use super::Devices;
         use futures::Future;
         use noop_waker::noop_waker;
-        use std::task::{Context, Poll};
+        use std::{
+            pin::Pin,
+            task::{Context, Poll},
+        };
         use tokio::sync::oneshot;
 
         // If there's no memory devices, then the future should pend
         // forever.
 
         {
-            let fut = Devices { set: vec![] };
-            let mut pinned_fut = Box::pin(fut);
+            let mut dev = Devices { set: vec![] };
+            let fut = std::pin::pin!(dev.get_next());
             let waker = noop_waker();
             let mut context = Context::from_waker(&waker);
-            let poll_result = pinned_fut.as_mut().poll(&mut context);
 
-            assert!(matches!(poll_result, Poll::Pending));
+            assert_eq!(fut.poll(&mut context), Poll::Pending);
         }
 
         // Now add a single memory device.
 
         {
             let (setting, _, device) = build_device();
-            let fut = Devices { set: vec![device] };
-            let mut pinned_fut = Box::pin(fut);
+            let mut dev = Devices { set: vec![device] };
             let waker = noop_waker();
             let mut context = Context::from_waker(&waker);
 
             // Before we push any values, the Future should pend.
 
-            assert_eq!(pinned_fut.as_mut().poll(&mut context), Poll::Pending);
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(fut.poll(&mut context), Poll::Pending);
+            }
 
             // Now we send a `true` value. It should echo it back and
             // a future request will pend.
@@ -457,11 +454,21 @@ mod tests {
             let (tx_reply, _) = oneshot::channel();
 
             setting.try_send((Value::Bool(true), tx_reply)).unwrap();
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((0, Value::Bool(true)))
-            );
-            assert_eq!(pinned_fut.as_mut().poll(&mut context), Poll::Pending);
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((0, Value::Bool(true)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(fut.poll(&mut context), Poll::Pending);
+            }
 
             // Now send two values and make sure they're both
             // returned.
@@ -478,15 +485,29 @@ mod tests {
                 setting.try_send((Value::Flt(1.0), tx_reply)).unwrap();
             }
 
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((0, Value::Bool(true)))
-            );
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((0, Value::Flt(1.0)))
-            );
-            assert_eq!(pinned_fut.as_mut().poll(&mut context), Poll::Pending);
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((0, Value::Bool(true)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((0, Value::Flt(1.0)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(fut.poll(&mut context), Poll::Pending);
+            }
 
             // Send two values, but send the second after we've read
             // the first.
@@ -497,10 +518,14 @@ mod tests {
                 setting.try_send((Value::Bool(true), tx_reply)).unwrap();
             }
 
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((0, Value::Bool(true)))
-            );
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((0, Value::Bool(true)))
+                );
+            }
 
             {
                 let (tx_reply, _) = oneshot::channel();
@@ -508,11 +533,20 @@ mod tests {
                 setting.try_send((Value::Flt(1.0), tx_reply)).unwrap();
             }
 
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((0, Value::Flt(1.0)))
-            );
-            assert_eq!(pinned_fut.as_mut().poll(&mut context), Poll::Pending);
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((0, Value::Flt(1.0)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(fut.poll(&mut context), Poll::Pending);
+            }
         }
 
         // This section tests when we have two memory devices. We are
@@ -521,16 +555,19 @@ mod tests {
         {
             let (setting_a, _, device_a) = build_device();
             let (setting_b, _, device_b) = build_device();
-            let fut = Devices {
+            let mut dev = Devices {
                 set: vec![device_a, device_b],
             };
-            let mut pinned_fut = Box::pin(fut);
             let waker = noop_waker();
             let mut context = Context::from_waker(&waker);
 
             // Nothing inserted, should Pend.
 
-            assert_eq!(pinned_fut.as_mut().poll(&mut context), Poll::Pending);
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(fut.poll(&mut context), Poll::Pending);
+            }
 
             // Set first device. Should return it, then pend.
 
@@ -540,11 +577,20 @@ mod tests {
                 setting_a.try_send((Value::Flt(1.0), tx_reply)).unwrap();
             }
 
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((0, Value::Flt(1.0)))
-            );
-            assert_eq!(pinned_fut.as_mut().poll(&mut context), Poll::Pending);
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((0, Value::Flt(1.0)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(fut.poll(&mut context), Poll::Pending);
+            }
 
             // Set second device. Should return it, then pend.
 
@@ -554,11 +600,20 @@ mod tests {
                 setting_b.try_send((Value::Flt(2.0), tx_reply)).unwrap();
             }
 
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((1, Value::Flt(2.0)))
-            );
-            assert_eq!(pinned_fut.as_mut().poll(&mut context), Poll::Pending);
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((1, Value::Flt(2.0)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(fut.poll(&mut context), Poll::Pending);
+            }
 
             // Set each device. Should read first, first, and second,
             // second.
@@ -575,15 +630,29 @@ mod tests {
                 setting_b.try_send((Value::Flt(1.0), tx_reply)).unwrap();
             }
 
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((0, Value::Bool(true)))
-            );
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((1, Value::Flt(1.0)))
-            );
-            assert_eq!(pinned_fut.as_mut().poll(&mut context), Poll::Pending);
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((0, Value::Bool(true)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((1, Value::Flt(1.0)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(fut.poll(&mut context), Poll::Pending);
+            }
 
             // Set each device twice. Interleave the settings and make
             // sure they come out in the correct order.
@@ -606,14 +675,23 @@ mod tests {
                 setting_b.try_send((Value::Flt(5.0), tx_reply)).unwrap();
             }
 
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((0, Value::Bool(true)))
-            );
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((1, Value::Flt(1.0)))
-            );
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((0, Value::Bool(true)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((1, Value::Flt(1.0)))
+                );
+            }
 
             {
                 let (tx_reply, _) = oneshot::channel();
@@ -621,15 +699,29 @@ mod tests {
                 setting_a.try_send((Value::Bool(false), tx_reply)).unwrap();
             }
 
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((0, Value::Bool(false)))
-            );
-            assert_eq!(
-                pinned_fut.as_mut().poll(&mut context),
-                Poll::Ready((1, Value::Flt(5.0)))
-            );
-            assert_eq!(pinned_fut.as_mut().poll(&mut context), Poll::Pending);
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((0, Value::Bool(false)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(
+                    fut.poll(&mut context),
+                    Poll::Ready((1, Value::Flt(5.0)))
+                );
+            }
+
+            {
+                let fut = std::pin::pin!(dev.get_next());
+
+                assert_eq!(fut.poll(&mut context), Poll::Pending);
+            }
         }
     }
 }
