@@ -24,7 +24,7 @@ pub type Launcher = fn(
     Option<usize>,
 ) -> MgrFuncRet;
 
-pub type DriverInfo = (&'static str, &'static str, Launcher);
+type DriverInfo = (&'static str, &'static str, Launcher);
 
 // This is the main loop of the driver manager. It only returns if the
 // driver panics.
