@@ -8,7 +8,7 @@ use drmem_api::{driver::RequestChan, Error, Result};
 use futures::{future, FutureExt};
 use std::convert::Infallible;
 use tokio::task::JoinHandle;
-use tracing::{error, trace, warn};
+use tracing::{error, info, warn};
 
 mod config;
 mod core;
@@ -86,37 +86,15 @@ async fn run() -> Result<()> {
 
         let (tx_drv_req, tx_clnt_req, core_task) = core::start(&cfg).await?;
 
-        trace!("starting core tasks");
-
         // Build initial vector of required tasks. Crate features will
         // enable more required tasks.
 
         let mut tasks = vec![wrap_task(core_task)];
 
-        // If the "graphql" feature is specified, start up the web
-        // server which accepts GraphQL queries.
-
-        #[cfg(feature = "graphql")]
-        {
-            // This server should never exit. If it does, report an
-            // `OperationError`,
-
-            let f = graphql::server(
-                &cfg.graphql,
-                drv_tbl.clone(),
-                tx_clnt_req.clone(),
-            )
-            .then(|_| async {
-                Err(Error::OperationError("graphql server exited".to_owned()))
-            });
-
-            tasks.push(wrap_task(tokio::spawn(f)));
-        }
-
         // Iterate through the list of drivers specified in the
         // configuration file.
 
-        trace!("starting driver instances");
+        info!("starting driver instances");
 
         for driver in cfg.driver {
             let driver_name: drmem_api::driver::Name =
@@ -139,18 +117,24 @@ async fn run() -> Result<()> {
                 // then the devices couldn't be registered or some
                 // other serious error occurred.
 
-                let instance = (driver_info.2)(
+                if let Ok(instance) = (driver_info.2)(
                     driver_name,
                     driver.prefix.clone(),
                     driver.cfg.unwrap_or_default().clone(),
                     chan,
                     driver.max_history,
                 )
-                .await?;
+                .await
+                {
+                    // Push the driver instance at the end of the vector.
 
-                // Push the driver instance at the end of the vector.
-
-                tasks.push(wrap_task(tokio::spawn(instance.map(Ok))))
+                    tasks.push(wrap_task(tokio::spawn(instance.map(Ok))))
+                } else {
+                    error!(
+                        "couldn't prep driver {} with {} prefix",
+                        &driver.name, driver.prefix
+                    );
+                }
             } else {
                 error!("no driver named {}", driver.name);
                 return Err(Error::NotFound);
@@ -174,6 +158,8 @@ async fn run() -> Result<()> {
             let (tx_solar, _) =
                 logic::solar::create_task(cfg.latitude, cfg.longitude);
 
+            info!("starting logic instances");
+
             // Iterate through the [[logic]] sections of the config.
 
             for logic in cfg.logic {
@@ -184,6 +170,30 @@ async fn run() -> Result<()> {
                     logic,
                 )));
             }
+        }
+
+        // If the "graphql" feature is specified, start up the web
+        // server which accepts GraphQL queries. We do this last so
+        // that all the queries will have access to all the
+        // drivers/blocks/devices that were created above.
+
+        #[cfg(feature = "graphql")]
+        {
+            info!("starting GraphQL interface");
+
+            // This server should never exit. If it does, report an
+            // `OperationError`,
+
+            let f = graphql::server(
+                &cfg.graphql,
+                drv_tbl.clone(),
+                tx_clnt_req.clone(),
+            )
+            .then(|_| async {
+                Err(Error::OperationError("graphql server exited".to_owned()))
+            });
+
+            tasks.push(wrap_task(tokio::spawn(f)));
         }
 
         // Now run all the tasks.
