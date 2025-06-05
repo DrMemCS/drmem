@@ -449,7 +449,7 @@ impl RedisStore {
                 db: cfg.get_dbn(),
                 username: name.cloned(),
                 password: pword.cloned(),
-                protocol: redis::ProtocolVersion::RESP3,
+                protocol: redis::ProtocolVersion::RESP2,
             },
         };
 
