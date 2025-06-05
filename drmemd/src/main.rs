@@ -141,6 +141,7 @@ async fn run() -> Result<()> {
 
                 let instance = (driver_info.2)(
                     driver_name,
+                    driver.prefix.clone(),
                     driver.cfg.unwrap_or_default().clone(),
                     chan,
                     driver.max_history,
