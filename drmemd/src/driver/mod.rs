@@ -1,4 +1,4 @@
-use drmem_api::{driver, Result};
+use drmem_api::{device, driver, Result};
 use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
@@ -18,12 +18,13 @@ pub type MgrFuncRet = Fut<Result<MgrTask>>;
 
 pub type Launcher = fn(
     driver::Name,
+    device::Path,
     driver::DriverConfig,
     driver::RequestChan,
     Option<usize>,
 ) -> MgrFuncRet;
 
-pub type DriverInfo = (&'static str, &'static str, Launcher);
+type DriverInfo = (&'static str, &'static str, Launcher);
 
 // This is the main loop of the driver manager. It only returns if the
 // driver panics.
@@ -114,6 +115,7 @@ where
 
 fn manage_instance<T>(
     name: driver::Name,
+    prefix: device::Path,
     cfg: driver::DriverConfig,
     req_chan: driver::RequestChan,
     max_history: Option<usize>,
@@ -138,7 +140,11 @@ where
             let drv_name = name.clone();
 
             mgr_body::<T>(name, devices, cfg)
-                .instrument(info_span!("mngr", drvr = drv_name.as_ref()))
+                .instrument(info_span!(
+                    "mngr",
+                    drvr = drv_name.as_ref(),
+                    path = ?prefix
+                ))
                 .await
         }) as MgrTask)
     }) as MgrFuncRet

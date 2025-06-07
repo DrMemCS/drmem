@@ -3,9 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{
-    convert::Infallible, future::Future, ops::DerefMut, pin::Pin, sync::Arc,
-};
+use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 
 // Defines the signature if a function that validates a
@@ -414,10 +412,7 @@ mod tests {
         use super::Devices;
         use futures::Future;
         use noop_waker::noop_waker;
-        use std::{
-            pin::Pin,
-            task::{Context, Poll},
-        };
+        use std::task::{Context, Poll};
         use tokio::sync::oneshot;
 
         // If there's no memory devices, then the future should pend
