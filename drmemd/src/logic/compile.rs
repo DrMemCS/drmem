@@ -24,6 +24,8 @@
 //     {utc:DOW}	day of week (Monday = 0, Sunday = 6)
 //     {utc:DOY}	day of year from 0 to 364 -- this ignores leap
 //                      years and treats Feb 29th as Feb 28th
+//     {utc:SOM}        the Nth day of week from the start of the month (1..)
+//     {utc:EOM}        the Nth day of week from the end of the month (1..)
 //     {utc:LY}		true if it's a leap year
 //
 //     {local:second}
@@ -35,6 +37,8 @@
 //     {local:DOW}	day of week (Monday = 0, Sunday = 6)
 //     {local:DOY}	day of year from 0 to 364 -- this ignores leap
 //                      years and treats Feb 29th as Feb 28th
+//     {local:SOM}      the Nth day of week from the start of the month (1..)
+//     {local:EOM}      the Nth day of week from the end of the month (1..)
 //     {local:LY}	true if it's a leap year
 //
 // There is a built-in type, "solar", that provides solar position in
@@ -82,6 +86,8 @@ pub enum TimeField {
     Day,
     DoW,
     DoY,
+    SoM,
+    EoM,
     Month,
     Year,
     LeapYear,
@@ -98,6 +104,8 @@ impl std::fmt::Display for TimeField {
             TimeField::Hour => write!(f, "hour"),
             TimeField::Day => write!(f, "day"),
             TimeField::DoW => write!(f, "DOW"),
+            TimeField::EoM => write!(f, "EOM"),
+            TimeField::SoM => write!(f, "SOM"),
             TimeField::Month => write!(f, "month"),
             TimeField::Year => write!(f, "year"),
             TimeField::DoY => write!(f, "DOY"),
@@ -170,8 +178,8 @@ impl Expr {
         }
     }
 
-    // Traverses an expression and returns `true` if it uses any
-    // `TimeVal()` variants.
+    // Traverses an expression and returns the highest changing
+    // `TimeVal()` variants that it uses.
 
     pub fn uses_time(&self) -> Option<tod::TimeField> {
         match self {
@@ -183,6 +191,8 @@ impl Expr {
             }
             Expr::TimeVal(_, TimeField::Hour, _) => Some(tod::TimeField::Hour),
             Expr::TimeVal(_, TimeField::Day, _)
+            | Expr::TimeVal(_, TimeField::SoM, _)
+            | Expr::TimeVal(_, TimeField::EoM, _)
             | Expr::TimeVal(_, TimeField::DoW, _)
             | Expr::TimeVal(_, TimeField::DoY, _) => Some(tod::TimeField::Day),
             Expr::TimeVal(_, TimeField::Month, _) => {
@@ -886,6 +896,8 @@ mod tests {
         assert!(Program::compile("{utc:hour} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{utc:day} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{utc:month} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:EOM} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{utc:SOM} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{utc:year} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{utc:DOW} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{utc:DOY} -> {bulb}", &env).is_ok());
@@ -895,6 +907,8 @@ mod tests {
         assert!(Program::compile("{local:hour} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:day} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:month} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:EOM} -> {bulb}", &env).is_ok());
+        assert!(Program::compile("{local:SOM} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:year} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:DOW} -> {bulb}", &env).is_ok());
         assert!(Program::compile("{local:DOY} -> {bulb}", &env).is_ok());
@@ -2686,6 +2700,8 @@ mod tests {
             ("{utc:hour} -> {c}", "{utc:hour} -> out[1]"),
             ("{utc:day} -> {c}", "{utc:day} -> out[1]"),
             ("{utc:month} -> {c}", "{utc:month} -> out[1]"),
+            ("{utc:EOM} -> {c}", "{utc:EOM} -> out[1]"),
+            ("{utc:SOM} -> {c}", "{utc:SOM} -> out[1]"),
             ("{utc:year} -> {c}", "{utc:year} -> out[1]"),
             ("{utc:DOW} -> {c}", "{utc:DOW} -> out[1]"),
             ("{utc:DOY} -> {c}", "{utc:DOY} -> out[1]"),
@@ -2694,6 +2710,8 @@ mod tests {
             ("{local:hour} -> {c}", "{local:hour} -> out[1]"),
             ("{local:day} -> {c}", "{local:day} -> out[1]"),
             ("{local:month} -> {c}", "{local:month} -> out[1]"),
+            ("{local:EOM} -> {c}", "{local:EOM} -> out[1]"),
+            ("{local:SOM} -> {c}", "{local:SOM} -> out[1]"),
             ("{local:year} -> {c}", "{local:year} -> out[1]"),
             ("{local:DOW} -> {c}", "{local:DOW} -> out[1]"),
             ("{local:DOY} -> {c}", "{local:DOY} -> out[1]"),
@@ -2951,6 +2969,62 @@ mod tests {
                 *year
             );
         }
+
+        const MON_TESTS: &[(i32, u32, u32, i32, i32)] = &[
+            (2025, 6, 1, 1, 5),
+            (2025, 3, 1, 1, 5),
+            (2025, 3, 2, 1, 5),
+            (2025, 3, 7, 1, 4),
+            (2025, 3, 8, 2, 4),
+            (2025, 3, 24, 4, 2),
+            (2025, 3, 25, 4, 1),
+        ];
+
+        for (year, month, day, som, eom) in MON_TESTS {
+            let time = Arc::new((
+                chrono::Utc
+                    .with_ymd_and_hms(*year, *month, *day, 12, 0, 0)
+                    .single()
+                    .unwrap(),
+                chrono::Local
+                    .with_ymd_and_hms(*year, *month, *day, 12, 0, 0)
+                    .single()
+                    .unwrap(),
+            ));
+
+            assert_eq!(
+                evaluate("{utc:SOM}", &time, None),
+                Some(device::Value::Int(*som)),
+                "incorrect SOM for {:02}-{:02}-{:04} UTC",
+                *month,
+                *day,
+                *year
+            );
+            assert_eq!(
+                evaluate("{local:SOM}", &time, None),
+                Some(device::Value::Int(*som)),
+                "incorrect SOM for {:02}-{:02}-{:04} LOCAL",
+                *month,
+                *day,
+                *year
+            );
+            assert_eq!(
+                evaluate("{utc:EOM}", &time, None),
+                Some(device::Value::Int(*eom)),
+                "incorrect EOM for {:02}-{:02}-{:04} UTC",
+                *month,
+                *day,
+                *year
+            );
+            assert_eq!(
+                evaluate("{local:EOM}", &time, None),
+                Some(device::Value::Int(*eom)),
+                "incorrect EOM for {:02}-{:02}-{:04} LOCAL",
+                *month,
+                *day,
+                *year
+            );
+        }
     }
 
     #[test]
@@ -2973,6 +3047,8 @@ mod tests {
             ("{utc:DOW}", Some(tod::TimeField::Day)),
             ("{utc:DOY}", Some(tod::TimeField::Day)),
             ("{utc:month}", Some(tod::TimeField::Month)),
+            ("{utc:EOM}", Some(tod::TimeField::Day)),
+            ("{utc:SOM}", Some(tod::TimeField::Day)),
             ("{utc:year}", Some(tod::TimeField::Year)),
             ("{utc:LY}", Some(tod::TimeField::Year)),
             ("{local:second}", Some(tod::TimeField::Second)),
@@ -2982,6 +3058,8 @@ mod tests {
             ("{local:DOW}", Some(tod::TimeField::Day)),
             ("{local:DOY}", Some(tod::TimeField::Day)),
             ("{local:month}", Some(tod::TimeField::Month)),
+            ("{local:EOM}", Some(tod::TimeField::Day)),
+            ("{local:SOM}", Some(tod::TimeField::Day)),
             ("{local:year}", Some(tod::TimeField::Year)),
             ("{local:LY}", Some(tod::TimeField::Year)),
             // Now test more complicated expressions to make sure each
