@@ -258,6 +258,8 @@ const FLD_MONTH: &str = "month";
 const FLD_YEAR: &str = "year";
 const FLD_DOW: &str = "DOW";
 const FLD_DOY: &str = "DOY";
+const FLD_EOM: &str = "EOM";
+const FLD_SOM: &str = "SOM";
 const FLD_LY: &str = "LY";
 const FLD_ALT: &str = "alt";
 const FLD_AZ: &str = "az";
@@ -266,6 +268,25 @@ const FLD_DEC: &str = "dec";
 
 fn is_leap_year(year: u32) -> bool {
     ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0)
+}
+
+fn get_last_day(month: u32, year: u32) -> u32 {
+    match month {
+        1 => 31,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        3 => 31,
+        4 => 30,
+        5 => 31,
+        6 => 30,
+        7 => 31,
+        8 => 31,
+        9 => 30,
+        10 => 31,
+        11 => 30,
+        12 => 31,
+        _ => unreachable!()
+    }
 }
 
 fn get_utc_second(info: &tod::Info) -> device::Value {
@@ -290,6 +311,17 @@ fn get_utc_day_of_week(info: &tod::Info) -> device::Value {
 
 fn get_utc_month(info: &tod::Info) -> device::Value {
     device::Value::Int(info.0.month() as i32)
+}
+
+fn get_utc_start_from_month(info: &tod::Info) -> device::Value {
+    device::Value::Int(((info.0.day() + 6) / 7) as i32)
+}
+
+fn get_utc_end_from_month(info: &tod::Info) -> device::Value {
+    let day = info.0.day();
+    let last_day = get_last_day(info.0.month(), info.0.year() as u32);
+
+    device::Value::Int(((last_day + 7 - day) / 7) as i32)
 }
 
 fn get_utc_year(info: &tod::Info) -> device::Value {
@@ -332,6 +364,17 @@ fn get_local_day_of_week(info: &tod::Info) -> device::Value {
 
 fn get_local_month(info: &tod::Info) -> device::Value {
     device::Value::Int(info.1.month() as i32)
+}
+
+fn get_local_start_from_month(info: &tod::Info) -> device::Value {
+    device::Value::Int(((info.1.day() + 6) / 7) as i32)
+}
+
+fn get_local_end_from_month(info: &tod::Info) -> device::Value {
+    let day = info.1.day();
+    let last_day = get_last_day(info.1.month(), info.1.year() as u32);
+
+    device::Value::Int(((last_day + 7 - day) / 7) as i32)
 }
 
 fn get_local_year(info: &tod::Info) -> device::Value {
@@ -388,6 +431,12 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
 	(CAT_UTC, FLD_MONTH) => Ok(Expr::TimeVal(
             CAT_UTC, TimeField::Month, get_utc_month
         )),
+	(CAT_UTC, FLD_SOM) => Ok(Expr::TimeVal(
+            CAT_UTC, TimeField::SoM, get_utc_start_from_month
+        )),
+	(CAT_UTC, FLD_EOM) => Ok(Expr::TimeVal(
+            CAT_UTC, TimeField::EoM, get_utc_end_from_month
+        )),
 	(CAT_UTC, FLD_YEAR) => Ok(Expr::TimeVal(
             CAT_UTC, TimeField::Year, get_utc_year
         )),
@@ -414,6 +463,12 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
         )),
 	(CAT_LOCAL, FLD_MONTH) => Ok(Expr::TimeVal(
             CAT_LOCAL, TimeField::Month, get_local_month
+        )),
+	(CAT_LOCAL, FLD_SOM) => Ok(Expr::TimeVal(
+            CAT_LOCAL, TimeField::SoM, get_local_start_from_month
+        )),
+	(CAT_LOCAL, FLD_EOM) => Ok(Expr::TimeVal(
+            CAT_LOCAL, TimeField::EoM, get_local_end_from_month
         )),
 	(CAT_LOCAL, FLD_YEAR) => Ok(Expr::TimeVal(
             CAT_LOCAL, TimeField::Year, get_local_year
