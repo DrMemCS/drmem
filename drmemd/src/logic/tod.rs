@@ -2,7 +2,10 @@ use chrono::{Datelike, Timelike};
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::sync::Arc;
-use tokio::{sync::broadcast, time};
+use tokio::{
+    sync::{broadcast, Barrier},
+    time,
+};
 use tokio_stream::{wrappers::BroadcastStream, Stream};
 use tracing::{info, info_span, warn};
 use tracing_futures::Instrument;
@@ -133,8 +136,6 @@ async fn run(tx: broadcast::Sender<Info>) {
         time::Duration::from_secs(1),
     );
 
-    info!("starting task");
-
     while tx
         .send(Arc::new((chrono::Utc::now(), chrono::Local::now())))
         .is_ok()
@@ -144,12 +145,21 @@ async fn run(tx: broadcast::Sender<Info>) {
     warn!("no remaining clients ... terminating");
 }
 
-pub fn create_task() -> (broadcast::Sender<Info>, broadcast::Receiver<Info>) {
+pub fn create_task(
+    barrier: Arc<Barrier>,
+) -> (broadcast::Sender<Info>, broadcast::Receiver<Info>) {
     let (tx, rx) = broadcast::channel(1);
     let tx_copy = tx.clone();
 
     tokio::spawn(
-        async move { run(tx_copy).await }.instrument(info_span!("tod")),
+        async move {
+            info!("waiting for clients to register");
+            barrier.wait().await;
+
+            info!("running task");
+            run(tx_copy).await
+        }
+        .instrument(info_span!("tod")),
     );
 
     (tx, rx)

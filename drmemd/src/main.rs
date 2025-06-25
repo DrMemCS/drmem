@@ -6,8 +6,8 @@ extern crate lazy_static;
 
 use drmem_api::{driver::RequestChan, Error, Result};
 use futures::{future, FutureExt};
-use std::convert::Infallible;
-use tokio::task::JoinHandle;
+use std::{convert::Infallible, sync::Arc};
+use tokio::{sync::Barrier, task::JoinHandle};
 use tracing::{error, info, warn};
 
 mod config;
@@ -145,20 +145,27 @@ async fn run() -> Result<()> {
         // freed up.
 
         {
+            let barrier = Arc::new(Barrier::new(3));
+
             // Start the time-of-day task. This needs to be done
             // *before* any logic blocks are started because logic
             // blocks *may* have an expression that uses the
             // time-of-day.
 
-            let (tx_tod, _) = logic::tod::create_task();
+            let (tx_tod, _) = logic::tod::create_task(barrier.clone());
 
             // Start the solar task. This, too, needs to be done
             // before any logic blocks are started.
 
-            let (tx_solar, _) =
-                logic::solar::create_task(cfg.latitude, cfg.longitude);
+            let (tx_solar, _) = logic::solar::create_task(
+                cfg.latitude,
+                cfg.longitude,
+                barrier.clone(),
+            );
 
             info!("starting logic instances");
+
+            let init_barrier = Arc::new(Barrier::new(2));
 
             // Iterate through the [[logic]] sections of the config.
 
@@ -168,8 +175,15 @@ async fn run() -> Result<()> {
                     tx_tod.subscribe(),
                     tx_solar.subscribe(),
                     logic,
+                    init_barrier.clone(),
                 )));
+                init_barrier.wait().await;
             }
+
+            // Now that all the logic blocks have initialized, we
+            // start the tasks blocked by the Barrier.
+
+            let _ = barrier.wait().await;
         }
 
         // If the "graphql" feature is specified, start up the web

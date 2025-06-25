@@ -6,7 +6,10 @@
 
 use chrono::{Datelike, Timelike};
 use std::sync::Arc;
-use tokio::{sync::broadcast, time};
+use tokio::{
+    sync::{broadcast, Barrier},
+    time,
+};
 use tracing::{debug, info, info_span, warn};
 use tracing_futures::Instrument;
 
@@ -120,8 +123,6 @@ fn round(v: f64, prec: f64) -> f64 {
 async fn run(tx: broadcast::Sender<Info>, lat: f64, long: f64) {
     let mut interval = time::interval(time::Duration::from_secs(15));
 
-    info!("starting task");
-
     while tx
         .send(get_solar_position(lat, long, &chrono::Utc::now()))
         .is_ok()
@@ -134,13 +135,20 @@ async fn run(tx: broadcast::Sender<Info>, lat: f64, long: f64) {
 pub fn create_task(
     lat: f64,
     long: f64,
+    barrier: Arc<Barrier>,
 ) -> (broadcast::Sender<Info>, broadcast::Receiver<Info>) {
     let (tx, rx) = broadcast::channel(10);
     let tx_copy = tx.clone();
 
     tokio::spawn(
-        async move { run(tx_copy, lat, long).await }
-            .instrument(info_span!("solar")),
+        async move {
+            info!("waiting for clients to register");
+            barrier.wait().await;
+
+            info!("running task");
+            run(tx_copy, lat, long).await
+        }
+        .instrument(info_span!("solar")),
     );
 
     (tx, rx)
