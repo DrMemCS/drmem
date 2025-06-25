@@ -37,75 +37,77 @@ fn mgr_body<T>(
 where
     T: driver::API + Send + 'static,
 {
-    Box::pin(async move {
-        const START_DELAY: u64 = 5;
-        const MAX_DELAY: u64 = 600;
+    Box::pin(
+        async move {
+            const START_DELAY: u64 = 5;
+            const MAX_DELAY: u64 = 600;
 
-        let mut restart_delay = START_DELAY;
-        let devices = Arc::new(Mutex::new(devices));
+            let mut restart_delay = START_DELAY;
+            let devices = Arc::new(Mutex::new(devices));
 
-        info!("starting instance of driver");
+            info!("starting instance of driver");
 
-        loop {
-            // Create a Future that creates an instance of the driver
-            // using the provided configuration parameters.
+            loop {
+                // Create a Future that creates an instance of the driver
+                // using the provided configuration parameters.
 
-            let result = T::create_instance(&cfg)
-                .instrument(info_span!("init", cfg = field::Empty));
+                let result = T::create_instance(&cfg)
+                    .instrument(info_span!("init", cfg = field::Empty));
 
-            match result.await {
-                Ok(mut instance) => {
-                    let name = name.clone();
-                    let devices = devices.clone();
+                match result.await {
+                    Ok(mut instance) => {
+                        let devices = devices.clone();
 
-                    restart_delay = START_DELAY;
+                        restart_delay = START_DELAY;
 
-                    // Start the driver instance as a background task
-                    // and monitor the return value.
+                        // Start the driver instance as a background task
+                        // and monitor the return value.
 
-                    let task = tokio::spawn(async move {
-                        instance
-                            .run(devices)
-                            .instrument(info_span!(
-                                "driver",
-                                name = name.as_ref(),
-                                cfg = field::Empty
-                            ))
-                            .await
-                    });
+                        let task =
+                            tokio::spawn(
+                                async move { instance.run(devices).await },
+                            );
 
-                    // Drivers are never supposed to exit so the
-                    // JoinHandle will never return an `Ok()`
-                    // value. We can't stop drivers from panicking,
-                    // however, so we have to look for an `Err()`
-                    // value.
-                    //
-                    // (When Rust officially supports the `!` type, we
-                    // will be able to convert this from an
-                    // `if-statement` to a simple assignment.)
+                        // Drivers are never supposed to exit so the
+                        // JoinHandle will never return an `Ok()`
+                        // value. We can't stop drivers from panicking,
+                        // however, so we have to look for an `Err()`
+                        // value.
+                        //
+                        // (When Rust officially supports the `!` type, we
+                        // will be able to convert this from an
+                        // `if-statement` to a simple assignment.)
 
-                    let Err(e) = task.await;
+                        let Err(e) = task.await;
 
-                    error!("driver exited unexpectedly -- {e}")
+                        error!("driver exited unexpectedly -- {e}")
+                    }
+                    Err(e) => error!("{e}"),
                 }
-                Err(e) => error!("{e}"),
-            }
 
-            // Delay before restarting the driver. This prevents the
-            // system from being compute-bound if the driver panics right
-            // away.
+                // Delay before restarting the driver. This prevents the
+                // system from being compute-bound if the driver panics right
+                // away.
 
-            warn!("delay before restarting driver ...");
-            tokio::time::sleep(tokio::time::Duration::from_secs(restart_delay))
+                warn!("delay before restarting driver ...");
+                tokio::time::sleep(tokio::time::Duration::from_secs(
+                    restart_delay,
+                ))
                 .await;
 
-            // Stretch the timeout each time we have to restart. Set the
-            // max timeout to 10 minutes.
+                // Stretch the timeout each time we have to restart. Set the
+                // max timeout to 10 minutes.
 
-            restart_delay = std::cmp::min(restart_delay * 2, MAX_DELAY);
-            info!("restarting instance of driver");
+                restart_delay = std::cmp::min(restart_delay * 2, MAX_DELAY);
+                info!("restarting instance of driver");
+            }
         }
-    })
+        .instrument(info_span!(
+            "driver",
+            name = name.as_ref(),
+            cfg = field::Empty
+        )),
+    )
 }
 
 // This generic function manages an instance of a specific driver. We

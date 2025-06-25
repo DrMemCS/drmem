@@ -30,19 +30,30 @@ incremental = false
 
 [profile.dev]
 opt-level = 'z'
-debug = 1
+debug = false
+lto = false
+codegen-units = 4
 incremental = false
 
 [profile.dev.package."*"]
 opt-level = 'z'
-debug = 1
+debug = false
+incremental = false
+
+[profile.release.build-override]
+opt-level = 3
 incremental = false
 
 [profile.release]
-opt-level = 'z'
+opt-level = 3
 debug = false
 lto = "thin"
 codegen-units = 1
 debug-assertions = false
 strip = "symbols"
+incremental = false
+
+[profile.release.package."*"]
+opt-level = 3
+debug = false
 incremental = false

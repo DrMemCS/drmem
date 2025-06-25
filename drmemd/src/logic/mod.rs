@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::{
-    sync::{broadcast, oneshot},
+    sync::{broadcast, oneshot, Barrier},
     task::JoinHandle,
 };
 use tokio_stream::{wrappers::BroadcastStream, StreamExt, StreamMap};
@@ -493,21 +493,43 @@ impl Node {
         rx_tod: broadcast::Receiver<tod::Info>,
         rx_solar: broadcast::Receiver<solar::Info>,
         cfg: config::Logic,
+        barrier: Arc<Barrier>,
     ) -> JoinHandle<Result<Infallible>> {
         let name = cfg.name.clone();
 
         // Put the node in the background.
 
-        tokio::spawn(async move {
-            // Create a new instance and let it initialize itself. If
-            // an error occurs, return it.
+        tokio::spawn(
+            async move {
+                let name = cfg.name.clone();
 
-            let node = Node::init(c_req, rx_tod, rx_solar, cfg)
-                .instrument(info_span!("logic-init", name = &name))
-                .await?;
+                // Create a new instance and let it initialize itself. If
+                // an error occurs, return it.
 
-            node.run().instrument(info_span!("logic", name)).await
-        })
+                let node = Node::init(c_req, rx_tod, rx_solar, cfg)
+                    .instrument(info_span!("init", name = &name))
+                    .await;
+
+                // This barrier syncs this tasks with the start-up task.
+                // When both wait on the barrier, they both wake up and
+                // continue. The start-up task then knows this logic block
+                // has registered all the devices and tod and solar
+                // handles it needs.
+
+                barrier.wait().await;
+
+                // Enter the main loop of the logic block.
+                //
+                // NOTE: We used the '?' operator here instead of the
+                // assignment above because we have to wait on the
+                // barrier. If we let the '?' operator return before
+                // waiting on the barrier, the initialization loop would
+                // wait forever.
+
+                node?.run().await
+            }
+            .instrument(info_span!("logic", name)),
+        )
     }
 }
 
@@ -521,7 +543,7 @@ mod test {
     use futures::Future;
     use std::{collections::HashMap, sync::Arc, time::Duration};
     use tokio::{
-        sync::{broadcast, mpsc, oneshot},
+        sync::{broadcast, mpsc, oneshot, Barrier},
         task, time,
     };
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -580,6 +602,8 @@ mod test {
             let (tx_tod, _) = broadcast::channel(100);
             let (tx_solar, _) = broadcast::channel(100);
 
+            let barrier = Arc::new(Barrier::new(1));
+
             // Start the logic block with the proper communciation
             // channels and configuration.
 
@@ -588,6 +612,7 @@ mod test {
                 tx_tod.subscribe(),
                 tx_solar.subscribe(),
                 cfg,
+                barrier,
             );
 
             // Create the 'stop' channel.

@@ -274,7 +274,10 @@ impl driver::API for Instance {
 			// set the output to the inactive value.
 
 			self.time_expired();
-			devices.d_output.report_update(self.inactive_value.clone()).await;
+			devices
+                            .d_output
+                            .report_update(self.inactive_value.clone())
+                            .await;
                     }
 
                     // Always look for settings. We're pattern
