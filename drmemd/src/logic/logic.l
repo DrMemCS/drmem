@@ -12,6 +12,11 @@ not                     "B_NOT"
 and                     "B_AND"
 or                      "B_OR"
 
+[Ii][Ff]                "KW_IF"
+[Tt][Hh][Ee][Nn]        "KW_THEN"
+[Ee][Ll][Ss][Ee]        "KW_ELSE"
+[Ee][Nn][Dd]            "KW_END"
+
 =                       "EQ"
 \<>                     "NE"
 \<=                     "LT_EQ"
