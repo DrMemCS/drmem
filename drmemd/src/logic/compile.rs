@@ -59,6 +59,7 @@
 //     not EXPR          Computes the complement of a boolean expression
 //     EXPR or EXPR      Computes the boolean OR of two boolean expressions
 //     EXPR and EXPR     Computes the boolean AND of two boolean expressions
+//     if EXPR then EXPR [else EXPR] end
 //
 //     =,<>,<,<=,>,>=    Perform the comparison and return a boolean
 //
@@ -147,6 +148,8 @@ pub enum Expr {
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
 
+    If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
+
     // NotEq, Gt, and GtEq are parsed and converted into one of the
     // following three representations (the NotEq is a combination Not
     // and Eq value.)
@@ -175,6 +178,7 @@ impl Expr {
             Expr::Lt(_, _) | Expr::LtEq(_, _) | Expr::Eq(_, _) => 3,
             Expr::And(_, _) => 2,
             Expr::Or(_, _) => 1,
+            Expr::If(_, _, _) => 0,
         }
     }
 
@@ -219,6 +223,25 @@ impl Expr {
                 (None, b) => b,
                 (Some(a), Some(b)) => Some(a.min(b)),
             },
+            Expr::If(a, b, c) => {
+                match (
+                    a.uses_time(),
+                    b.uses_time(),
+                    c.as_ref().map(|v| v.uses_time()),
+                ) {
+                    (None, None, None) | (None, None, Some(None)) => None,
+                    (None, None, Some(c @ Some(_))) => c,
+                    (None, b @ Some(_), None)
+                    | (None, b @ Some(_), Some(None)) => b,
+                    (None, Some(b), Some(Some(c))) => Some(b.min(c)),
+                    (a @ Some(_), None, None)
+                    | (a @ Some(_), None, Some(None)) => a,
+                    (Some(a), None, Some(Some(c))) => Some(a.min(c)),
+                    (Some(a), Some(b), None)
+                    | (Some(a), Some(b), Some(None)) => Some(a.min(b)),
+                    (Some(a), Some(b), Some(Some(c))) => Some(a.min(b.min(c))),
+                }
+            }
         }
     }
 
@@ -239,7 +262,11 @@ impl Expr {
             | Expr::LtEq(a, b)
             | Expr::Eq(a, b)
             | Expr::And(a, b)
-            | Expr::Or(a, b) => a.uses_solar() || b.uses_solar(),
+            | Expr::Or(a, b)
+            | Expr::If(a, b, None) => a.uses_solar() || b.uses_solar(),
+            Expr::If(a, b, Some(c)) => {
+                a.uses_solar() || b.uses_solar() || c.uses_solar()
+            }
         }
     }
 
@@ -328,6 +355,19 @@ impl fmt::Display for Expr {
                 write!(f, " % ")?;
                 self.fmt_subexpr(b, f)
             }
+
+            Expr::If(a, b, c) => {
+                write!(f, "if ")?;
+                self.fmt_subexpr(a, f)?;
+                write!(f, " then ")?;
+                self.fmt_subexpr(b, f)?;
+
+                if let Some(c) = c {
+                    write!(f, " else ")?;
+                    self.fmt_subexpr(c, f)?;
+                }
+                write!(f, " end")
+            }
         }
     }
 }
@@ -412,6 +452,10 @@ pub fn eval(
         Expr::Div(ref a, ref b) => eval_as_div_expr(a, b, inp, time, solar),
 
         Expr::Rem(ref a, ref b) => eval_as_rem_expr(a, b, inp, time, solar),
+
+        Expr::If(ref a, ref b, ref c) => {
+            eval_as_if_expr(a, b, c, inp, time, solar)
+        }
     }
 }
 
@@ -803,6 +847,30 @@ fn eval_as_rem_expr(
     }
 }
 
+fn eval_as_if_expr(
+    a: &Expr,
+    b: &Expr,
+    c: &Option<Box<Expr>>,
+    inp: &[Option<device::Value>],
+    time: &tod::Info,
+    solar: Option<&solar::Info>,
+) -> Option<device::Value> {
+    match eval(a, inp, time, solar) {
+        Some(device::Value::Bool(v)) => {
+            if v {
+                eval(b, inp, time, solar)
+            } else {
+                c.as_ref().and_then(|v| eval(v, inp, time, solar))
+            }
+        }
+        Some(v) => {
+            error!("IF condition didn't evaluate to boolean value: {}", &v);
+            None
+        }
+        None => None,
+    }
+}
+
 // This function takes an expression and tries to reduce it.
 
 pub fn optimize(e: Expr) -> Expr {
@@ -1034,6 +1102,36 @@ mod tests {
             Program::compile("#black -> {bulb}", &env),
             Ok(Program(
                 Expr::Lit(device::Value::Color(LinSrgba::new(0, 0, 0, 255))),
+                0
+            ))
+        );
+
+        assert_eq!(
+            Program::compile("if true then 1.0 else 0.0 end -> {bulb}", &env),
+            Ok(Program(
+                Expr::If(
+                    Box::new(Expr::Lit(device::Value::Bool(true))),
+                    Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                    Some(Box::new(Expr::Lit(device::Value::Flt(0.0))))
+                ),
+                0
+            ))
+        );
+
+        assert_eq!(
+            Program::compile(
+                "if 10.0 < 0.0 then 1.0 else 0.0 end -> {bulb}",
+                &env
+            ),
+            Ok(Program(
+                Expr::If(
+                    Box::new(Expr::Lt(
+                        Box::new(Expr::Lit(device::Value::Flt(10.0))),
+                        Box::new(Expr::Lit(device::Value::Flt(0.0)))
+                    )),
+                    Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                    Some(Box::new(Expr::Lit(device::Value::Flt(0.0))))
+                ),
                 0
             ))
         );
@@ -2715,6 +2813,14 @@ mod tests {
             ("{local:year} -> {c}", "{local:year} -> out[1]"),
             ("{local:DOW} -> {c}", "{local:DOW} -> out[1]"),
             ("{local:DOY} -> {c}", "{local:DOY} -> out[1]"),
+            (
+                "if {a} then true else false end -> {c}",
+                "if inp[0] then true else false end -> out[1]",
+            ),
+            (
+                "if ({a} > 0.0) then (5 + 3) else false end -> {c}",
+                "if 0 < inp[0] then 5 + 3 else false end -> out[1]",
+            ),
         ];
 
         for (in_val, out_val) in TESTS {
@@ -2764,98 +2870,82 @@ mod tests {
             declination: 4.0,
         });
 
-        assert_eq!(evaluate("1 / 0", &time, None), None);
-        assert_eq!(evaluate("5 > true", &time, None), None);
+        const EXPR_TESTS: &[(&'static str, Option<device::Value>)] = &[
+            ("1 / 0", None),
+            ("5 > true", None),
+            ("1 + 2 * 3", Some(device::Value::Int(7))),
+            ("1 + (2 * 3)", Some(device::Value::Int(7))),
+            ("1 + 2 < 1 + 3", Some(device::Value::Bool(true))),
+            ("1 + 2 < 1 + 1", Some(device::Value::Bool(false))),
+            ("1 > 2 or 5 < 3", Some(device::Value::Bool(false))),
+            ("1 > 2 or 5 >= 3", Some(device::Value::Bool(true))),
+            (
+                "if true then 7.0 else 3.0 end",
+                Some(device::Value::Flt(7.0)),
+            ),
+            (
+                "IF false THEN 7.0 ELSE 3.0 END",
+                Some(device::Value::Flt(3.0)),
+            ),
+            ("if true then 7.0 end", Some(device::Value::Flt(7.0))),
+            ("if false then 7.0 end", None),
+            (
+                "7.0 - If true Then 7.0 Else 3.0 End",
+                Some(device::Value::Flt(0.0)),
+            ),
+            (
+                "7.0 - if false then 7.0 else 3.0 end",
+                Some(device::Value::Flt(4.0)),
+            ),
+            (
+                "if true and false then 7.0 else 3.0 end",
+                Some(device::Value::Flt(3.0)),
+            ),
+            (
+                "if true or false then 7.0 else 3.0 end",
+                Some(device::Value::Flt(7.0)),
+            ),
+            (
+                "if true then if true then 4.0 end else 3.0 end",
+                Some(device::Value::Flt(4.0)),
+            ),
+            ("if true then if false then 4.0 end else 3.0 end", None),
+            (
+                "if false then \
+                    if true then \
+                       4.0 \
+                    end \
+                 else \
+                    3.0 \
+                 end",
+                Some(device::Value::Flt(3.0)),
+            ),
+            ("{utc:second}", Some(device::Value::Int(5))),
+            ("{utc:minute}", Some(device::Value::Int(4))),
+            ("{utc:hour}", Some(device::Value::Int(3))),
+            ("{utc:day}", Some(device::Value::Int(2))),
+            ("{utc:month}", Some(device::Value::Int(1))),
+            ("{utc:year}", Some(device::Value::Int(2000))),
+            ("{utc:DOW}", Some(device::Value::Int(6))),
+            ("{local:second}", Some(device::Value::Int(10))),
+            ("{local:minute}", Some(device::Value::Int(9))),
+            ("{local:hour}", Some(device::Value::Int(8))),
+            ("{local:day}", Some(device::Value::Int(7))),
+            ("{local:month}", Some(device::Value::Int(6))),
+            ("{local:year}", Some(device::Value::Int(2001))),
+            ("{local:DOW}", Some(device::Value::Int(3))),
+        ];
 
-        assert_eq!(
-            evaluate("1 + 2 * 3", &time, None),
-            Some(device::Value::Int(7))
-        );
-        assert_eq!(
-            evaluate("(1 + 2) * 3", &time, None),
-            Some(device::Value::Int(9))
-        );
-        assert_eq!(
-            evaluate("1 + (2 * 3)", &time, None),
-            Some(device::Value::Int(7))
-        );
+        for (expr, result) in EXPR_TESTS {
+            assert_eq!(
+                evaluate(expr, &time, None),
+                result.clone(),
+                "error with expression {}",
+                expr
+            );
+        }
 
-        assert_eq!(
-            evaluate("1 + 2 < 1 + 3", &time, None),
-            Some(device::Value::Bool(true))
-        );
-        assert_eq!(
-            evaluate("1 + 2 < 1 + 1", &time, None),
-            Some(device::Value::Bool(false))
-        );
-
-        assert_eq!(
-            evaluate("1 > 2 or 5 < 3", &time, None),
-            Some(device::Value::Bool(false))
-        );
-        assert_eq!(
-            evaluate("1 > 2 or 5 >= 3", &time, None),
-            Some(device::Value::Bool(true))
-        );
-
-        assert_eq!(
-            evaluate("{utc:second}", &time, None),
-            Some(device::Value::Int(5))
-        );
-        assert_eq!(
-            evaluate("{utc:minute}", &time, None),
-            Some(device::Value::Int(4))
-        );
-        assert_eq!(
-            evaluate("{utc:hour}", &time, None),
-            Some(device::Value::Int(3))
-        );
-        assert_eq!(
-            evaluate("{utc:day}", &time, None),
-            Some(device::Value::Int(2))
-        );
-        assert_eq!(
-            evaluate("{utc:month}", &time, None),
-            Some(device::Value::Int(1))
-        );
-        assert_eq!(
-            evaluate("{utc:year}", &time, None),
-            Some(device::Value::Int(2000))
-        );
-        assert_eq!(
-            evaluate("{utc:DOW}", &time, None),
-            Some(device::Value::Int(6))
-        );
-        assert_eq!(
-            evaluate("{local:second}", &time, None),
-            Some(device::Value::Int(10))
-        );
-        assert_eq!(
-            evaluate("{local:minute}", &time, None),
-            Some(device::Value::Int(9))
-        );
-        assert_eq!(
-            evaluate("{local:hour}", &time, None),
-            Some(device::Value::Int(8))
-        );
-        assert_eq!(
-            evaluate("{local:day}", &time, None),
-            Some(device::Value::Int(7))
-        );
-        assert_eq!(
-            evaluate("{local:month}", &time, None),
-            Some(device::Value::Int(6))
-        );
-        assert_eq!(
-            evaluate("{local:year}", &time, None),
-            Some(device::Value::Int(2001))
-        );
-        assert_eq!(
-            evaluate("{local:DOW}", &time, None),
-            Some(device::Value::Int(3))
-        );
-
-        // Verify the solar variable are working correctly.
+        // Verify the solar variables are working correctly.
 
         assert_eq!(evaluate("{solar:alt}", &time, None), None);
         assert_eq!(evaluate("{solar:az}", &time, None), None);

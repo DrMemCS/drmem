@@ -18,6 +18,9 @@
 %epp B_NOT "not"
 %epp B_AND "and"
 %epp B_OR "or"
+%epp KW_IF "if"
+%epp KW_THEN "then"
+%epp KW_ELSE "else"
 %epp ADD "+"
 %epp SUB "-"
 %epp MUL "*"
@@ -27,10 +30,14 @@
 %epp LBRACE "{"
 %epp RBRACE "}"
 
+%left KW_IF
+%left KW_THEN
+%left KW_ELSE
+
 %%
 
 Logic -> Result<Program>:
-    BoolExpr "CONTROL" "LBRACE" "IDENTIFIER" "RBRACE"
+    TopExpr "CONTROL" "LBRACE" "IDENTIFIER" "RBRACE"
     {
 	let v = $4.map_err(|_| Error::ParseError(
 	        String::from("error reading target device")
@@ -39,6 +46,10 @@ Logic -> Result<Program>:
 
 	Ok(Program($1?, parse_device(s, p.1)?))
     }
+    ;
+
+TopExpr -> Result<Expr>:
+      BoolExpr { $1 }
     ;
 
 BoolExpr -> Result<Expr>:
@@ -117,12 +128,13 @@ MulDivExpr -> Result<Expr>:
     ;
 
 Expr -> Result<Expr>:
-    Factor { $1 }
+      Factor { $1 }
     ;
 
 Factor -> Result<Expr>:
       "B_NOT" Factor { Ok(Expr::Not(Box::new($2?))) }
-    | "(" BoolExpr ")" { $2 }
+    | "(" TopExpr ")" { $2 }
+    | Conditional { $1 }
     | "TRUE" { Ok(Expr::Lit(device::Value::Bool(true))) }
     | "FALSE" { Ok(Expr::Lit(device::Value::Bool(false))) }
     | "INT"
@@ -169,6 +181,17 @@ Factor -> Result<Expr>:
 	}
     }
     | Device { $1 }
+    ;
+
+Conditional -> Result<Expr>:
+    "KW_IF" TopExpr "KW_THEN" TopExpr "KW_ELSE" TopExpr "KW_END"
+      {
+          Ok(Expr::If(Box::new($2?), Box::new($4?), Some(Box::new($6?))))
+      }
+    | "KW_IF" TopExpr "KW_THEN" TopExpr "KW_END"
+      {
+          Ok(Expr::If(Box::new($2?), Box::new($4?), None))
+      }
     ;
 
 Device -> Result<Expr>:
