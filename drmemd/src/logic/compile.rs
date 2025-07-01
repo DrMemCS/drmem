@@ -139,6 +139,8 @@ impl std::fmt::Display for SolarField {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    Nothing,
+
     Lit(device::Value),
     Var(usize),
     TimeVal(&'static str, TimeField, fn(&tod::Info) -> device::Value),
@@ -171,7 +173,8 @@ impl Expr {
             Expr::Lit(_)
             | Expr::Var(_)
             | Expr::TimeVal(..)
-            | Expr::SolarVal(..) => 10,
+            | Expr::SolarVal(..)
+            | Expr::Nothing => 10,
             Expr::Not(_) => 9,
             Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 5,
             Expr::Add(_, _) | Expr::Sub(_, _) => 4,
@@ -206,7 +209,10 @@ impl Expr {
             | Expr::TimeVal(_, TimeField::LeapYear, _) => {
                 Some(tod::TimeField::Year)
             }
-            Expr::SolarVal(..) | Expr::Lit(_) | Expr::Var(_) => None,
+            Expr::SolarVal(..)
+            | Expr::Lit(_)
+            | Expr::Var(_)
+            | Expr::Nothing => None,
             Expr::Not(e) => e.uses_time(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
@@ -251,7 +257,9 @@ impl Expr {
     pub fn uses_solar(&self) -> bool {
         match self {
             Expr::SolarVal(..) => true,
-            Expr::TimeVal(..) | Expr::Lit(_) | Expr::Var(_) => false,
+            Expr::TimeVal(..) | Expr::Lit(_) | Expr::Var(_) | Expr::Nothing => {
+                false
+            }
             Expr::Not(e) => e.uses_solar(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
@@ -284,6 +292,7 @@ impl Expr {
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Expr::Nothing => write!(f, "!"),
             Expr::Lit(v) => write!(f, "{}", &v),
             Expr::Var(v) => write!(f, "inp[{}]", &v),
 
@@ -422,6 +431,8 @@ pub fn eval(
     solar: Option<&solar::Info>,
 ) -> Option<device::Value> {
     match e {
+        Expr::Nothing => None,
+
         // Literals hold actual `device::Values`, so simply return it.
         Expr::Lit(v) => Some(v.clone()),
 

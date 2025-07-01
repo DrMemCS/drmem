@@ -166,9 +166,14 @@ impl Node {
             let result = compile::Program::compile(
                 &format!("{} -> {{{}}}", &expr, &name),
                 &env,
-            )?;
+            )
+            .map(compile::Program::optimize)?;
 
-            debug!("inp[{}] = {}", result.1, &result.0);
+            if result.0 == compile::Expr::Nothing {
+                warn!("expression '{}' never generates a value", &expr);
+            } else {
+                debug!("inp[{}] = {}", result.1, &result.0);
+            }
 
             // Add the program to the list of programs.
 
@@ -324,7 +329,16 @@ impl Node {
                     .map(compile::Program::optimize)
             })
             .inspect(|e| match e {
-                Ok(ex) => debug!("out[{}] = {}", ex.1, &ex.0),
+                Ok(ex) => {
+                    if ex.0 == compile::Expr::Nothing {
+                        warn!(
+                            "expression for out[{}] never generates a value",
+                            ex.1
+                        )
+                    } else {
+                        debug!("out[{}] = {}", ex.1, &ex.0)
+                    }
+                }
                 Err(e) => error!("{}", &e),
             })
             .collect();
