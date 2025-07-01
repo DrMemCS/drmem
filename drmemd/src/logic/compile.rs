@@ -934,6 +934,23 @@ pub fn optimize(e: Expr) -> Expr {
             }
         }
 
+        Expr::If(ref a, ref b, ref c) => {
+            let condition = optimize(*a.clone());
+
+            match condition {
+                Expr::Nothing => Expr::Nothing,
+                Expr::Lit(device::Value::Bool(true)) => optimize(*b.clone()),
+                Expr::Lit(device::Value::Bool(false)) => {
+                    c.clone().map(|v| optimize(*v)).unwrap_or(Expr::Nothing)
+                }
+                _ => Expr::If(
+                    Box::new(condition),
+                    Box::new(optimize(*b.clone())),
+                    c.clone().map(|v| Box::new(optimize(*v))),
+                ),
+            }
+        }
+
         _ => e,
     }
 }
@@ -2760,6 +2777,63 @@ mod tests {
                 Box::new(Expr::Lit(device::Value::Bool(false)))
             )),
             Expr::Lit(device::Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn test_if_optimizer() {
+        assert_eq!(
+            optimize(Expr::If(
+                Box::new(Expr::Lit(device::Value::Bool(true))),
+                Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                Some(Box::new(Expr::Lit(device::Value::Flt(2.0))))
+            )),
+            Expr::Lit(device::Value::Flt(1.0))
+        );
+
+        assert_eq!(
+            optimize(Expr::If(
+                Box::new(Expr::Lit(device::Value::Bool(false))),
+                Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                Some(Box::new(Expr::Lit(device::Value::Flt(2.0))))
+            )),
+            Expr::Lit(device::Value::Flt(2.0))
+        );
+
+        assert_eq!(
+            optimize(Expr::If(
+                Box::new(Expr::Lit(device::Value::Bool(true))),
+                Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                None
+            )),
+            Expr::Lit(device::Value::Flt(1.0))
+        );
+
+        assert_eq!(
+            optimize(Expr::If(
+                Box::new(Expr::Lit(device::Value::Bool(false))),
+                Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                None
+            )),
+            Expr::Nothing
+        );
+
+        assert_eq!(
+            optimize(Expr::If(
+                Box::new(Expr::Nothing),
+                Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                None
+            )),
+            Expr::Nothing
+        );
+
+        assert_eq!(
+            optimize(Expr::If(
+                Box::new(Expr::Nothing),
+                Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                Some(Box::new(Expr::Lit(device::Value::Flt(2.0))))
+            )),
+            Expr::Nothing
         );
     }
 
