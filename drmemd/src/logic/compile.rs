@@ -981,270 +981,268 @@ mod tests {
             &[String::from("bulb")],
         );
 
-        assert!(Program::compile("", &env).is_err());
-        assert!(Program::compile("{switch -> {bulb}", &env).is_err());
-        assert!(Program::compile("switch} -> {bulb}", &env).is_err());
+        const BAD_EXPR: &[&str] = &[
+            "",
+            "{switch -> {bulb}",
+            "switch} -> {bulb}",
+            // Don't allow bad categories or fields.
+            "{bad:second} -> {bulb}",
+            "{utc:bad} -> {bulb}",
+            "{local:bad} -> {bulb}",
+            // Don't allow whitespace.
+            "{ switch} -> {bulb}",
+            "{switch } -> {bulb}",
+            "{ utc:second} -> {bulb}",
+            "{utc :second} -> {bulb}",
+            "{utc: second} -> {bulb}",
+            "{utc:second } -> {bulb}",
+            "#1 -> {bulb}",
+            "#12 -> {bulb}",
+            "#12345 -> {bulb}",
+        ];
 
-        // Test for defined categories and fields.
+        for entry in BAD_EXPR.iter() {
+            assert!(
+                Program::compile(entry, &env).is_err(),
+                "accepted {}",
+                entry
+            );
+        }
 
-        assert!(Program::compile("{utc:second} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:minute} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:hour} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:day} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:month} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:EOM} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:SOM} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:year} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:DOW} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:DOY} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{utc:LY} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:second} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:minute} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:hour} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:day} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:month} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:EOM} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:SOM} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:year} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:DOW} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:DOY} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{local:LY} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{solar:alt} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{solar:az} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{solar:ra} -> {bulb}", &env).is_ok());
-        assert!(Program::compile("{solar:dec} -> {bulb}", &env).is_ok());
+        const GOOD_EXPR: &[&str] = &[
+            // Test for defined categories and fields.
+            "{utc:second} -> {bulb}",
+            "{utc:minute} -> {bulb}",
+            "{utc:hour} -> {bulb}",
+            "{utc:day} -> {bulb}",
+            "{utc:month} -> {bulb}",
+            "{utc:EOM} -> {bulb}",
+            "{utc:SOM} -> {bulb}",
+            "{utc:year} -> {bulb}",
+            "{utc:DOW} -> {bulb}",
+            "{utc:DOY} -> {bulb}",
+            "{utc:LY} -> {bulb}",
+            "{local:second} -> {bulb}",
+            "{local:minute} -> {bulb}",
+            "{local:hour} -> {bulb}",
+            "{local:day} -> {bulb}",
+            "{local:month} -> {bulb}",
+            "{local:EOM} -> {bulb}",
+            "{local:SOM} -> {bulb}",
+            "{local:year} -> {bulb}",
+            "{local:DOW} -> {bulb}",
+            "{local:DOY} -> {bulb}",
+            "{local:LY} -> {bulb}",
+            "{solar:alt} -> {bulb}",
+            "{solar:az} -> {bulb}",
+            "{solar:ra} -> {bulb}",
+            "{solar:dec} -> {bulb}",
+        ];
 
-        // Don't allow bad categories or fields.
-
-        assert!(Program::compile("{bad:second} -> {bulb}", &env).is_err());
-        assert!(Program::compile("{utc:bad} -> {bulb}", &env).is_err());
-        assert!(Program::compile("{local:bad} -> {bulb}", &env).is_err());
-
-        // Don't allow whitespace.
-
-        assert!(Program::compile("{ switch} -> {bulb}", &env).is_err());
-        assert!(Program::compile("{switch } -> {bulb}", &env).is_err());
-        assert!(Program::compile("{ utc:second} -> {bulb}", &env).is_err());
-        assert!(Program::compile("{utc :second} -> {bulb}", &env).is_err());
-        assert!(Program::compile("{utc: second} -> {bulb}", &env).is_err());
-        assert!(Program::compile("{utc:second } -> {bulb}", &env).is_err());
+        for entry in GOOD_EXPR.iter() {
+            assert!(
+                Program::compile(entry, &env).is_ok(),
+                "rejected {}",
+                entry
+            );
+        }
 
         // Test proper compilations.
 
-        assert_eq!(
-            Program::compile("{switch} -> {bulb}", &env),
-            Ok(Program(Expr::Var(0), 0))
-        );
-
-        assert_eq!(
-            Program::compile("true -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Bool(true)), 0))
-        );
-        assert_eq!(
-            Program::compile("false -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Bool(false)), 0))
-        );
-
-        assert_eq!(
-            Program::compile("1 -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Int(1)), 0))
-        );
-        assert_eq!(
-            Program::compile("1. -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Flt(1.0)), 0))
-        );
-        assert_eq!(
-            Program::compile("1.0 -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Flt(1.0)), 0))
-        );
-        assert_eq!(
-            Program::compile("-1.0 -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Flt(-1.0)), 0))
-        );
-        assert_eq!(
-            Program::compile("1.5 -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Flt(1.5)), 0))
-        );
-        assert_eq!(
-            Program::compile("1.0e10 -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Flt(1.0e10)), 0))
-        );
-        assert_eq!(
-            Program::compile("2.75e-10 -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Flt(2.75e-10)), 0))
-        );
-        assert_eq!(
-            Program::compile("(((10))) -> {bulb}", &env),
-            Ok(Program(Expr::Lit(device::Value::Int(10)), 0))
-        );
-
-        assert!(Program::compile("#1 -> {bulb}", &env).is_err());
-        assert!(Program::compile("#12 -> {bulb}", &env).is_err());
-        assert!(Program::compile("#12345 -> {bulb}", &env).is_err());
-        assert_eq!(
-            Program::compile("#123 -> {bulb}", &env),
-            Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgba::new(
-                    0x11, 0x22, 0x33, 255
-                ))),
-                0
-            ))
-        );
-        assert_eq!(
-            Program::compile("#1234 -> {bulb}", &env),
-            Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgba::new(
-                    0x11, 0x22, 0x33, 0x44
-                ))),
-                0
-            ))
-        );
-        assert_eq!(
-            Program::compile("#7f8081 -> {bulb}", &env),
-            Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgba::new(
-                    127, 128, 129, 255
-                ))),
-                0
-            ))
-        );
-        assert_eq!(
-            Program::compile("#7f808182 -> {bulb}", &env),
-            Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgba::new(
-                    127, 128, 129, 130
-                ))),
-                0
-            ))
-        );
-        assert_eq!(
-            Program::compile("#7F80A0 -> {bulb}", &env),
-            Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgba::new(
-                    127, 128, 160, 255
-                ))),
-                0
-            ))
-        );
-        assert_eq!(
-            Program::compile("#black -> {bulb}", &env),
-            Ok(Program(
-                Expr::Lit(device::Value::Color(LinSrgba::new(0, 0, 0, 255))),
-                0
-            ))
-        );
-
-        assert_eq!(
-            Program::compile("if true then 1.0 else 0.0 end -> {bulb}", &env),
-            Ok(Program(
-                Expr::If(
-                    Box::new(Expr::Lit(device::Value::Bool(true))),
-                    Box::new(Expr::Lit(device::Value::Flt(1.0))),
-                    Some(Box::new(Expr::Lit(device::Value::Flt(0.0))))
-                ),
-                0
-            ))
-        );
-
-        assert_eq!(
-            Program::compile(
-                "if 10.0 < 0.0 then 1.0 else 0.0 end -> {bulb}",
-                &env
+        let good_comp: &[(&str, Program)] = &[
+            ("{switch} -> {bulb}", Program(Expr::Var(0), 0)),
+            (
+                "true -> {bulb}",
+                Program(Expr::Lit(device::Value::Bool(true)), 0),
             ),
-            Ok(Program(
-                Expr::If(
-                    Box::new(Expr::Lt(
-                        Box::new(Expr::Lit(device::Value::Flt(10.0))),
-                        Box::new(Expr::Lit(device::Value::Flt(0.0)))
-                    )),
-                    Box::new(Expr::Lit(device::Value::Flt(1.0))),
-                    Some(Box::new(Expr::Lit(device::Value::Flt(0.0))))
-                ),
-                0
-            ))
-        );
-
-        assert_eq!(
-            Program::compile("{on_time} > 10.0 -> {bulb}", &env),
-            Ok(Program(
-                Expr::Lt(
-                    Box::new(Expr::Lit(device::Value::Flt(10.0))),
-                    Box::new(Expr::Var(1))
-                ),
-                0
-            ))
-        );
-
-        assert_eq!(
-            Program::compile(
-                "4 + ({on_time} + 5) * 10 > 10.0 % 3 -> {bulb}",
-                &env
+            (
+                "false -> {bulb}",
+                Program(Expr::Lit(device::Value::Bool(false)), 0),
             ),
-            Ok(Program(
-                Expr::Lt(
-                    Box::new(Expr::Rem(
-                        Box::new(Expr::Lit(device::Value::Flt(10.0))),
-                        Box::new(Expr::Lit(device::Value::Int(3)))
-                    )),
-                    Box::new(Expr::Add(
-                        Box::new(Expr::Lit(device::Value::Int(4))),
-                        Box::new(Expr::Mul(
-                            Box::new(Expr::Add(
-                                Box::new(Expr::Var(1)),
-                                Box::new(Expr::Lit(device::Value::Int(5)))
-                            )),
-                            Box::new(Expr::Lit(device::Value::Int(10)))
-                        ))
-                    ))
-                ),
-                0
-            ))
-        );
-
-        assert_eq!(
-            Program::compile(
-                "true and false or false and true -> {bulb}",
-                &env
+            ("1 -> {bulb}", Program(Expr::Lit(device::Value::Int(1)), 0)),
+            (
+                "1. -> {bulb}",
+                Program(Expr::Lit(device::Value::Flt(1.0)), 0),
             ),
-            Ok(Program(
-                Expr::Or(
-                    Box::new(Expr::And(
+            (
+                "1.0 -> {bulb}",
+                Program(Expr::Lit(device::Value::Flt(1.0)), 0),
+            ),
+            (
+                "-1.0 -> {bulb}",
+                Program(Expr::Lit(device::Value::Flt(-1.0)), 0),
+            ),
+            (
+                "1.5 -> {bulb}",
+                Program(Expr::Lit(device::Value::Flt(1.5)), 0),
+            ),
+            (
+                "1.0e10 -> {bulb}",
+                Program(Expr::Lit(device::Value::Flt(1.0e10)), 0),
+            ),
+            (
+                "2.75e-10 -> {bulb}",
+                Program(Expr::Lit(device::Value::Flt(2.75e-10)), 0),
+            ),
+            (
+                "(((10))) -> {bulb}",
+                Program(Expr::Lit(device::Value::Int(10)), 0),
+            ),
+            (
+                "#123 -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(LinSrgba::new(
+                        0x11, 0x22, 0x33, 255,
+                    ))),
+                    0,
+                ),
+            ),
+            (
+                "#1234 -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(LinSrgba::new(
+                        0x11, 0x22, 0x33, 0x44,
+                    ))),
+                    0,
+                ),
+            ),
+            (
+                "#7f8081 -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(LinSrgba::new(
+                        127, 128, 129, 255,
+                    ))),
+                    0,
+                ),
+            ),
+            (
+                "#7f808182 -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(LinSrgba::new(
+                        127, 128, 129, 130,
+                    ))),
+                    0,
+                ),
+            ),
+            (
+                "#7F80A0 -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(LinSrgba::new(
+                        127, 128, 160, 255,
+                    ))),
+                    0,
+                ),
+            ),
+            (
+                "#black -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(LinSrgba::new(
+                        0, 0, 0, 255,
+                    ))),
+                    0,
+                ),
+            ),
+            (
+                "if true then 1.0 else 0.0 end -> {bulb}",
+                Program(
+                    Expr::If(
                         Box::new(Expr::Lit(device::Value::Bool(true))),
-                        Box::new(Expr::Lit(device::Value::Bool(false)))
-                    )),
-                    Box::new(Expr::And(
-                        Box::new(Expr::Lit(device::Value::Bool(false))),
-                        Box::new(Expr::Lit(device::Value::Bool(true)))
-                    ))
+                        Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                        Some(Box::new(Expr::Lit(device::Value::Flt(0.0)))),
+                    ),
+                    0,
                 ),
-                0
-            ))
-        );
-
-        assert_eq!(
-            Program::compile("true and (5 < 7 or true) -> {bulb}", &env),
-            Ok(Program(
-                Expr::And(
-                    Box::new(Expr::Lit(device::Value::Bool(true))),
-                    Box::new(Expr::Or(
+            ),
+            (
+                "if 10.0 < 0.0 then 1.0 else 0.0 end -> {bulb}",
+                Program(
+                    Expr::If(
                         Box::new(Expr::Lt(
-                            Box::new(Expr::Lit(device::Value::Int(5))),
-                            Box::new(Expr::Lit(device::Value::Int(7)))
+                            Box::new(Expr::Lit(device::Value::Flt(10.0))),
+                            Box::new(Expr::Lit(device::Value::Flt(0.0))),
                         )),
-                        Box::new(Expr::Lit(device::Value::Bool(true)))
-                    ))
+                        Box::new(Expr::Lit(device::Value::Flt(1.0))),
+                        Some(Box::new(Expr::Lit(device::Value::Flt(0.0)))),
+                    ),
+                    0,
                 ),
-                0
-            ))
-        );
+            ),
+            (
+                "{on_time} > 10.0 -> {bulb}",
+                Program(
+                    Expr::Lt(
+                        Box::new(Expr::Lit(device::Value::Flt(10.0))),
+                        Box::new(Expr::Var(1)),
+                    ),
+                    0,
+                ),
+            ),
+            (
+                "4 + ({on_time} + 5) * 10 > 10.0 % 3 -> {bulb}",
+                Program(
+                    Expr::Lt(
+                        Box::new(Expr::Rem(
+                            Box::new(Expr::Lit(device::Value::Flt(10.0))),
+                            Box::new(Expr::Lit(device::Value::Int(3))),
+                        )),
+                        Box::new(Expr::Add(
+                            Box::new(Expr::Lit(device::Value::Int(4))),
+                            Box::new(Expr::Mul(
+                                Box::new(Expr::Add(
+                                    Box::new(Expr::Var(1)),
+                                    Box::new(Expr::Lit(device::Value::Int(5))),
+                                )),
+                                Box::new(Expr::Lit(device::Value::Int(10))),
+                            )),
+                        )),
+                    ),
+                    0,
+                ),
+            ),
+            (
+                "true and false or false and true -> {bulb}",
+                Program(
+                    Expr::Or(
+                        Box::new(Expr::And(
+                            Box::new(Expr::Lit(device::Value::Bool(true))),
+                            Box::new(Expr::Lit(device::Value::Bool(false))),
+                        )),
+                        Box::new(Expr::And(
+                            Box::new(Expr::Lit(device::Value::Bool(false))),
+                            Box::new(Expr::Lit(device::Value::Bool(true))),
+                        )),
+                    ),
+                    0,
+                ),
+            ),
+            (
+                "true and (5 < 7 or true) -> {bulb}",
+                Program(
+                    Expr::And(
+                        Box::new(Expr::Lit(device::Value::Bool(true))),
+                        Box::new(Expr::Or(
+                            Box::new(Expr::Lt(
+                                Box::new(Expr::Lit(device::Value::Int(5))),
+                                Box::new(Expr::Lit(device::Value::Int(7))),
+                            )),
+                            Box::new(Expr::Lit(device::Value::Bool(true))),
+                        )),
+                    ),
+                    0,
+                ),
+            ),
+            (
+                "\"Hello, world!\" -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Str("Hello, world!".into())),
+                    0,
+                ),
+            ),
+        ];
 
-        assert_eq!(
-            Program::compile("\"Hello, world!\" -> {bulb}", &env),
-            Ok(Program(
-                Expr::Lit(device::Value::Str("Hello, world!".into())),
-                0
-            ))
-        );
+        for entry in good_comp {
+            assert_eq!(Program::compile(entry.0, &env).unwrap(), entry.1);
+        }
     }
 
     #[test]
