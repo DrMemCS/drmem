@@ -1251,44 +1251,37 @@ mod tests {
         const FALSE: device::Value = device::Value::Bool(false);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
-        // Test for uninitialized and initialized variables.
-
-        assert_eq!(
-            eval(&Expr::Not(Box::new(Expr::Var(0))), &[None], &time, None),
-            None
-        );
-        assert_eq!(
-            eval(
-                &Expr::Not(Box::new(Expr::Var(0))),
-                &[Some(device::Value::Bool(true))],
-                &time,
-                None
+        let test_data: &[(
+            Expr,
+            [Option<device::Value>; 1],
+            Option<device::Value>,
+        )] = &[
+            // Test for uninitialized and initialized variables.
+            (Expr::Not(Box::new(Expr::Var(0))), [None], None),
+            (
+                Expr::Not(Box::new(Expr::Var(0))),
+                [Some(device::Value::Bool(true))],
+                Some(device::Value::Bool(false)),
             ),
-            Some(device::Value::Bool(false))
-        );
-
-        // Test literal values.
-
-        assert_eq!(
-            eval(&Expr::Not(Box::new(Expr::Lit(FALSE))), &[], &time, None),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(&Expr::Not(Box::new(Expr::Lit(TRUE))), &[], &time, None),
-            Some(FALSE)
-        );
-
-        // Test incorrect types.
-
-        assert_eq!(
-            eval(
-                &Expr::Not(Box::new(Expr::Lit(device::Value::Int(1)))),
-                &[],
-                &time,
-                None
+            // Test literal values.
+            (Expr::Not(Box::new(Expr::Lit(FALSE))), [None], Some(TRUE)),
+            (Expr::Not(Box::new(Expr::Lit(TRUE))), [None], Some(FALSE)),
+            // Test incorrect types.
+            (
+                Expr::Not(Box::new(Expr::Lit(device::Value::Int(1)))),
+                [None],
+                None,
             ),
-            None
-        );
+        ];
+
+        for entry in test_data {
+            assert_eq!(
+                eval(&entry.0, &entry.1, &time, None),
+                entry.2,
+                "expression '{}' failed",
+                &entry.0
+            )
+        }
     }
 
     #[test]
