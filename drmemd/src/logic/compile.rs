@@ -1291,153 +1291,101 @@ mod tests {
         const ONE: device::Value = device::Value::Int(1);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
-        // Test uninitialized and initialized variables.
-
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
-                &[Some(FALSE), Some(FALSE)],
-                &time,
-                None
+        let test_data: &[(
+            Expr,
+            [Option<device::Value>; 2],
+            Option<device::Value>,
+        )] = &[
+            // Test uninitialized and initialized variables.
+            (
+                Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                [Some(FALSE), Some(FALSE)],
+                Some(FALSE),
             ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
-                &[Some(FALSE), Some(TRUE)],
-                &time,
-                None
+            (
+                Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                [Some(FALSE), Some(TRUE)],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
-                &[Some(TRUE), Some(FALSE)],
-                &time,
-                None
+            (
+                Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                [Some(TRUE), Some(FALSE)],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
-                &[Some(TRUE), None],
-                &time,
-                None
+            (
+                Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                [Some(TRUE), None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
-                &[Some(FALSE), None],
-                &time,
-                None
+            (
+                Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                [Some(FALSE), None],
+                None,
             ),
-            None
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
-                &[None, Some(TRUE)],
-                &time,
-                None
+            (
+                Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                [None, Some(TRUE)],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
-                &[None, Some(FALSE)],
-                &time,
-                None
+            (
+                Expr::Or(Box::new(Expr::Var(0)), Box::new(Expr::Var(1))),
+                [None, Some(FALSE)],
+                None,
             ),
-            None
-        );
-
-        // Test literal values.
-
-        assert_eq!(
-            eval(
-                &Expr::Or(
+            // Test literal values.
+            (
+                Expr::Or(
                     Box::new(Expr::Lit(FALSE)),
-                    Box::new(Expr::Lit(FALSE))
-                ),
-                &[],
-                &time,
-                None
-            ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(
-                    Box::new(Expr::Lit(TRUE)),
-                    Box::new(Expr::Lit(FALSE))
-                ),
-                &[],
-                &time,
-                None
-            ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(
                     Box::new(Expr::Lit(FALSE)),
-                    Box::new(Expr::Lit(TRUE))
                 ),
-                &[],
-                &time,
-                None
+                [None, None],
+                Some(FALSE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(TRUE))),
-                &[],
-                &time,
-                None
+            (
+                Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(FALSE))),
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
+            (
+                Expr::Or(Box::new(Expr::Lit(FALSE)), Box::new(Expr::Lit(TRUE))),
+                [None, None],
+                Some(TRUE),
+            ),
+            (
+                Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(TRUE))),
+                [None, None],
+                Some(TRUE),
+            ),
+            // Test invalid types.
+            (
+                Expr::Or(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TRUE))),
+                [None, None],
+                None,
+            ),
+            (
+                Expr::Or(Box::new(Expr::Lit(FALSE)), Box::new(Expr::Lit(ONE))),
+                [None, None],
+                None,
+            ),
+            // This is a loophole for expression errors. If the first
+            // subexpression is `true`, we don't evaluate the second
+            // so we won't catch type errors until the first
+            // subexpression is `false`.
+            (
+                Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
+                [None, None],
+                Some(TRUE),
+            ),
+        ];
 
-        // Test invalid types.
-
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TRUE))),
-                &[],
-                &time,
-                None
-            ),
-            None
-        );
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Lit(FALSE)), Box::new(Expr::Lit(ONE))),
-                &[],
-                &time,
-                None
-            ),
-            None
-        );
-        // This is a loophole for expression errors. If the first
-        // subexpression is `true`, we don't evaluate the second so
-        // we won't catch type errors until the first subexpression is
-        // `false`.
-        assert_eq!(
-            eval(
-                &Expr::Or(Box::new(Expr::Lit(TRUE)), Box::new(Expr::Lit(ONE))),
-                &[],
-                &time,
-                None
-            ),
-            Some(TRUE)
-        );
+        for entry in test_data {
+            assert_eq!(
+                eval(&entry.0, &entry.1, &time, None),
+                entry.2,
+                "expression '{}' failed",
+                &entry.0
+            )
+        }
     }
 
     #[test]
