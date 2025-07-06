@@ -1511,81 +1511,62 @@ mod tests {
         const FP_ONE: device::Value = device::Value::Flt(1.0);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
-        assert_eq!(
-            eval(
-                &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(ONE))),
-                &[],
-                &time,
-                None
+        let test_data: &[(
+            Expr,
+            [Option<device::Value>; 2],
+            Option<device::Value>,
+        )] = &[
+            (
+                Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(ONE))),
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
-                &[],
-                &time,
-                None
+            (
+                Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
+                [None, None],
+                Some(FALSE),
             ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Eq(
-                    Box::new(Expr::Lit(ONE)),
-                    Box::new(Expr::Lit(FP_ONE))
-                ),
-                &[],
-                &time,
-                None
+            (
+                Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FP_ONE))),
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Eq(
-                    Box::new(Expr::Lit(FP_ONE)),
-                    Box::new(Expr::Lit(ONE))
-                ),
-                &[],
-                &time,
-                None
+            (
+                Expr::Eq(Box::new(Expr::Lit(FP_ONE)), Box::new(Expr::Lit(ONE))),
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
-                &[],
-                &time,
-                None
+            (
+                Expr::Eq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
+                [None, None],
+                None,
             ),
-            None
-        );
-        assert_eq!(
-            eval(
-                &Expr::Eq(
+            (
+                Expr::Eq(
                     Box::new(Expr::Lit(device::Value::Str("same".into()))),
-                    Box::new(Expr::Lit(device::Value::Str("same".into())))
-                ),
-                &[],
-                &time,
-                None
-            ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Eq(
                     Box::new(Expr::Lit(device::Value::Str("same".into()))),
-                    Box::new(Expr::Lit(device::Value::Str("not same".into())))
                 ),
-                &[],
-                &time,
-                None
+                [None, None],
+                Some(TRUE),
             ),
-            Some(FALSE)
-        );
+            (
+                Expr::Eq(
+                    Box::new(Expr::Lit(device::Value::Str("same".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("not same".into()))),
+                ),
+                [None, None],
+                Some(FALSE),
+            ),
+        ];
+
+        for entry in test_data {
+            assert_eq!(
+                eval(&entry.0, &entry.1, &time, None),
+                entry.2,
+                "expression '{}' failed",
+                &entry.0
+            )
+        }
     }
 
     #[test]
@@ -1597,102 +1578,72 @@ mod tests {
         const FP_ONE: device::Value = device::Value::Flt(1.0);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
-        assert_eq!(
-            eval(
-                &Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
-                &[],
-                &time,
-                None
+        let test_data: &[(
+            Expr,
+            [Option<device::Value>; 2],
+            Option<device::Value>,
+        )] = &[
+            (
+                Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
+                [None, None],
+                Some(FALSE),
             ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
-                &[],
-                &time,
-                None
+            (
+                Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
+                [None, None],
+                Some(FALSE),
             ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
-                &[],
-                &time,
-                None
+            (
+                Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
-                &[],
-                &time,
-                None
+            (
+                Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FALSE))),
+                [None, None],
+                None,
             ),
-            None
-        );
-        assert_eq!(
-            eval(
-                &Expr::Lt(
-                    Box::new(Expr::Lit(ONE)),
-                    Box::new(Expr::Lit(FP_ONE))
-                ),
-                &[],
-                &time,
-                None
+            (
+                Expr::Lt(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(FP_ONE))),
+                [None, None],
+                Some(FALSE),
             ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Lt(
-                    Box::new(Expr::Lit(TWO)),
-                    Box::new(Expr::Lit(FP_ONE))
-                ),
-                &[],
-                &time,
-                None
+            (
+                Expr::Lt(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(FP_ONE))),
+                [None, None],
+                Some(FALSE),
             ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Lt(
-                    Box::new(Expr::Lit(FP_ONE)),
-                    Box::new(Expr::Lit(TWO))
-                ),
-                &[],
-                &time,
-                None
+            (
+                Expr::Lt(Box::new(Expr::Lit(FP_ONE)), Box::new(Expr::Lit(TWO))),
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Lt(
+            (
+                Expr::Lt(
                     Box::new(Expr::Lit(device::Value::Str("abc".into()))),
-                    Box::new(Expr::Lit(device::Value::Str("abc".into())))
-                ),
-                &[],
-                &time,
-                None
-            ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::Lt(
                     Box::new(Expr::Lit(device::Value::Str("abc".into()))),
-                    Box::new(Expr::Lit(device::Value::Str("abcd".into())))
                 ),
-                &[],
-                &time,
-                None
+                [None, None],
+                Some(FALSE),
             ),
-            Some(TRUE)
-        );
+            (
+                Expr::Lt(
+                    Box::new(Expr::Lit(device::Value::Str("abc".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("abcd".into()))),
+                ),
+                [None, None],
+                Some(TRUE),
+            ),
+        ];
+
+        for entry in test_data {
+            assert_eq!(
+                eval(&entry.0, &entry.1, &time, None),
+                entry.2,
+                "expression '{}' failed",
+                &entry.0
+            )
+        }
     }
 
     #[test]
@@ -1704,117 +1655,92 @@ mod tests {
         const FP_ONE: device::Value = device::Value::Flt(1.0);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
-        assert_eq!(
-            eval(
-                &Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
-                &[],
-                &time,
-                None
+        let test_data: &[(
+            Expr,
+            [Option<device::Value>; 2],
+            Option<device::Value>,
+        )] = &[
+            (
+                Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(ONE))),
+                [None, None],
+                Some(FALSE),
             ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
-                &[],
-                &time,
-                None
+            (
+                Expr::LtEq(Box::new(Expr::Lit(TWO)), Box::new(Expr::Lit(TWO))),
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::LtEq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
-                &[],
-                &time,
-                None
+            (
+                Expr::LtEq(Box::new(Expr::Lit(ONE)), Box::new(Expr::Lit(TWO))),
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::LtEq(
+            (
+                Expr::LtEq(
                     Box::new(Expr::Lit(ONE)),
-                    Box::new(Expr::Lit(FALSE))
+                    Box::new(Expr::Lit(FALSE)),
                 ),
-                &[],
-                &time,
-                None
+                [None, None],
+                None,
             ),
-            None
-        );
-        assert_eq!(
-            eval(
-                &Expr::LtEq(
+            (
+                Expr::LtEq(
                     Box::new(Expr::Lit(ONE)),
-                    Box::new(Expr::Lit(FP_ONE))
-                ),
-                &[],
-                &time,
-                None
-            ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::LtEq(
-                    Box::new(Expr::Lit(TWO)),
-                    Box::new(Expr::Lit(FP_ONE))
-                ),
-                &[],
-                &time,
-                None
-            ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::LtEq(
                     Box::new(Expr::Lit(FP_ONE)),
-                    Box::new(Expr::Lit(TWO))
                 ),
-                &[],
-                &time,
-                None
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::LtEq(
+            (
+                Expr::LtEq(
+                    Box::new(Expr::Lit(TWO)),
+                    Box::new(Expr::Lit(FP_ONE)),
+                ),
+                [None, None],
+                Some(FALSE),
+            ),
+            (
+                Expr::LtEq(
+                    Box::new(Expr::Lit(FP_ONE)),
+                    Box::new(Expr::Lit(TWO)),
+                ),
+                [None, None],
+                Some(TRUE),
+            ),
+            (
+                Expr::LtEq(
                     Box::new(Expr::Lit(device::Value::Str("abcd".into()))),
-                    Box::new(Expr::Lit(device::Value::Str("abc".into())))
-                ),
-                &[],
-                &time,
-                None
-            ),
-            Some(FALSE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::LtEq(
                     Box::new(Expr::Lit(device::Value::Str("abc".into()))),
-                    Box::new(Expr::Lit(device::Value::Str("abc".into())))
                 ),
-                &[],
-                &time,
-                None
+                [None, None],
+                Some(FALSE),
             ),
-            Some(TRUE)
-        );
-        assert_eq!(
-            eval(
-                &Expr::LtEq(
+            (
+                Expr::LtEq(
                     Box::new(Expr::Lit(device::Value::Str("abc".into()))),
-                    Box::new(Expr::Lit(device::Value::Str("abcd".into())))
+                    Box::new(Expr::Lit(device::Value::Str("abc".into()))),
                 ),
-                &[],
-                &time,
-                None
+                [None, None],
+                Some(TRUE),
             ),
-            Some(TRUE)
-        );
+            (
+                Expr::LtEq(
+                    Box::new(Expr::Lit(device::Value::Str("abc".into()))),
+                    Box::new(Expr::Lit(device::Value::Str("abcd".into()))),
+                ),
+                [None, None],
+                Some(TRUE),
+            ),
+        ];
+
+        for entry in test_data {
+            assert_eq!(
+                eval(&entry.0, &entry.1, &time, None),
+                entry.2,
+                "expression '{}' failed",
+                &entry.0
+            )
+        }
     }
 
     #[test]
