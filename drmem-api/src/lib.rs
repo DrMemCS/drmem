@@ -1,4 +1,4 @@
-//! This crate is used by hardware drivers.
+//! Defines types and interfaces used by hardware drivers.
 //!
 //! The interfaces and types defined in this crate are useful for
 //! those wishing to write a new driver for the `drmemd` executable.

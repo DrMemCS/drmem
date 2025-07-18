@@ -95,14 +95,14 @@ impl<'a> Instance {
     }
 }
 
-impl driver::API for Instance {
+impl driver::Registrator for Instance {
     type DeviceSet = Devices;
 
     fn register_devices(
         core: driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
         let output_name = "output".parse::<device::Base>().unwrap();
         let trigger_name = "trigger".parse::<device::Base>().unwrap();
         let reset_name = "reset".parse::<device::Base>().unwrap();
@@ -128,7 +128,9 @@ impl driver::API for Instance {
             })
         })
     }
+}
 
+impl driver::API for Instance {
     fn create_instance(
         cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {

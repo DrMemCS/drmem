@@ -198,23 +198,35 @@ impl RequestChan {
     }
 }
 
-/// Defines a boxed type that supports the `driver::API` trait.
-pub type DriverType<T> = Box<dyn API<DeviceSet = <T as API>::DeviceSet>>;
-
-/// All drivers implement the `driver::API` trait.
+/// A trait which manages details about driver registration.
 ///
-/// The `API` trait defines methods that are expected to be available
-/// from a driver instance. By supporting this API, the framework can
-/// create driver instances and monitor them as they run.
-pub trait API: Send {
+/// All drivers need to implement this trait. It's main purpose is to
+/// define a type (`HandleSet`) that holds the handles to channels
+/// that report device values and accept settings (for settable
+/// devices.)
+///
+/// The only function in this trait is one to register the device set
+/// with core.
+
+pub trait Registrator {
     type DeviceSet: Send + Sync;
 
     fn register_devices(
         drc: RequestChan,
         cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>>;
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send;
+}
 
+/// Defines a boxed type that supports the `driver::API` trait.
+pub type DriverType<T> = Box<dyn API<DeviceSet = T>>;
+
+/// All drivers implement the `driver::API` trait.
+///
+/// The `API` trait defines methods that are expected to be available
+/// from a driver instance. By supporting this API, the framework can
+/// create driver instances and monitor them as they run.
+pub trait API: Registrator + Send {
     /// Creates an instance of the driver.
     ///
     /// `cfg` contains the driver parameters, as specified in the

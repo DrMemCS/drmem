@@ -282,14 +282,14 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
+impl driver::Registrator for Instance {
     type DeviceSet = Devices;
 
     fn register_devices(
         core: driver::RequestChan,
         _: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
         let service_name = "service".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
         let duty_name = "duty".parse::<device::Base>().unwrap();
@@ -322,7 +322,9 @@ impl driver::API for Instance {
             })
         })
     }
+}
 
+impl driver::API for Instance {
     fn create_instance(
         cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {

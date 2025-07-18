@@ -557,7 +557,7 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
+impl driver::Registrator for Instance {
     type DeviceSet = Devices;
 
     // Registers two devices, `error` and `brightness`.
@@ -566,7 +566,7 @@ impl driver::API for Instance {
         core: driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
         let error_name = "error"
             .parse::<device::Base>()
             .expect("parsing 'error' should never fail");
@@ -594,7 +594,9 @@ impl driver::API for Instance {
             })
         })
     }
+}
 
+impl driver::API for Instance {
     // This driver doesn't store any data in its instance; it's all
     // stored in local variables in the `.run()` method.
 

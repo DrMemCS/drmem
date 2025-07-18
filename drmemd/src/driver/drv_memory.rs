@@ -173,14 +173,14 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
+impl driver::Registrator for Instance {
     type DeviceSet = Devices;
 
     fn register_devices(
         core: driver::RequestChan,
         cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
         let vars = Self::get_cfg_vars(cfg);
 
         Box::pin(async move {
@@ -220,7 +220,9 @@ impl driver::API for Instance {
             Ok(Devices { set: devs })
         })
     }
+}
 
+impl driver::API for Instance {
     fn create_instance(
         _cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {

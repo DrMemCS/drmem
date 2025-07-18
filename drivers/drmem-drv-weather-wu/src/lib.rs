@@ -277,7 +277,7 @@ impl Instance {
     async fn handle(
         &mut self,
         obs: &wu::Observation,
-        devices: &mut <Instance as driver::API>::DeviceSet,
+        devices: &mut <Instance as driver::Registrator>::DeviceSet,
     ) {
         // Retreive all the parameters whose units can change between
         // English and Metric.
@@ -413,14 +413,14 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
+impl driver::Registrator for Instance {
     type DeviceSet = Devices;
 
     fn register_devices(
         core: driver::RequestChan,
         cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
         let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();
         let heat_index_name = "heat-index".parse::<device::Base>().unwrap();
         let humidity_name = "humidity".parse::<device::Base>().unwrap();
@@ -556,7 +556,9 @@ impl driver::API for Instance {
             })
         })
     }
+}
 
+impl driver::API for Instance {
     fn create_instance(
         cfg: &DriverConfig,
     ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
