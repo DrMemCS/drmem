@@ -68,7 +68,6 @@ pub enum Request {
 ///
 /// This type wraps the `mpsc::Sender<>` and defines a set of helper
 /// methods to send requests and receive replies with the core.
-#[derive(Clone)]
 pub struct RequestChan {
     driver_name: Name,
     prefix: device::Path,
