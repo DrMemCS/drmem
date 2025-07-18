@@ -19,6 +19,7 @@ pub type Name = Arc<str>;
 /// values.
 pub type DriverConfig = value::Table;
 
+pub mod classes;
 mod ro_device;
 mod rw_device;
 
