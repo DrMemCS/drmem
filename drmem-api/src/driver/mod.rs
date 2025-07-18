@@ -212,11 +212,11 @@ impl RequestChan {
 pub trait Registrator {
     type DeviceSet: Send + Sync;
 
-    fn register_devices(
-        drc: RequestChan,
+    fn register_devices<'a>(
+        drc: &'a mut RequestChan,
         cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send;
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a;
 }
 
 /// Defines a boxed type that supports the `driver::API` trait.

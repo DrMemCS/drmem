@@ -285,11 +285,11 @@ impl Instance {
 impl driver::Registrator for Instance {
     type DeviceSet = Devices;
 
-    fn register_devices(
-        core: driver::RequestChan,
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         _: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
         let service_name = "service".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
         let duty_name = "duty".parse::<device::Base>().unwrap();

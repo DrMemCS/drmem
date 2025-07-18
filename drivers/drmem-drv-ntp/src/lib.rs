@@ -367,11 +367,11 @@ impl Instance {
 impl driver::Registrator for Instance {
     type DeviceSet = Devices;
 
-    fn register_devices(
-        core: driver::RequestChan,
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         _: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
         // It's safe to use `.unwrap()` for these names because, in a
         // fully-tested, released version of this driver, we would
         // have seen and fixed any panics.

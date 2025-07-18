@@ -416,11 +416,11 @@ impl Instance {
 impl driver::Registrator for Instance {
     type DeviceSet = Devices;
 
-    fn register_devices(
-        core: driver::RequestChan,
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
         let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();
         let heat_index_name = "heat-index".parse::<device::Base>().unwrap();
         let humidity_name = "humidity".parse::<device::Base>().unwrap();

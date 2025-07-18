@@ -562,11 +562,11 @@ impl driver::Registrator for Instance {
 
     // Registers two devices, `error` and `brightness`.
 
-    fn register_devices(
-        core: driver::RequestChan,
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
         let error_name = "error"
             .parse::<device::Base>()
             .expect("parsing 'error' should never fail");

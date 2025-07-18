@@ -15,11 +15,11 @@ pub struct Switch;
 impl Registrator for Switch {
     type DeviceSet = ReadWriteDevice<bool>;
 
-    fn register_devices(
-        drc: RequestChan,
+    fn register_devices<'a>(
+        drc: &'a mut RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
         async move {
             drc.add_rw_device::<bool>("state".parse()?, None, max_history)
                 .await
@@ -37,11 +37,11 @@ pub struct DimmerSet {
 impl Registrator for Dimmer {
     type DeviceSet = DimmerSet;
 
-    fn register_devices(
-        drc: RequestChan,
+    fn register_devices<'a>(
+        drc: &'a mut RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
         let nm_state = "state".parse();
         let nm_brightness = "brightness".parse();
 
