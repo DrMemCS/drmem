@@ -119,7 +119,7 @@ fn manage_instance<T>(
     name: driver::Name,
     prefix: device::Path,
     cfg: driver::DriverConfig,
-    req_chan: driver::RequestChan,
+    mut req_chan: driver::RequestChan,
     max_history: Option<usize>,
 ) -> MgrFuncRet
 where
@@ -132,7 +132,7 @@ where
     Box::pin(async move {
         // Let the driver API register the necessary devices.
 
-        let devices = T::register_devices(req_chan, &cfg, max_history)
+        let devices = T::register_devices(&mut req_chan, &cfg, max_history)
             .instrument(info_span!("one-time-init", name = name.as_ref()))
             .await?;
 

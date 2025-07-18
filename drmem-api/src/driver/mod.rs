@@ -19,6 +19,7 @@ pub type Name = Arc<str>;
 /// values.
 pub type DriverConfig = value::Table;
 
+pub mod classes;
 mod ro_device;
 mod rw_device;
 
@@ -67,7 +68,6 @@ pub enum Request {
 ///
 /// This type wraps the `mpsc::Sender<>` and defines a set of helper
 /// methods to send requests and receive replies with the core.
-#[derive(Clone)]
 pub struct RequestChan {
     driver_name: Name,
     prefix: device::Path,
@@ -198,23 +198,35 @@ impl RequestChan {
     }
 }
 
+/// A trait which manages details about driver registration.
+///
+/// All drivers need to implement this trait. It's main purpose is to
+/// define a type (`HandleSet`) that holds the handles to channels
+/// that report device values and accept settings (for settable
+/// devices.)
+///
+/// The only function in this trait is one to register the device set
+/// with core.
+
+pub trait Registrator {
+    type DeviceSet: Send + Sync;
+
+    fn register_devices<'a>(
+        drc: &'a mut RequestChan,
+        cfg: &DriverConfig,
+        max_history: Option<usize>,
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a;
+}
+
 /// Defines a boxed type that supports the `driver::API` trait.
-pub type DriverType<T> = Box<dyn API<DeviceSet = <T as API>::DeviceSet>>;
+pub type DriverType<T> = Box<dyn API<DeviceSet = T>>;
 
 /// All drivers implement the `driver::API` trait.
 ///
 /// The `API` trait defines methods that are expected to be available
 /// from a driver instance. By supporting this API, the framework can
 /// create driver instances and monitor them as they run.
-pub trait API: Send {
-    type DeviceSet: Send + Sync;
-
-    fn register_devices(
-        drc: RequestChan,
-        cfg: &DriverConfig,
-        max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>>;
-
+pub trait API: Registrator + Send {
     /// Creates an instance of the driver.
     ///
     /// `cfg` contains the driver parameters, as specified in the
