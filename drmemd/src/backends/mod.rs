@@ -1,11 +1,11 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use drmem_api::{client, device, driver, Result};
+use futures::Future;
+use std::pin::Pin;
 
 // Defines the trait that a back-end needs to implement to provide
 // storage for -- and access to -- the state of each driver's devices.
 
-#[async_trait]
 pub trait Store {
     // Called when a read-only device is to be registered with the
     // back-end.
@@ -29,13 +29,13 @@ pub trait Store {
     // is an optional value representing the last value of the device,
     // as saved in the back-end.
 
-    async fn register_read_only_device(
-        &mut self,
-        driver: &str,
-        name: &device::Name,
-        units: Option<&String>,
+    fn register_read_only_device<'a>(
+        &'a mut self,
+        driver: &'a str,
+        name: &'a device::Name,
+        units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> Result<driver::ReportReading>;
+    ) -> Pin<Box<dyn Future<Output = Result<driver::ReportReading>> + Send + 'a>>;
 
     // Called when a read-write device is to be registered with the
     // back-end.
@@ -60,17 +60,24 @@ pub trait Store {
     // requests. The third element is an optional value representing
     // the last value of the device, as saved in the back-end.
 
-    async fn register_read_write_device(
-        &mut self,
-        driver: &str,
-        name: &device::Name,
-        units: Option<&String>,
+    fn register_read_write_device<'a>(
+        &'a mut self,
+        driver: &'a str,
+        name: &'a device::Name,
+        units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> Result<(
-        driver::ReportReading,
-        driver::RxDeviceSetting,
-        Option<device::Value>,
-    )>;
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<(
+                        driver::ReportReading,
+                        driver::RxDeviceSetting,
+                        Option<device::Value>,
+                    )>,
+                > + Send
+                + 'a,
+        >,
+    >;
 
     // Called when information from a device is requested.
     //
@@ -80,19 +87,21 @@ pub trait Store {
     // grammar of the pattern is the one used by Redis (to be
     // consistent across back-ends.)
 
-    async fn get_device_info(
-        &mut self,
-        pattern: Option<&str>,
-    ) -> Result<Vec<client::DevInfoReply>>;
+    fn get_device_info<'a>(
+        &'a mut self,
+        pattern: Option<&'a str>,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<Vec<client::DevInfoReply>>> + Send + 'a>,
+    >;
 
     // Sends a request to a driver to set its device to the specified
     // value.
 
-    async fn set_device(
+    fn set_device(
         &self,
         name: device::Name,
         value: device::Value,
-    ) -> Result<device::Value>;
+    ) -> Pin<Box<dyn Future<Output = Result<device::Value>> + Send + '_>>;
 
     // Obtains the `mpsc::Sender<>` handle associated with the
     // specified device. This handle can be used to send settings to
@@ -102,20 +111,28 @@ pub trait Store {
     // When it gets supported, requesters can decide whether they
     // should set it to true.
 
-    async fn get_setting_chan(
+    fn get_setting_chan(
         &self,
         name: device::Name,
         own: bool,
-    ) -> Result<driver::TxDeviceSetting>;
+    ) -> Pin<
+        Box<dyn Future<Output = Result<driver::TxDeviceSetting>> + Send + '_>,
+    >;
 
     // Creates a stream that yields values of a device as it updates.
 
-    async fn monitor_device(
+    fn monitor_device(
         &mut self,
         name: device::Name,
         start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
-    ) -> Result<device::DataStream<device::Reading>>;
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<device::DataStream<device::Reading>>>
+                + Send
+                + '_,
+        >,
+    >;
 }
 
 #[cfg(feature = "simple-backend")]

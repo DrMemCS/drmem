@@ -10,15 +10,16 @@
 //! with current values.
 
 use crate::backends::Store;
-use async_trait::async_trait;
 use chrono::*;
 use drmem_api::{
     client, device,
     driver::{self, ReportReading, RxDeviceSetting, TxDeviceSetting},
     Error, Result,
 };
+use futures::Future;
 use std::collections::{hash_map, HashMap};
 use std::{
+    pin::Pin,
     sync::{Arc, Mutex},
     time,
 };
@@ -132,211 +133,241 @@ fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
     })
 }
 
-#[async_trait]
 impl Store for SimpleStore {
     /// Handle read-only devices registration. This function creates
     /// an association between the device name and its associated
     /// resources. Since the driver is registering a read-only device,
     /// this function doesn't allocate a channel to provide settings.
 
-    async fn register_read_only_device(
-        &mut self,
-        driver: &str,
-        name: &device::Name,
-        units: Option<&String>,
+    fn register_read_only_device<'a>(
+        &'a mut self,
+        driver: &'a str,
+        name: &'a device::Name,
+        units: Option<&'a String>,
         _max_history: Option<usize>,
-    ) -> Result<ReportReading> {
-        // Check to see if the device name already exists.
+    ) -> Pin<Box<dyn Future<Output = Result<ReportReading>> + Send + 'a>> {
+        Box::pin(async move {
+            // Check to see if the device name already exists.
 
-        match self.0.entry((*name).clone()) {
-            // The device didn't exist. Create it and associate it
-            // with the driver.
-            hash_map::Entry::Vacant(e) => {
-                // Build the entry and insert it in the table.
+            match self.0.entry((*name).clone()) {
+                // The device didn't exist. Create it and associate it
+                // with the driver.
+                hash_map::Entry::Vacant(e) => {
+                    // Build the entry and insert it in the table.
 
-                let di = e.insert(DeviceInfo::create(
-                    String::from(driver),
-                    units,
-                    None,
-                ));
+                    let di = e.insert(DeviceInfo::create(
+                        String::from(driver),
+                        units,
+                        None,
+                    ));
 
-                // Create and return the closure that the driver will
-                // use to report updates.
+                    // Create and return the closure that the driver
+                    // will use to report updates.
 
-                Ok(mk_report_func(di, name))
-            }
+                    Ok(mk_report_func(di, name))
+                }
 
-            // The device already exists. If it was created from a
-            // previous instance of the driver, allow the registration
-            // to succeed.
-            hash_map::Entry::Occupied(e) => {
-                let dev_info = e.get();
+                // The device already exists. If it was created from a
+                // previous instance of the driver, allow the
+                // registration to succeed.
+                hash_map::Entry::Occupied(e) => {
+                    let dev_info = e.get();
 
-                if dev_info.owner.as_ref() == driver {
-                    let func = mk_report_func(dev_info, name);
+                    if dev_info.owner.as_ref() == driver {
+                        let func = mk_report_func(dev_info, name);
 
-                    Ok(func)
-                } else {
-                    Err(Error::InUse)
+                        Ok(func)
+                    } else {
+                        Err(Error::InUse)
+                    }
                 }
             }
-        }
+        })
     }
 
     /// Handle read-write devices registration. This function creates
     /// an association between the device name and its associated
     /// resources.
 
-    async fn register_read_write_device(
-        &mut self,
-        driver: &str,
-        name: &device::Name,
-        units: Option<&String>,
+    fn register_read_write_device<'a>(
+        &'a mut self,
+        driver: &'a str,
+        name: &'a device::Name,
+        units: Option<&'a String>,
         _max_history: Option<usize>,
-    ) -> Result<(ReportReading, RxDeviceSetting, Option<device::Value>)> {
-        // Check to see if the device name already exists.
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<(
+                        ReportReading,
+                        RxDeviceSetting,
+                        Option<device::Value>,
+                    )>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            // Check to see if the device name already exists.
 
-        match self.0.entry((*name).clone()) {
-            // The device didn't exist. Create it and associate it
-            // with the driver.
-            hash_map::Entry::Vacant(e) => {
-                // Create a channel with which to send settings.
-
-                let (tx_sets, rx_sets) = mpsc::channel(CHAN_SIZE);
-
-                // Build the entry and insert it in the table.
-
-                let di = e.insert(DeviceInfo::create(
-                    String::from(driver),
-                    units,
-                    Some(tx_sets),
-                ));
-
-                // Create and return the closure that the driver will
-                // use to report updates.
-
-                Ok((mk_report_func(di, name), rx_sets, None))
-            }
-
-            // The device already exists. If it was created from a
-            // previous instance of the driver, allow the registration
-            // to succeed.
-            hash_map::Entry::Occupied(mut e) => {
-                let dev_info = e.get_mut();
-
-                if dev_info.owner.as_ref() == driver {
+            match self.0.entry((*name).clone()) {
+                // The device didn't exist. Create it and associate it
+                // with the driver.
+                hash_map::Entry::Vacant(e) => {
                     // Create a channel with which to send settings.
 
                     let (tx_sets, rx_sets) = mpsc::channel(CHAN_SIZE);
 
-                    dev_info.tx_setting = Some(tx_sets);
+                    // Build the entry and insert it in the table.
 
-                    let func = mk_report_func(dev_info, name);
-                    let guard = dev_info.reading.lock();
+                    let di = e.insert(DeviceInfo::create(
+                        String::from(driver),
+                        units,
+                        Some(tx_sets),
+                    ));
 
-                    Ok((
-                        func,
-                        rx_sets,
-                        if let Ok(data) = guard {
-                            data.1.as_ref().map(
-                                |device::Reading { value, .. }| value.clone(),
-                            )
-                        } else {
-                            None
-                        },
-                    ))
-                } else {
-                    Err(Error::InUse)
+                    // Create and return the closure that the driver
+                    // will use to report updates.
+
+                    Ok((mk_report_func(di, name), rx_sets, None))
+                }
+
+                // The device already exists. If it was created from a
+                // previous instance of the driver, allow the
+                // registration to succeed.
+                hash_map::Entry::Occupied(mut e) => {
+                    let dev_info = e.get_mut();
+
+                    if dev_info.owner.as_ref() == driver {
+                        // Create a channel with which to send
+                        // settings.
+
+                        let (tx_sets, rx_sets) = mpsc::channel(CHAN_SIZE);
+
+                        dev_info.tx_setting = Some(tx_sets);
+
+                        let func = mk_report_func(dev_info, name);
+                        let guard = dev_info.reading.lock();
+
+                        Ok((
+                            func,
+                            rx_sets,
+                            if let Ok(data) = guard {
+                                data.1.as_ref().map(
+                                    |device::Reading { value, .. }| {
+                                        value.clone()
+                                    },
+                                )
+                            } else {
+                                None
+                            },
+                        ))
+                    } else {
+                        Err(Error::InUse)
+                    }
                 }
             }
-        }
+        })
     }
 
-    async fn get_device_info(
-        &mut self,
-        pattern: Option<&str>,
-    ) -> Result<Vec<client::DevInfoReply>> {
-        let pred: Box<dyn FnMut(&(&device::Name, &DeviceInfo)) -> bool> =
-            if let Some(pattern) = pattern {
-                if let Ok(pattern) = pattern.parse::<device::Name>() {
-                    Box::new(move |(k, _)| pattern == **k)
-                } else {
-                    Box::new(move |(k, _)| {
-                        glob::Pattern::create(pattern).matches(&k.to_string())
-                    })
-                }
-            } else {
-                Box::new(|_| true)
-            };
-        let res: Vec<client::DevInfoReply> = self
-            .0
-            .iter()
-            .filter(pred)
-            .map(|(k, v)| {
-                let (tot, rdg) = if let Ok(data) = v.reading.lock() {
-                    if data.1.is_some() {
-                        (1, data.1.clone())
+    fn get_device_info<'a>(
+        &'a mut self,
+        pattern: Option<&'a str>,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<Vec<client::DevInfoReply>>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let pred: Box<dyn FnMut(&(&device::Name, &DeviceInfo)) -> bool> =
+                if let Some(pattern) = pattern {
+                    if let Ok(pattern) = pattern.parse::<device::Name>() {
+                        Box::new(move |(k, _)| pattern == **k)
                     } else {
-                        (0, None)
+                        Box::new(move |(k, _)| {
+                            glob::Pattern::create(pattern)
+                                .matches(&k.to_string())
+                        })
                     }
                 } else {
-                    (0, None)
+                    Box::new(|_| true)
                 };
+            let res: Vec<client::DevInfoReply> = self
+                .0
+                .iter()
+                .filter(pred)
+                .map(|(k, v)| {
+                    let (tot, rdg) = if let Ok(data) = v.reading.lock() {
+                        if data.1.is_some() {
+                            (1, data.1.clone())
+                        } else {
+                            (0, None)
+                        }
+                    } else {
+                        (0, None)
+                    };
 
-                client::DevInfoReply {
-                    name: k.clone(),
-                    units: v.units.clone(),
-                    settable: v.tx_setting.is_some(),
-                    driver: v.owner.clone(),
-                    total_points: tot,
-                    first_point: rdg.clone(),
-                    last_point: rdg,
-                }
-            })
-            .collect();
+                    client::DevInfoReply {
+                        name: k.clone(),
+                        units: v.units.clone(),
+                        settable: v.tx_setting.is_some(),
+                        driver: v.owner.clone(),
+                        total_points: tot,
+                        first_point: rdg.clone(),
+                        last_point: rdg,
+                    }
+                })
+                .collect();
 
-        Ok(res)
+            Ok(res)
+        })
     }
 
-    async fn set_device(
+    fn set_device(
         &self,
         name: device::Name,
         value: device::Value,
-    ) -> Result<device::Value> {
-        if let Some(di) = self.0.get(&name) {
-            if let Some(tx) = &di.tx_setting {
-                let (tx_rpy, rx_rpy) = oneshot::channel();
+    ) -> Pin<Box<dyn Future<Output = Result<device::Value>> + Send + '_>> {
+        Box::pin(async move {
+            if let Some(di) = self.0.get(&name) {
+                if let Some(tx) = &di.tx_setting {
+                    let (tx_rpy, rx_rpy) = oneshot::channel();
 
-                match tx.send((value, tx_rpy)).await {
-                    Ok(()) => match rx_rpy.await {
-                        Ok(reply) => reply,
+                    match tx.send((value, tx_rpy)).await {
+                        Ok(()) => match rx_rpy.await {
+                            Ok(reply) => reply,
+                            Err(_) => Err(Error::MissingPeer(
+                                "driver broke connection".to_string(),
+                            )),
+                        },
                         Err(_) => Err(Error::MissingPeer(
-                            "driver broke connection".to_string(),
+                            "driver is ignoring settings".to_string(),
                         )),
-                    },
-                    Err(_) => Err(Error::MissingPeer(
-                        "driver is ignoring settings".to_string(),
-                    )),
+                    }
+                } else {
+                    Err(Error::OperationError(format!(
+                        "{} is read-only",
+                        &name
+                    )))
                 }
             } else {
-                Err(Error::OperationError(format!("{} is read-only", &name)))
+                Err(Error::NotFound)
             }
-        } else {
-            Err(Error::NotFound)
-        }
+        })
     }
 
-    async fn get_setting_chan(
+    fn get_setting_chan(
         &self,
         name: device::Name,
         _own: bool,
-    ) -> Result<TxDeviceSetting> {
-        if let Some(di) = self.0.get(&name) {
-            if let Some(tx) = &di.tx_setting {
-                return Ok(tx.clone());
+    ) -> Pin<Box<dyn Future<Output = Result<TxDeviceSetting>> + Send + '_>>
+    {
+        Box::pin(async move {
+            if let Some(di) = self.0.get(&name) {
+                if let Some(tx) = &di.tx_setting {
+                    return Ok(tx.clone());
+                }
             }
-        }
-        Err(Error::NotFound)
+            Err(Error::NotFound)
+        })
     }
 
     // Handles a request to monitor a device's changing value. The
@@ -344,110 +375,139 @@ impl Store for SimpleStore {
     // which returns the last value reported for the device followed
     // by all new updates.
 
-    async fn monitor_device(
+    fn monitor_device(
         &mut self,
         name: device::Name,
         start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
-    ) -> Result<device::DataStream<device::Reading>> {
-        // Look-up the name of the device. If it doesn't exist, return
-        // an error.
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<device::DataStream<device::Reading>>>
+                + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async move {
+            // Look-up the name of the device. If it doesn't exist,
+            // return an error.
 
-        if let Some(di) = self.0.get(&name) {
-            // Lock the mutex which protects the broadcast channel and
-            // the device's last values.
+            if let Some(di) = self.0.get(&name) {
+                // Lock the mutex which protects the broadcast channel
+                // and the device's last values.
 
-            if let Ok(guard) = di.reading.lock() {
-                let chan = guard.0.subscribe();
+                if let Ok(guard) = di.reading.lock() {
+                    let chan = guard.0.subscribe();
 
-                // Convert the broadcast channel into a broadcast
-                // stream. Broadcast channels report when a client is
-                // too slow in reading values, by returning an error.
-                // The DrMem core doesn't know (or care) about these
-                // low-level details and doesn't expect them so we
-                // filter the errors, but report them to the log.
+                    // Convert the broadcast channel into a broadcast
+                    // stream. Broadcast channels report when a client
+                    // is too slow in reading values, by returning an
+                    // error.  The DrMem core doesn't know (or care)
+                    // about these low-level details and doesn't
+                    // expect them so we filter the errors, but report
+                    // them to the log.
 
-                let strm =
-                    BroadcastStream::new(chan).filter_map(move |entry| {
-                        match entry {
-                            Ok(v) => Some(v),
-                            Err(BroadcastStreamRecvError::Lagged(count)) => {
-                                warn!("missed {} readings of {}", count, &name);
-                                None
+                    let strm =
+                        BroadcastStream::new(chan).filter_map(move |entry| {
+                            match entry {
+                                Ok(v) => Some(v),
+                                Err(BroadcastStreamRecvError::Lagged(
+                                    count,
+                                )) => {
+                                    warn!(
+                                        "missed {} readings of {}",
+                                        count, &name
+                                    );
+                                    None
+                                }
+                            }
+                        });
+
+                    match (start.map(|v| v.into()), end.map(|v| v.into())) {
+                        (None, None) => {
+                            if let Some(prev) = &guard.1 {
+                                Ok(Box::pin(
+                                    tokio_stream::once(prev.clone())
+                                        .chain(strm),
+                                )
+                                    as device::DataStream<device::Reading>)
+                            } else {
+                                Ok(Box::pin(strm)
+                                    as device::DataStream<device::Reading>)
                             }
                         }
-                    });
+                        (None, Some(end)) => {
+                            let not_end =
+                                move |v: &device::Reading| v.ts <= end;
 
-                match (start.map(|v| v.into()), end.map(|v| v.into())) {
-                    (None, None) => {
-                        if let Some(prev) = &guard.1 {
-                            Ok(Box::pin(
-                                tokio_stream::once(prev.clone()).chain(strm),
-                            ))
-                        } else {
-                            Ok(Box::pin(strm))
+                            if let Some(prev) = &guard.1 {
+                                Ok(Box::pin(
+                                    tokio_stream::once(prev.clone())
+                                        .chain(strm)
+                                        .take_while(not_end),
+                                )
+                                    as device::DataStream<device::Reading>)
+                            } else {
+                                Ok(Box::pin(strm.take_while(not_end))
+                                    as device::DataStream<device::Reading>)
+                            }
+                        }
+                        (Some(start), None) => {
+                            let valid =
+                                move |v: &device::Reading| v.ts >= start;
+
+                            if let Some(prev) = &guard.1 {
+                                Ok(Box::pin(
+                                    tokio_stream::once(prev.clone())
+                                        .chain(strm)
+                                        .filter(valid),
+                                )
+                                    as device::DataStream<device::Reading>)
+                            } else {
+                                Ok(Box::pin(strm.filter(valid))
+                                    as device::DataStream<device::Reading>)
+                            }
+                        }
+                        (Some(start_tmp), Some(end_tmp)) => {
+                            // Make sure the `start` time is before the
+                            // `end` time.
+
+                            let start: time::SystemTime =
+                                std::cmp::min(start_tmp, end_tmp);
+                            let end: time::SystemTime =
+                                std::cmp::max(start_tmp, end_tmp);
+
+                            // Define predicates for filters.
+
+                            let valid =
+                                move |v: &device::Reading| v.ts >= start;
+                            let not_end =
+                                move |v: &device::Reading| v.ts <= end;
+
+                            if let Some(prev) = &guard.1 {
+                                Ok(Box::pin(
+                                    tokio_stream::once(prev.clone())
+                                        .chain(strm)
+                                        .filter(valid)
+                                        .take_while(not_end),
+                                )
+                                    as device::DataStream<device::Reading>)
+                            } else {
+                                Ok(Box::pin(
+                                    strm.filter(valid).take_while(not_end),
+                                )
+                                    as device::DataStream<device::Reading>)
+                            }
                         }
                     }
-                    (None, Some(end)) => {
-                        let not_end = move |v: &device::Reading| v.ts <= end;
-
-                        if let Some(prev) = &guard.1 {
-                            Ok(Box::pin(
-                                tokio_stream::once(prev.clone())
-                                    .chain(strm)
-                                    .take_while(not_end),
-                            ))
-                        } else {
-                            Ok(Box::pin(strm.take_while(not_end)))
-                        }
-                    }
-                    (Some(start), None) => {
-                        let valid = move |v: &device::Reading| v.ts >= start;
-
-                        if let Some(prev) = &guard.1 {
-                            Ok(Box::pin(
-                                tokio_stream::once(prev.clone())
-                                    .chain(strm)
-                                    .filter(valid),
-                            ))
-                        } else {
-                            Ok(Box::pin(strm.filter(valid)))
-                        }
-                    }
-                    (Some(start_tmp), Some(end_tmp)) => {
-                        // Make sure the `start` time is before the
-                        // `end` time.
-
-                        let start: time::SystemTime =
-                            std::cmp::min(start_tmp, end_tmp);
-                        let end: time::SystemTime =
-                            std::cmp::max(start_tmp, end_tmp);
-
-                        // Define predicates for filters.
-
-                        let valid = move |v: &device::Reading| v.ts >= start;
-                        let not_end = move |v: &device::Reading| v.ts <= end;
-
-                        if let Some(prev) = &guard.1 {
-                            Ok(Box::pin(
-                                tokio_stream::once(prev.clone())
-                                    .chain(strm)
-                                    .filter(valid)
-                                    .take_while(not_end),
-                            ))
-                        } else {
-                            Ok(Box::pin(strm.filter(valid).take_while(not_end)))
-                        }
-                    }
+                } else {
+                    Err(Error::OperationError(
+                        "unable to lock reading channel".to_owned(),
+                    ))
                 }
             } else {
-                Err(Error::OperationError(
-                    "unable to lock reading channel".to_owned(),
-                ))
+                Err(Error::NotFound)
             }
-        } else {
-            Err(Error::NotFound)
-        }
+        })
     }
 }
 

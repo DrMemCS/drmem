@@ -19,9 +19,6 @@ lrlex = "0.13"
 lrpar = "0.13"
 
 [dependencies]
-async-trait.workspace = true
-async-trait.default-features = false
-
 futures.workspace = true
 futures.default-features = false
 futures.features = ["alloc"]

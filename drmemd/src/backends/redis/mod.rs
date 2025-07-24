@@ -1,5 +1,4 @@
 use crate::backends::Store;
-use async_trait::async_trait;
 use chrono::*;
 use drmem_api::{
     client, device,
@@ -915,216 +914,250 @@ impl RedisStore {
     }
 }
 
-#[async_trait]
 impl Store for RedisStore {
     /// Registers a device in the redis backend.
 
-    async fn register_read_only_device(
-        &mut self,
-        driver_name: &str,
-        name: &device::Name,
-        units: Option<&String>,
+    fn register_read_only_device<'a>(
+        &'a mut self,
+        driver_name: &'a str,
+        name: &'a device::Name,
+        units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> Result<ReportReading> {
+    ) -> Pin<Box<dyn Future<Output = Result<ReportReading>> + Send + 'a>> {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
 
-        if self.validate_device(&name).await.is_err() {
-            self.init_device(&name, driver_name, units).await?;
+        Box::pin(async move {
+            if self.validate_device(&name).await.is_err() {
+                self.init_device(&name, driver_name, units).await?;
 
-            info!("'{}' has been successfully created", &name);
-        }
-        Ok(self.mk_report_func(&name, max_history))
+                info!("'{}' has been successfully created", &name);
+            }
+            Ok(self.mk_report_func(&name, max_history))
+        })
     }
 
-    async fn register_read_write_device(
-        &mut self,
-        driver_name: &str,
-        name: &device::Name,
-        units: Option<&String>,
+    fn register_read_write_device<'a>(
+        &'a mut self,
+        driver_name: &'a str,
+        name: &'a device::Name,
+        units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> Result<(ReportReading, RxDeviceSetting, Option<device::Value>)> {
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<(
+                        ReportReading,
+                        RxDeviceSetting,
+                        Option<device::Value>,
+                    )>,
+                > + Send
+                + 'a,
+        >,
+    > {
         let sname = name.to_string();
 
         debug!("registering '{}' as read-write", &sname);
 
-        if self.validate_device(&sname).await.is_err() {
-            self.init_device(&sname, driver_name, units).await?;
+        Box::pin(async move {
+            if self.validate_device(&sname).await.is_err() {
+                self.init_device(&sname, driver_name, units).await?;
 
-            info!("'{}' has been successfully created", &sname);
-        }
+                info!("'{}' has been successfully created", &sname);
+            }
 
-        let (tx, rx) = mpsc::channel(20);
+            let (tx, rx) = mpsc::channel(20);
 
-        if self.table.insert(name.clone(), tx).is_some() {
-            warn!("{} already had a setting channel", &name);
-        }
+            if self.table.insert(name.clone(), tx).is_some() {
+                warn!("{} already had a setting channel", &name);
+            }
 
-        Ok((
-            self.mk_report_func(&sname, max_history),
-            rx,
-            self.last_value(&sname).await.map(|v| v.value),
-        ))
+            Ok((
+                self.mk_report_func(&sname, max_history),
+                rx,
+                self.last_value(&sname).await.map(|v| v.value),
+            ))
+        })
     }
 
     // Implement the request to pull device information. Any task with
     // a client channel can make this request although the primary
     // client will be from GraphQL requests.
 
-    async fn get_device_info(
-        &mut self,
-        pattern: Option<&str>,
-    ) -> Result<Vec<client::DevInfoReply>> {
-        // Get a list of all the keys that match the pattern. For
-        // Redis, these keys will have "#info" appended at the end.
+    fn get_device_info<'a>(
+        &'a mut self,
+        pattern: Option<&'a str>,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<Vec<client::DevInfoReply>>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            // Get a list of all the keys that match the pattern. For
+            // Redis, these keys will have "#info" appended at the
+            // end.
 
-        let result: Vec<String> = Self::match_pattern_cmd(pattern)
-            .query_async(&mut self.db_con)
-            .await
-            .map_err(xlat_err)?;
+            let result: Vec<String> = Self::match_pattern_cmd(pattern)
+                .query_async(&mut self.db_con)
+                .await
+                .map_err(xlat_err)?;
 
-        // Create an empty container to hold the device info records.
+            // Create an empty container to hold the device info
+            // records.
 
-        let mut devices = vec![];
+            let mut devices = vec![];
 
-        // Loop through the results and pull all the device
-        // information. Strip off the trailing "#info" before getting
-        // the device information.
+            // Loop through the results and pull all the device
+            // information. Strip off the trailing "#info" before
+            // getting the device information.
 
-        for key in result {
-            // Only process keys that are valid device names.
+            for key in result {
+                // Only process keys that are valid device names.
 
-            if let Ok(name) =
-                key.trim_end_matches("#info").parse::<device::Name>()
-            {
-                let dev_info = self.lookup_device(name).await?;
+                if let Ok(name) =
+                    key.trim_end_matches("#info").parse::<device::Name>()
+                {
+                    let dev_info = self.lookup_device(name).await?;
 
-                devices.push(dev_info)
+                    devices.push(dev_info)
+                }
             }
-        }
-        Ok(devices)
+            Ok(devices)
+        })
     }
 
     // This method implements the set_device mutation in the GraphQL
     // API.
 
-    async fn set_device(
+    fn set_device(
         &self,
         name: device::Name,
         value: device::Value,
-    ) -> Result<device::Value> {
-        if let Some(tx) = self.table.get(&name) {
-            let (tx_rpy, rx_rpy) = oneshot::channel();
+    ) -> Pin<Box<dyn Future<Output = Result<device::Value>> + Send + '_>> {
+        Box::pin(async move {
+            if let Some(tx) = self.table.get(&name) {
+                let (tx_rpy, rx_rpy) = oneshot::channel();
 
-            // Send the request and return from the function with the
-            // reply. If any error occurs during communication, fall
-            // through to report it.
+                // Send the request and return from the function with
+                // the reply. If any error occurs during
+                // communication, fall through to report it.
 
-            if let Ok(()) = tx.send((value, tx_rpy)).await {
-                if let Ok(reply) = rx_rpy.await {
-                    return reply;
+                if let Ok(()) = tx.send((value, tx_rpy)).await {
+                    if let Ok(reply) = rx_rpy.await {
+                        return reply;
+                    }
                 }
+
+                // Some portion of the RPC failed. Return an error.
+
+                Err(Error::MissingPeer(
+                    "cannot communicate with driver".to_string(),
+                ))
+            } else {
+                Err(Error::NotFound)
             }
-
-            // Some portion of the RPC failed. Return an error.
-
-            Err(Error::MissingPeer(
-                "cannot communicate with driver".to_string(),
-            ))
-        } else {
-            Err(Error::NotFound)
-        }
+        })
     }
 
-    async fn get_setting_chan(
+    fn get_setting_chan(
         &self,
         name: device::Name,
         _own: bool,
-    ) -> Result<TxDeviceSetting> {
-        if let Some(tx) = self.table.get(&name) {
-            Ok(tx.clone())
-        } else {
-            Err(Error::NotFound)
-        }
+    ) -> Pin<Box<dyn Future<Output = Result<TxDeviceSetting>> + Send + '_>>
+    {
+        Box::pin(async move {
+            if let Some(tx) = self.table.get(&name) {
+                Ok(tx.clone())
+            } else {
+                Err(Error::NotFound)
+            }
+        })
     }
 
-    async fn monitor_device(
+    fn monitor_device(
         &mut self,
         name: device::Name,
         start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
-    ) -> Result<device::DataStream<device::Reading>> {
-        match Self::make_connection(&self.cfg, None, None).await {
-            Ok(con) => {
-                let name = name.to_string();
-                let key = RedisStore::hist_key(&name);
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<device::DataStream<device::Reading>>>
+                + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async move {
+            match Self::make_connection(&self.cfg, None, None).await {
+                Ok(con) => {
+                    let name = name.to_string();
+                    let key = RedisStore::hist_key(&name);
 
-                match (start.map(|v| v.into()), end.map(|v| v.into())) {
-                    // With no start time, use the latest value of the
-                    // device. If there's an end time, add a stream
-                    // combinator that ends the stream once the date
-                    // reaches it.
-                    (None, end) => {
-                        let ts = self
-                            .last_value(&name)
-                            .await
-                            .map(|tmp| st_minus_1us(tmp.ts));
+                    match (start.map(|v| v.into()), end.map(|v| v.into())) {
+                        // With no start time, use the latest value of
+                        // the device. If there's an end time, add a
+                        // stream combinator that ends the stream once
+                        // the date reaches it.
+                        (None, end) => {
+                            let ts = self
+                                .last_value(&name)
+                                .await
+                                .map(|tmp| st_minus_1us(tmp.ts));
 
-                        // If there's an end date, append a filter to
-                        // the stream so it stops once the timestamp
-                        // reach it.
+                            // If there's an end date, append a filter
+                            // to the stream so it stops once the
+                            // timestamp reach it.
 
-                        if let Some(end) = end {
+                            if let Some(end) = end {
+                                let date_test =
+                                    move |v: &device::Reading| v.ts <= end;
+
+                                Ok(Box::pin(
+                                    ReadingStream::new(con, &key, ts)
+                                        .take_while(date_test),
+                                )
+                                    as device::DataStream<device::Reading>)
+                            } else {
+                                Ok(Box::pin(ReadingStream::new(con, &key, ts))
+                                    as device::DataStream<device::Reading>)
+                            }
+                        }
+
+                        // Given a start time with no end time, start
+                        // reading the redis stream at that point.
+                        (Some(start), None) => Ok(Box::pin(ReadingStream::new(
+                            con,
+                            &key,
+                            Some(st_minus_1us(start)),
+                        ))
+                            as device::DataStream<device::Reading>),
+
+                        // Start reading at the start time and stop
+                        // the stream at the end time.
+                        (Some(start_tmp), Some(end_tmp)) => {
+                            let start = std::cmp::min(start_tmp, end_tmp);
+                            let end = std::cmp::max(start_tmp, end_tmp);
                             let date_test =
                                 move |v: &device::Reading| v.ts <= end;
 
                             Ok(Box::pin(
-                                ReadingStream::new(con, &key, ts)
-                                    .take_while(date_test),
+                                ReadingStream::new(
+                                    con,
+                                    &key,
+                                    Some(st_minus_1us(start)),
+                                )
+                                .take_while(date_test),
                             )
-                                as device::DataStream<device::Reading>)
-                        } else {
-                            Ok(Box::pin(ReadingStream::new(con, &key, ts))
                                 as device::DataStream<device::Reading>)
                         }
                     }
+                }
+                Err(e) => {
+                    error!("couldn't make a connection : {}", e);
 
-                    // Given a start time with no end time, start
-                    // reading the redis stream at that point.
-                    (Some(start), None) => Ok(Box::pin(ReadingStream::new(
-                        con,
-                        &key,
-                        Some(st_minus_1us(start)),
-                    ))
-                        as device::DataStream<device::Reading>),
-
-                    // Start reading at the start time and stop the
-                    // stream at the end time.
-                    (Some(start_tmp), Some(end_tmp)) => {
-                        let start = std::cmp::min(start_tmp, end_tmp);
-                        let end = std::cmp::max(start_tmp, end_tmp);
-                        let date_test = move |v: &device::Reading| v.ts <= end;
-
-                        Ok(Box::pin(
-                            ReadingStream::new(
-                                con,
-                                &key,
-                                Some(st_minus_1us(start)),
-                            )
-                            .take_while(date_test),
-                        )
-                            as device::DataStream<device::Reading>)
-                    }
+                    Ok(Box::pin(tokio_stream::empty())
+                        as device::DataStream<device::Reading>)
                 }
             }
-            Err(e) => {
-                error!("couldn't make a connection : {}", e);
-
-                Ok(Box::pin(tokio_stream::empty())
-                    as device::DataStream<device::Reading>)
-            }
-        }
+        })
     }
 }
 
