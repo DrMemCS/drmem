@@ -4,7 +4,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::convert::{Infallible, TryFrom};
-use std::{future::Future, pin::Pin, sync::Arc, time::SystemTime};
+use std::{future::Future, sync::Arc, time::SystemTime};
 use tokio::sync::Mutex;
 use tokio::time::{interval_at, Duration, Instant};
 use tracing::{debug, error, warn, Span};
@@ -277,7 +277,7 @@ impl Instance {
     async fn handle(
         &mut self,
         obs: &wu::Observation,
-        devices: &mut <Instance as driver::API>::DeviceSet,
+        devices: &mut <Instance as driver::Registrator>::DeviceSet,
     ) {
         // Retreive all the parameters whose units can change between
         // English and Metric.
@@ -413,14 +413,14 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
+impl driver::Registrator for Instance {
     type DeviceSet = Devices;
 
-    fn register_devices(
-        core: driver::RequestChan,
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
         let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();
         let heat_index_name = "heat-index".parse::<device::Base>().unwrap();
         let humidity_name = "humidity".parse::<device::Base>().unwrap();
@@ -556,10 +556,12 @@ impl driver::API for Instance {
             })
         })
     }
+}
 
+impl driver::API for Instance {
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         debug!("reading config parameters");
 
         let interval = Instance::get_cfg_interval(cfg);
@@ -567,7 +569,7 @@ impl driver::API for Instance {
 
         Span::current().record("cfg", Instance::get_cfg_station(cfg).unwrap());
 
-        let fut = async move {
+        async move {
             match wu::create_client(Duration::from_secs(5)) {
                 Ok(mut con) => {
                     // Validate the driver parameters.
@@ -594,16 +596,14 @@ impl driver::API for Instance {
                     &e
                 ))),
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 
     fn run<'a>(
         &'a mut self,
         devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             let mut devices = devices.lock().await;
 
             Span::current().record("cfg", devices.station.as_str());
@@ -677,9 +677,7 @@ impl driver::API for Instance {
                     }
                 }
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

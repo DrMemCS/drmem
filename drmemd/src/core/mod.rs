@@ -1,4 +1,4 @@
-use crate::backends::{store, Store};
+use crate::backends::{store, Instance, Store};
 use drmem_api::{client, driver, Error, Result};
 use std::convert::Infallible;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -11,15 +11,15 @@ use tracing_futures::Instrument;
 /// table of active devices. Drivers and client communicate with the
 /// core task through channels.
 struct State {
-    backend: Box<dyn Store + Send>,
+    backend: Instance,
 }
 
 impl State {
     /// Creates an initialized state for the core task.
     async fn create(cfg: store::config::Config) -> Result<Self> {
-        let backend = Box::new(store::open(&cfg).await?);
-
-        Ok(State { backend })
+        Ok(State {
+            backend: store::open(&cfg).await?,
+        })
     }
 
     /// Handles incoming requests and returns a reply.
