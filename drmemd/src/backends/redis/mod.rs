@@ -923,19 +923,19 @@ impl Store for RedisStore {
         name: &'a device::Name,
         units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<ReportReading>> + Send + 'a>> {
+    ) -> impl Future<Output = Result<ReportReading>> + Send + 'a {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
 
-        Box::pin(async move {
+        async move {
             if self.validate_device(&name).await.is_err() {
                 self.init_device(&name, driver_name, units).await?;
 
                 info!("'{}' has been successfully created", &name);
             }
             Ok(self.mk_report_func(&name, max_history))
-        })
+        }
     }
 
     fn register_read_write_device<'a>(
@@ -944,23 +944,19 @@ impl Store for RedisStore {
         name: &'a device::Name,
         units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<(
-                        ReportReading,
-                        RxDeviceSetting,
-                        Option<device::Value>,
-                    )>,
-                > + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl Future<
+        Output = Result<(
+            ReportReading,
+            RxDeviceSetting,
+            Option<device::Value>,
+        )>,
+    > + Send
+           + 'a {
         let sname = name.to_string();
 
         debug!("registering '{}' as read-write", &sname);
 
-        Box::pin(async move {
+        async move {
             if self.validate_device(&sname).await.is_err() {
                 self.init_device(&sname, driver_name, units).await?;
 
@@ -978,7 +974,7 @@ impl Store for RedisStore {
                 rx,
                 self.last_value(&sname).await.map(|v| v.value),
             ))
-        })
+        }
     }
 
     // Implement the request to pull device information. Any task with
@@ -988,10 +984,9 @@ impl Store for RedisStore {
     fn get_device_info<'a>(
         &'a mut self,
         pattern: Option<&'a str>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<Vec<client::DevInfoReply>>> + Send + 'a>,
-    > {
-        Box::pin(async move {
+    ) -> impl Future<Output = Result<Vec<client::DevInfoReply>>> + Send + 'a
+    {
+        async move {
             // Get a list of all the keys that match the pattern. For
             // Redis, these keys will have "#info" appended at the
             // end.
@@ -1022,7 +1017,7 @@ impl Store for RedisStore {
                 }
             }
             Ok(devices)
-        })
+        }
     }
 
     // This method implements the set_device mutation in the GraphQL
@@ -1032,8 +1027,8 @@ impl Store for RedisStore {
         &self,
         name: device::Name,
         value: device::Value,
-    ) -> Pin<Box<dyn Future<Output = Result<device::Value>> + Send + '_>> {
-        Box::pin(async move {
+    ) -> impl Future<Output = Result<device::Value>> + Send + '_ {
+        async move {
             if let Some(tx) = self.table.get(&name) {
                 let (tx_rpy, rx_rpy) = oneshot::channel();
 
@@ -1055,22 +1050,21 @@ impl Store for RedisStore {
             } else {
                 Err(Error::NotFound)
             }
-        })
+        }
     }
 
     fn get_setting_chan(
         &self,
         name: device::Name,
         _own: bool,
-    ) -> Pin<Box<dyn Future<Output = Result<TxDeviceSetting>> + Send + '_>>
-    {
-        Box::pin(async move {
+    ) -> impl Future<Output = Result<TxDeviceSetting>> + Send + '_ {
+        async move {
             if let Some(tx) = self.table.get(&name) {
                 Ok(tx.clone())
             } else {
                 Err(Error::NotFound)
             }
-        })
+        }
     }
 
     fn monitor_device(
@@ -1078,14 +1072,9 @@ impl Store for RedisStore {
         name: device::Name,
         start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<device::DataStream<device::Reading>>>
-                + Send
-                + '_,
-        >,
-    > {
-        Box::pin(async move {
+    ) -> impl Future<Output = Result<device::DataStream<device::Reading>>> + Send + '_
+    {
+        async move {
             match Self::make_connection(&self.cfg, None, None).await {
                 Ok(con) => {
                     let name = name.to_string();
@@ -1157,11 +1146,11 @@ impl Store for RedisStore {
                         as device::DataStream<device::Reading>)
                 }
             }
-        })
+        }
     }
 }
 
-pub async fn open(cfg: &config::Config) -> Result<impl Store> {
+pub async fn open(cfg: &config::Config) -> Result<RedisStore> {
     RedisStore::new(cfg, None, None)
         .instrument(
             info_span!("redis-db", addr=?cfg.get_addr(), db=cfg.get_dbn()),

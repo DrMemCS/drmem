@@ -19,7 +19,6 @@ use drmem_api::{
 use futures::Future;
 use std::collections::{hash_map, HashMap};
 use std::{
-    pin::Pin,
     sync::{Arc, Mutex},
     time,
 };
@@ -67,9 +66,9 @@ impl DeviceInfo {
     }
 }
 
-struct SimpleStore(HashMap<device::Name, DeviceInfo>);
+pub struct SimpleStore(HashMap<device::Name, DeviceInfo>);
 
-pub async fn open(_cfg: &config::Config) -> Result<impl Store> {
+pub async fn open(_cfg: &config::Config) -> Result<SimpleStore> {
     Ok(SimpleStore(HashMap::new()))
 }
 
@@ -145,8 +144,8 @@ impl Store for SimpleStore {
         name: &'a device::Name,
         units: Option<&'a String>,
         _max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<ReportReading>> + Send + 'a>> {
-        Box::pin(async move {
+    ) -> impl Future<Output = Result<ReportReading>> + Send + 'a {
+        async move {
             // Check to see if the device name already exists.
 
             match self.0.entry((*name).clone()) {
@@ -182,7 +181,7 @@ impl Store for SimpleStore {
                     }
                 }
             }
-        })
+        }
     }
 
     /// Handle read-write devices registration. This function creates
@@ -195,19 +194,15 @@ impl Store for SimpleStore {
         name: &'a device::Name,
         units: Option<&'a String>,
         _max_history: Option<usize>,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<(
-                        ReportReading,
-                        RxDeviceSetting,
-                        Option<device::Value>,
-                    )>,
-                > + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(async move {
+    ) -> impl Future<
+        Output = Result<(
+            ReportReading,
+            RxDeviceSetting,
+            Option<device::Value>,
+        )>,
+    > + Send
+           + 'a {
+        async move {
             // Check to see if the device name already exists.
 
             match self.0.entry((*name).clone()) {
@@ -267,16 +262,15 @@ impl Store for SimpleStore {
                     }
                 }
             }
-        })
+        }
     }
 
     fn get_device_info<'a>(
         &'a mut self,
         pattern: Option<&'a str>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<Vec<client::DevInfoReply>>> + Send + 'a>,
-    > {
-        Box::pin(async move {
+    ) -> impl Future<Output = Result<Vec<client::DevInfoReply>>> + Send + 'a
+    {
+        async move {
             let pred: Box<dyn FnMut(&(&device::Name, &DeviceInfo)) -> bool> =
                 if let Some(pattern) = pattern {
                     if let Ok(pattern) = pattern.parse::<device::Name>() {
@@ -318,15 +312,15 @@ impl Store for SimpleStore {
                 .collect();
 
             Ok(res)
-        })
+        }
     }
 
     fn set_device(
         &self,
         name: device::Name,
         value: device::Value,
-    ) -> Pin<Box<dyn Future<Output = Result<device::Value>> + Send + '_>> {
-        Box::pin(async move {
+    ) -> impl Future<Output = Result<device::Value>> + Send + '_ {
+        async move {
             if let Some(di) = self.0.get(&name) {
                 if let Some(tx) = &di.tx_setting {
                     let (tx_rpy, rx_rpy) = oneshot::channel();
@@ -351,23 +345,22 @@ impl Store for SimpleStore {
             } else {
                 Err(Error::NotFound)
             }
-        })
+        }
     }
 
     fn get_setting_chan(
         &self,
         name: device::Name,
         _own: bool,
-    ) -> Pin<Box<dyn Future<Output = Result<TxDeviceSetting>> + Send + '_>>
-    {
-        Box::pin(async move {
+    ) -> impl Future<Output = Result<TxDeviceSetting>> + Send + '_ {
+        async move {
             if let Some(di) = self.0.get(&name) {
                 if let Some(tx) = &di.tx_setting {
                     return Ok(tx.clone());
                 }
             }
             Err(Error::NotFound)
-        })
+        }
     }
 
     // Handles a request to monitor a device's changing value. The
@@ -380,14 +373,9 @@ impl Store for SimpleStore {
         name: device::Name,
         start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<device::DataStream<device::Reading>>>
-                + Send
-                + '_,
-        >,
-    > {
-        Box::pin(async move {
+    ) -> impl Future<Output = Result<device::DataStream<device::Reading>>> + Send + '_
+    {
+        async move {
             // Look-up the name of the device. If it doesn't exist,
             // return an error.
 
@@ -507,7 +495,7 @@ impl Store for SimpleStore {
             } else {
                 Err(Error::NotFound)
             }
-        })
+        }
     }
 }
 
