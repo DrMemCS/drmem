@@ -138,17 +138,15 @@ where
 
         // Create a future that manages the instance.
 
-        Ok(Box::pin(async move {
-            let drv_name = name.clone();
+        let drv_name = name.clone();
 
-            mgr_body::<T>(name, devices, cfg)
-                .instrument(info_span!(
-                    "mngr",
-                    drvr = drv_name.as_ref(),
-                    path = ?prefix
-                ))
-                .await
-        }) as MgrTask)
+        Ok(
+            Box::pin(mgr_body::<T>(name, devices, cfg).instrument(info_span!(
+                "mngr",
+                drvr = drv_name.as_ref(),
+                path = ?prefix
+            ))) as MgrTask,
+        )
     }) as MgrFuncRet
 }
 

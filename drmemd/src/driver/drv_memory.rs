@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 use tokio::sync::Mutex;
 
 // Defines the signature if a function that validates a
@@ -225,15 +225,15 @@ impl driver::Registrator for Instance {
 impl driver::API for Instance {
     fn create_instance(
         _cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
-        Box::pin(async move { Ok(Box::new(Instance::new())) })
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
+        async move { Ok(Box::new(Instance::new())) }
     }
 
     fn run<'a>(
         &'a mut self,
         devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        Box::pin(async move {
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             let mut devices = devices.lock().await;
 
             loop {
@@ -241,7 +241,7 @@ impl driver::API for Instance {
 
                 devices.set[idx].0.report_update(val).await
             }
-        })
+        }
     }
 }
 

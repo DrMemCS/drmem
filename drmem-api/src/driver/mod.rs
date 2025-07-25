@@ -3,7 +3,7 @@
 
 use crate::types::{device, Error};
 use std::future::Future;
-use std::{convert::Infallible, pin::Pin, sync::Arc};
+use std::{convert::Infallible, sync::Arc};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use toml::value;
 
@@ -255,9 +255,7 @@ pub trait API: Registrator + Send {
     /// bound.
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>>
-    where
-        Self: Sized;
+    ) -> impl Future<Output = Result<Box<Self>>> + Send + '_;
 
     /// Runs the instance of the driver.
     ///
@@ -267,8 +265,8 @@ pub trait API: Registrator + Send {
     /// and if a driver panics or returns an error from this method,
     /// it gets reported in the log and then, after a short delay, the
     /// driver is restarted.
-    fn run<'a>(
-        &'a mut self,
+    fn run(
+        &mut self,
         devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>>;
+    ) -> impl Future<Output = Infallible> + Send + '_;
 }

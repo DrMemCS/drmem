@@ -3,9 +3,9 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
+use std::convert::Infallible;
 use std::future::Future;
 use std::sync::Arc;
-use std::{convert::Infallible, pin::Pin};
 use std::{
     net::{SocketAddr, SocketAddrV4},
     str,
@@ -408,10 +408,10 @@ impl driver::Registrator for Instance {
 impl driver::API for Instance {
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let addr = Instance::get_cfg_address(cfg);
 
-        let fut = async move {
+        async move {
             // Validate the configuration.
 
             let addr = addr?;
@@ -425,16 +425,14 @@ impl driver::API for Instance {
                 }
             }
             Err(Error::OperationError("couldn't create socket".to_owned()))
-        };
-
-        Box::pin(fut)
+        }
     }
 
     fn run<'a>(
         &'a mut self,
         devices: Arc<Mutex<Devices>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             // Record the peer's address in the "cfg" field of the
             // span.
 
@@ -506,9 +504,7 @@ impl driver::API for Instance {
                     devices.d_state.report_update(false).await;
                 }
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

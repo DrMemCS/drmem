@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 use tokio::{sync::Mutex, time};
 use tracing::{self, debug};
 
@@ -235,29 +235,27 @@ impl driver::Registrator for Instance {
 impl driver::API for Instance {
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let millis = Instance::get_cfg_millis(cfg);
         let enabled_at_boot = Instance::get_cfg_enabled(cfg);
         let disabled = Instance::get_inactive_value(cfg);
         let enabled = Instance::get_active_values(cfg);
 
-        let fut = async move {
+        async move {
             Ok(Box::new(Instance::new(
                 enabled_at_boot?,
                 millis?,
                 disabled?,
                 enabled?,
             )))
-        };
-
-        Box::pin(fut)
+        }
     }
 
     fn run<'a>(
         &'a mut self,
         devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             let mut timer = time::interval(self.millis);
             let mut devices = devices.lock().await;
 
@@ -320,9 +318,7 @@ impl driver::API for Instance {
                     }
                 }
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

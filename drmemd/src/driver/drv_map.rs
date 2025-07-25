@@ -4,8 +4,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::{
-    convert::Infallible, future::Future, ops::RangeInclusive, pin::Pin,
-    sync::Arc,
+    convert::Infallible, future::Future, ops::RangeInclusive, sync::Arc,
 };
 use tokio::sync::Mutex;
 
@@ -234,7 +233,7 @@ impl driver::Registrator for Instance {
 impl driver::API for Instance {
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let init_index = Instance::get_cfg_init_val(cfg);
         let def_value = Instance::get_cfg_def_val(cfg);
         let values = if let Ok(ref def_value) = def_value {
@@ -243,16 +242,14 @@ impl driver::API for Instance {
             Ok(vec![])
         };
 
-        Box::pin(async move {
-            Ok(Box::new(Instance::new(init_index?, def_value?, values?)))
-        })
+        async move { Ok(Box::new(Instance::new(init_index?, def_value?, values?))) }
     }
 
     fn run<'a>(
         &'a mut self,
         devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             let mut devices = devices.lock().await;
 
             // If we have an initial value, use it.
@@ -280,9 +277,7 @@ impl driver::API for Instance {
                 devices.d_index.report_update(v).await
             }
             panic!("can no longer receive settings");
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

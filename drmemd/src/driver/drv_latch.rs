@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 use tokio::sync::Mutex;
 
 // This enum represents the two states in which the latch can be.
@@ -133,11 +133,11 @@ impl driver::Registrator for Instance {
 impl driver::API for Instance {
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let active_value = Instance::get_active_value(cfg);
         let inactive_value = Instance::get_inactive_value(cfg);
 
-        let fut = async move {
+        async move {
             // Validate the configuration.
 
             let active_value = active_value?;
@@ -146,16 +146,14 @@ impl driver::API for Instance {
             // Build and return the future.
 
             Ok(Box::new(Instance::new(active_value, inactive_value)))
-        };
-
-        Box::pin(fut)
+        }
     }
 
     fn run<'a>(
         &'a mut self,
         devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             let mut devices = devices.lock().await;
 
             let mut reset = false;
@@ -203,9 +201,7 @@ impl driver::API for Instance {
                     }
                 }
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

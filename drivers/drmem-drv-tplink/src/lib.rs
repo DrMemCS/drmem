@@ -35,9 +35,9 @@ use drmem_api::{
     Error, Result,
 };
 use futures::{Future, FutureExt};
+use std::convert::Infallible;
 use std::net::SocketAddrV4;
 use std::sync::Arc;
-use std::{convert::Infallible, pin::Pin};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -602,16 +602,16 @@ impl driver::API for Instance {
 
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let cfg_addr = Instance::get_cfg_address(cfg);
 
-        Box::pin(async {
+        async {
             Ok(Box::new(Instance {
                 addr: cfg_addr?,
                 reported_error: None,
                 buf: [0; BUF_TOTAL],
             }))
-        })
+        }
     }
 
     // Main run loop for the driver.
@@ -619,8 +619,8 @@ impl driver::API for Instance {
     fn run<'a>(
         &'a mut self,
         devices: Arc<Mutex<Devices>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             // Lock the mutex for the life of the driver. There is no
             // other task that wants access to these device handles.
             // An Arc<Mutex<>> is the only way I know of sharing a
@@ -655,9 +655,7 @@ impl driver::API for Instance {
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 
