@@ -30,8 +30,7 @@
 //   Received:  {"system":{"set_bright":{"err_code":-2,"err_msg":"member not support"}}}
 
 use drmem_api::{
-    device,
-    driver::{self, DriverConfig},
+    driver::{self, classes, DriverConfig},
     Error, Result,
 };
 use futures::{Future, FutureExt};
@@ -54,12 +53,6 @@ pub struct Instance {
     addr: SocketAddrV4,
     reported_error: Option<bool>,
     buf: [u8; BUF_TOTAL],
-}
-
-pub struct Devices {
-    d_error: driver::ReadOnlyDevice<bool>,
-    d_brightness: driver::ReadWriteDevice<f64>,
-    d_led: driver::ReadWriteDevice<bool>,
 }
 
 impl Instance {
@@ -439,7 +432,7 @@ impl Instance {
     async fn main_loop<'a>(
         &mut self,
         s: &mut TcpStream,
-        devices: &mut MutexGuard<'_, Devices>,
+        devices: &mut MutexGuard<'_, driver::DevSet<Self>>,
     ) {
         // Create a 5-second interval timer which will be used to poll
         // the device to see if its state was changed by some outside
@@ -453,13 +446,13 @@ impl Instance {
         // Main loop of the driver. This loop never ends.
 
         'main: loop {
-            self.sync_error_state(&mut devices.d_error, false).await;
+            self.sync_error_state(&mut devices.error, false).await;
 
             // Get mutable references to the setting channels.
 
-            let Devices {
-                d_brightness: ref mut d_b,
-                d_led: ref mut d_l,
+            let classes::DimmerSet {
+                brightness: ref mut d_b,
+                indicator: ref mut d_l,
                 ..
             } = **devices;
 
@@ -491,7 +484,7 @@ impl Instance {
 			if current_brightness != br {
 			    debug!("external brightness update: {}", br);
 			    current_brightness = br;
-			    devices.d_brightness.report_update(br).await;
+			    devices.brightness.report_update(br).await;
 			}
 		    } else {
 			break 'main
@@ -535,7 +528,7 @@ impl Instance {
 
 		    if current_led != v {
 			if self.handle_led_setting(
-			    s, v, reply, &mut devices.d_led
+			    s, v, reply, &mut devices.indicator
 			).await == Ok(()) {
 			    current_led = v;
 			} else {
@@ -557,49 +550,8 @@ impl Instance {
     }
 }
 
-pub struct TpLinkDimmer;
-
-impl driver::Registrator for TpLinkDimmer {
-    type DeviceSet = Devices;
-
-    // Registers two devices, `error` and `brightness`.
-
-    fn register_devices<'a>(
-        core: &'a mut driver::RequestChan,
-        _cfg: &DriverConfig,
-        max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
-        let error_name = "error"
-            .parse::<device::Base>()
-            .expect("parsing 'error' should never fail");
-        let brightness_name = "brightness"
-            .parse::<device::Base>()
-            .expect("parsing 'brightness' should never fail");
-        let led_name = "led"
-            .parse::<device::Base>()
-            .expect("parsing 'led' should never fail");
-
-        Box::pin(async move {
-            // Define the devices managed by this driver.
-
-            let d_error =
-                core.add_ro_device(error_name, None, max_history).await?;
-            let d_brightness = core
-                .add_rw_device(brightness_name, None, max_history)
-                .await?;
-            let d_led = core.add_rw_device(led_name, None, max_history).await?;
-
-            Ok(Devices {
-                d_error,
-                d_brightness,
-                d_led,
-            })
-        })
-    }
-}
-
 impl driver::API for Instance {
-    type HardwareType = TpLinkDimmer;
+    type HardwareType = classes::Dimmer;
 
     // This driver doesn't store any data in its instance; it's all
     // stored in local variables in the `.run()` method.
@@ -652,7 +604,7 @@ impl driver::API for Instance {
                     }
                 }
 
-                self.sync_error_state(&mut devices.d_error, true).await;
+                self.sync_error_state(&mut devices.error, true).await;
 
                 // Log the error and then sleep for 10 seconds.
                 // Hopefully the device will be available then.

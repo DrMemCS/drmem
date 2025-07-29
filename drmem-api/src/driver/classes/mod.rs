@@ -6,7 +6,8 @@
 //! bulbs. This type will device the set of DrMem devices that are
 //! expected from every color LED bulb.
 use super::{
-    rw_device::ReadWriteDevice, DriverConfig, Registrator, RequestChan, Result,
+    ro_device::ReadOnlyDevice, rw_device::ReadWriteDevice, DriverConfig,
+    Registrator, RequestChan, Result,
 };
 use std::future::Future;
 
@@ -32,7 +33,7 @@ impl Registrator for Switch {
 pub struct Dimmer;
 
 pub struct DimmerSet {
-    pub state: ReadWriteDevice<bool>,
+    pub error: ReadOnlyDevice<bool>,
     pub brightness: ReadWriteDevice<f64>,
     pub indicator: ReadWriteDevice<bool>,
 }
@@ -45,24 +46,20 @@ impl Registrator for Dimmer {
         _cfg: &DriverConfig,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
-        let nm_state = "state".parse();
-        let nm_brightness = "brightness".parse();
-        let nm_indicator = "led".parse();
+        let nm_state = "error".parse().unwrap();
+        let nm_brightness = "brightness".parse().unwrap();
+        let nm_indicator = "indicator".parse().unwrap();
 
         async move {
             Ok(DimmerSet {
-                state: drc
-                    .add_rw_device::<bool>(nm_state?, None, max_history)
+                error: drc
+                    .add_ro_device::<bool>(nm_state, None, max_history)
                     .await?,
                 brightness: drc
-                    .add_rw_device::<f64>(
-                        nm_brightness?,
-                        Some("%"),
-                        max_history,
-                    )
+                    .add_rw_device::<f64>(nm_brightness, Some("%"), max_history)
                     .await?,
                 indicator: drc
-                    .add_rw_device::<bool>(nm_indicator?, None, max_history)
+                    .add_rw_device::<bool>(nm_indicator, None, max_history)
                     .await?,
             })
         }
