@@ -316,7 +316,7 @@ mod tests {
     #[test]
     fn test_configuration() {
         use super::device;
-        use super::Instance;
+        use super::Memory;
         use toml::{map::Map, Table, Value};
 
         // Test for an empty Map or a Map that doesn't have the "vars"
@@ -327,23 +327,23 @@ mod tests {
         {
             let mut map = Map::new();
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Memory::get_cfg_vars(&map).is_err());
 
             let _ = map.insert("junk".into(), Value::Boolean(true));
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Memory::get_cfg_vars(&map).is_err());
 
             let _ = map.insert("vars".into(), Value::Boolean(true));
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Memory::get_cfg_vars(&map).is_err());
 
             let _ = map.insert("vars".into(), Value::Table(Table::new()));
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Memory::get_cfg_vars(&map).is_err());
 
             let _ = map.insert("vars".into(), Value::Array(vec![]));
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Memory::get_cfg_vars(&map).is_err());
         }
 
         // Now make sure the config code creates a single memory
@@ -379,7 +379,7 @@ mod tests {
                     Value::Array(vec![Value::Table(tbl)]),
                 );
 
-                let result = Instance::get_cfg_vars(&map).unwrap();
+                let result = Memory::get_cfg_vars(&map).unwrap();
 
                 assert!(result.len() == 1);
                 assert_eq!(result[0].0.to_string(), entry.0);
