@@ -10,6 +10,8 @@ use super::{
 };
 use std::future::Future;
 
+// Define a "marker" trait for registering switches.
+
 pub struct Switch;
 
 impl Registrator for Switch {
@@ -32,6 +34,7 @@ pub struct Dimmer;
 pub struct DimmerSet {
     pub state: ReadWriteDevice<bool>,
     pub brightness: ReadWriteDevice<f64>,
+    pub indicator: ReadWriteDevice<bool>,
 }
 
 impl Registrator for Dimmer {
@@ -44,6 +47,7 @@ impl Registrator for Dimmer {
     ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
         let nm_state = "state".parse();
         let nm_brightness = "brightness".parse();
+        let nm_indicator = "led".parse();
 
         async move {
             Ok(DimmerSet {
@@ -56,6 +60,9 @@ impl Registrator for Dimmer {
                         Some("%"),
                         max_history,
                     )
+                    .await?,
+                indicator: drc
+                    .add_rw_device::<bool>(nm_indicator?, None, max_history)
                     .await?,
             })
         }

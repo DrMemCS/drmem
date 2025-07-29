@@ -1,4 +1,8 @@
-use drmem_api::{device, driver, Result};
+use drmem_api::{
+    device,
+    driver::{self, DevSet, Registrator, API},
+    Result,
+};
 use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
@@ -31,11 +35,11 @@ type DriverInfo = (&'static str, &'static str, Launcher);
 
 fn mgr_body<T>(
     name: driver::Name,
-    devices: T::DeviceSet,
+    devices: DevSet<T>,
     cfg: driver::DriverConfig,
 ) -> MgrTask
 where
-    T: driver::API + Send + 'static,
+    T: API + Send + 'static,
 {
     Box::pin(
         async move {
@@ -123,7 +127,7 @@ fn manage_instance<T>(
     max_history: Option<usize>,
 ) -> MgrFuncRet
 where
-    T: driver::API + Send + 'static,
+    T: API + Send + 'static,
 {
     // Return a future that returns an error if the devices couldn't
     // be registered, or returns a future that manages the running

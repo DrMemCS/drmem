@@ -557,7 +557,9 @@ impl Instance {
     }
 }
 
-impl driver::Registrator for Instance {
+pub struct TpLinkDimmer;
+
+impl driver::Registrator for TpLinkDimmer {
     type DeviceSet = Devices;
 
     // Registers two devices, `error` and `brightness`.
@@ -597,6 +599,8 @@ impl driver::Registrator for Instance {
 }
 
 impl driver::API for Instance {
+    type HardwareType = TpLinkDimmer;
+
     // This driver doesn't store any data in its instance; it's all
     // stored in local variables in the `.run()` method.
 
@@ -618,7 +622,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Devices>>,
+        devices: Arc<Mutex<driver::DevSet<Self>>>,
     ) -> impl Future<Output = Infallible> + Send + 'a {
         async move {
             // Lock the mutex for the life of the driver. There is no

@@ -109,7 +109,11 @@ impl Instance {
     pub fn new() -> Instance {
         Instance {}
     }
+}
 
+pub struct Memory;
+
+impl Memory {
     fn read_name(m: &toml::Table) -> Result<device::Base> {
         match m.get("name") {
             Some(toml::value::Value::String(name)) => {
@@ -173,7 +177,7 @@ impl Instance {
     }
 }
 
-impl driver::Registrator for Instance {
+impl driver::Registrator for Memory {
     type DeviceSet = Devices;
 
     fn register_devices<'a>(
@@ -223,6 +227,8 @@ impl driver::Registrator for Instance {
 }
 
 impl driver::API for Instance {
+    type HardwareType = Memory;
+
     fn create_instance(
         _cfg: &DriverConfig,
     ) -> impl Future<Output = Result<Box<Self>>> + Send {
@@ -231,7 +237,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Self::DeviceSet>>,
+        devices: Arc<Mutex<driver::DevSet<Self>>>,
     ) -> impl Future<Output = Infallible> + Send + 'a {
         async move {
             let mut devices = devices.lock().await;

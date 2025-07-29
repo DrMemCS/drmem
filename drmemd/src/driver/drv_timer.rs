@@ -185,7 +185,9 @@ impl Instance {
     }
 }
 
-impl driver::Registrator for Instance {
+pub struct Timer;
+
+impl driver::Registrator for Timer {
     type DeviceSet = Devices;
 
     fn register_devices<'a>(
@@ -219,6 +221,8 @@ impl driver::Registrator for Instance {
 }
 
 impl driver::API for Instance {
+    type HardwareType = Timer;
+
     async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
         let millis = Instance::get_cfg_millis(cfg);
         let active_value = Instance::get_active_value(cfg);
@@ -241,7 +245,7 @@ impl driver::API for Instance {
 
     async fn run(
         &mut self,
-        devices: Arc<Mutex<Self::DeviceSet>>,
+        devices: Arc<Mutex<driver::DevSet<Self>>>,
     ) -> Infallible {
         let mut timeout = time::Instant::now();
         let mut devices = devices.lock().await;

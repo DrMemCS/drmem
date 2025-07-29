@@ -413,7 +413,9 @@ impl Instance {
     }
 }
 
-impl driver::Registrator for Instance {
+pub struct WeatherDevices;
+
+impl driver::Registrator for WeatherDevices {
     type DeviceSet = Devices;
 
     fn register_devices<'a>(
@@ -559,6 +561,8 @@ impl driver::Registrator for Instance {
 }
 
 impl driver::API for Instance {
+    type HardwareType = WeatherDevices;
+
     fn create_instance(
         cfg: &DriverConfig,
     ) -> impl Future<Output = Result<Box<Self>>> + Send {
@@ -601,7 +605,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Self::DeviceSet>>,
+        devices: Arc<Mutex<driver::DevSet<Self>>>,
     ) -> impl Future<Output = Infallible> + Send + 'a {
         async move {
             let mut devices = devices.lock().await;
