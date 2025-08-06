@@ -435,7 +435,7 @@ impl driver::Registrator for Devices {
         let station = Instance::get_cfg_station(cfg);
         let units = Instance::get_cfg_units(cfg);
 
-        Box::pin(async move {
+        async move {
             let station = station?;
             let units = units?;
 
@@ -548,7 +548,7 @@ impl driver::Registrator for Devices {
                 d_wndgst,
                 d_wndspd,
             })
-        })
+        }
     }
 }
 
