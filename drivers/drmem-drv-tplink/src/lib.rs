@@ -337,11 +337,9 @@ impl Instance {
             match TcpSocket::new_v4() {
                 Ok(s) => {
                     s.set_recv_buffer_size((BUF_TOTAL * 2) as u32)?;
+                    s.set_nodelay(true)?;
 
-                    let s = s.connect((*addr).into()).await?;
-
-                    s.set_nodelay(false)?;
-                    Ok(s)
+                    Ok(s.connect((*addr).into()).await?)
                 }
                 Err(e) => Err(e),
             }
