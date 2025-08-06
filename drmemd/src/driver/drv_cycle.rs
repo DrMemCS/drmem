@@ -26,11 +26,6 @@ pub struct Instance {
     millis: time::Duration,
 }
 
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_enable: driver::ReadWriteDevice<bool>,
-}
-
 impl Instance {
     pub const NAME: &'static str = "cycle";
 
@@ -198,16 +193,17 @@ impl Instance {
     }
 }
 
-pub struct Cycle;
+pub struct Devices {
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_enable: driver::ReadWriteDevice<bool>,
+}
 
-impl driver::Registrator for Cycle {
-    type DeviceSet = Devices;
-
+impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();
         let enable_name = "enable".parse::<device::Base>().unwrap();
 
@@ -235,7 +231,7 @@ impl driver::Registrator for Cycle {
 }
 
 impl driver::API for Instance {
-    type HardwareType = Cycle;
+    type HardwareType = Devices;
 
     fn create_instance(
         cfg: &DriverConfig,
@@ -257,7 +253,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<driver::DevSet<Self>>>,
+        devices: Arc<Mutex<Self::HardwareType>>,
     ) -> impl Future<Output = Infallible> + Send + 'a {
         async move {
             let mut timer = time::interval(self.millis);

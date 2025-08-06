@@ -23,19 +23,22 @@ use std::future::Future;
 
 // Define a "marker" trait for registering switches.
 
-pub struct Switch;
+pub struct Switch {
+    pub state: ReadWriteDevice<bool>,
+}
 
 impl Registrator for Switch {
-    type DeviceSet = ReadWriteDevice<bool>;
-
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         async move {
-            drc.add_rw_device::<bool>("state".parse()?, None, max_history)
-                .await
+            Ok(Switch {
+                state: drc
+                    .add_rw_device::<bool>("state".parse()?, None, max_history)
+                    .await?,
+            })
         }
     }
 }

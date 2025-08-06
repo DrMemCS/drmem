@@ -20,12 +20,6 @@ pub struct Instance {
     inactive_value: device::Value,
 }
 
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_trigger: driver::ReadWriteDevice<bool>,
-    d_reset: driver::ReadWriteDevice<bool>,
-}
-
 impl<'a> Instance {
     pub const NAME: &'static str = "latch";
 
@@ -95,16 +89,18 @@ impl<'a> Instance {
     }
 }
 
-pub struct Latch;
+pub struct Devices {
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_trigger: driver::ReadWriteDevice<bool>,
+    d_reset: driver::ReadWriteDevice<bool>,
+}
 
-impl driver::Registrator for Latch {
-    type DeviceSet = Devices;
-
+impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();
         let trigger_name = "trigger".parse::<device::Base>().unwrap();
         let reset_name = "reset".parse::<device::Base>().unwrap();
@@ -133,7 +129,7 @@ impl driver::Registrator for Latch {
 }
 
 impl driver::API for Instance {
-    type HardwareType = Latch;
+    type HardwareType = Devices;
 
     fn create_instance(
         cfg: &DriverConfig,
@@ -155,7 +151,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<driver::DevSet<Self>>>,
+        devices: Arc<Mutex<Self::HardwareType>>,
     ) -> impl Future<Output = Infallible> + Send + 'a {
         async move {
             let mut devices = devices.lock().await;

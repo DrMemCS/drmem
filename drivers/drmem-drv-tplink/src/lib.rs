@@ -432,7 +432,7 @@ impl Instance {
     async fn main_loop<'a>(
         &mut self,
         s: &mut TcpStream,
-        devices: &mut MutexGuard<'_, driver::DevSet<Self>>,
+        devices: &mut MutexGuard<'_, <Instance as driver::API>::HardwareType>,
     ) {
         // Create a 5-second interval timer which will be used to poll
         // the device to see if its state was changed by some outside
@@ -450,7 +450,7 @@ impl Instance {
 
             // Get mutable references to the setting channels.
 
-            let classes::DimmerSet {
+            let classes::Dimmer {
                 brightness: ref mut d_b,
                 indicator: ref mut d_l,
                 ..
@@ -574,7 +574,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<driver::DevSet<Self>>>,
+        devices: Arc<Mutex<Self::HardwareType>>,
     ) -> impl Future<Output = Infallible> + Send + 'a {
         async move {
             // Lock the mutex for the life of the driver. There is no

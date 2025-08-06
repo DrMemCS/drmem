@@ -13,5 +13,5 @@ mod switch_type;
 
 // Make top-level types available to driver writers.
 
-pub use dimmer_type::{Dimmer, DimmerSet};
+pub use dimmer_type::Dimmer;
 pub use switch_type::Switch;

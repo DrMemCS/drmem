@@ -274,11 +274,7 @@ impl Instance {
     // correct device channel. It also does some sanity checks on the
     // values.
 
-    async fn handle(
-        &mut self,
-        obs: &wu::Observation,
-        devices: &mut <Instance as driver::Registrator>::DeviceSet,
-    ) {
+    async fn handle(&mut self, obs: &wu::Observation, devices: &mut Devices) {
         // Retreive all the parameters whose units can change between
         // English and Metric.
 
@@ -413,16 +409,12 @@ impl Instance {
     }
 }
 
-pub struct WeatherDevices;
-
-impl driver::Registrator for WeatherDevices {
-    type DeviceSet = Devices;
-
+impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();
         let heat_index_name = "heat-index".parse::<device::Base>().unwrap();
         let humidity_name = "humidity".parse::<device::Base>().unwrap();
@@ -561,7 +553,7 @@ impl driver::Registrator for WeatherDevices {
 }
 
 impl driver::API for Instance {
-    type HardwareType = WeatherDevices;
+    type HardwareType = Devices;
 
     fn create_instance(
         cfg: &DriverConfig,
@@ -605,7 +597,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<driver::DevSet<Self>>>,
+        devices: Arc<Mutex<Self::HardwareType>>,
     ) -> impl Future<Output = Infallible> + Send + 'a {
         async move {
             let mut devices = devices.lock().await;

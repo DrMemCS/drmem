@@ -21,11 +21,6 @@ pub struct Instance {
     values: Vec<Entry>,
 }
 
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_index: driver::ReadWriteDevice<i32>,
-}
-
 impl Instance {
     pub const NAME: &'static str = "map";
 
@@ -200,16 +195,17 @@ impl Instance {
     }
 }
 
-pub struct MapDevices;
+pub struct Devices {
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_index: driver::ReadWriteDevice<i32>,
+}
 
-impl driver::Registrator for MapDevices {
-    type DeviceSet = Devices;
-
+impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();
         let index_name = "index".parse::<device::Base>().unwrap();
 
@@ -233,7 +229,7 @@ impl driver::Registrator for MapDevices {
 }
 
 impl driver::API for Instance {
-    type HardwareType = MapDevices;
+    type HardwareType = Devices;
 
     fn create_instance(
         cfg: &DriverConfig,
@@ -251,7 +247,7 @@ impl driver::API for Instance {
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<driver::DevSet<Self>>>,
+        devices: Arc<Mutex<Self::HardwareType>>,
     ) -> impl Future<Output = Infallible> + Send + 'a {
         async move {
             let mut devices = devices.lock().await;

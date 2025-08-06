@@ -1,6 +1,6 @@
 use drmem_api::{
     device,
-    driver::{self, DevSet, Registrator, API},
+    driver::{self, Registrator, API},
     Result,
 };
 use futures::future::Future;
@@ -35,7 +35,7 @@ type DriverInfo = (&'static str, &'static str, Launcher);
 
 fn mgr_body<T>(
     name: driver::Name,
-    devices: DevSet<T>,
+    devices: T::HardwareType,
     cfg: driver::DriverConfig,
 ) -> MgrTask
 where
@@ -136,9 +136,10 @@ where
     Box::pin(async move {
         // Let the driver API register the necessary devices.
 
-        let devices = T::register_devices(&mut req_chan, &cfg, max_history)
-            .instrument(info_span!("one-time-init", name = name.as_ref()))
-            .await?;
+        let devices =
+            T::HardwareType::register_devices(&mut req_chan, &cfg, max_history)
+                .instrument(info_span!("one-time-init", name = name.as_ref()))
+                .await?;
 
         // Create a future that manages the instance.
 

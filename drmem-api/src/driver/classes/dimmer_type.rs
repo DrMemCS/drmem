@@ -4,22 +4,18 @@ use crate::driver::{
 };
 use std::future::Future;
 
-pub struct Dimmer;
-
-pub struct DimmerSet {
+pub struct Dimmer {
     pub error: ReadOnlyDevice<bool>,
     pub brightness: ReadWriteDevice<f64>,
     pub indicator: ReadWriteDevice<bool>,
 }
 
 impl Registrator for Dimmer {
-    type DeviceSet = DimmerSet;
-
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let nm_error = "error".parse();
         let nm_brightness = "brightness".parse();
         let nm_indicator = "indicator".parse();
@@ -33,7 +29,7 @@ impl Registrator for Dimmer {
 
             // Build the set of channels.
 
-            Ok(DimmerSet {
+            Ok(Dimmer {
                 error: drc
                     .add_ro_device::<bool>(nm_error, None, max_history)
                     .await?,

@@ -200,27 +200,18 @@ impl RequestChan {
 
 /// A trait which manages details about driver registration.
 ///
-/// All drivers need to implement this trait. It's main purpose is to
-/// define a type (`HandleSet`) that holds the handles to channels
-/// that report device values and accept settings (for settable
-/// devices.)
+/// All drivers will implement a type, or use one of the predefined
+/// types, that registers the set of needed devices.
 ///
-/// The only function in this trait is one to register the device set
-/// with core.
-pub trait Registrator {
-    type DeviceSet: Send;
-
+/// The only function in this trait is one to register the device(s)
+/// with core and return the set of handles.
+pub trait Registrator: Sized + Send {
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a;
+    ) -> impl Future<Output = Result<Self>> + Send + 'a;
 }
-
-/// Defines a boxed type that supports the `driver::API` trait.
-pub type DriverType<T> = Box<dyn API<HardwareType = T>>;
-
-pub type DevSet<T> = <<T as API>::HardwareType as Registrator>::DeviceSet;
 
 /// All drivers implement the `driver::API` trait.
 ///
@@ -270,23 +261,6 @@ pub trait API: Send + Sync {
     /// driver is restarted.
     fn run(
         &mut self,
-        devices: Arc<Mutex<DevSet<Self>>>,
+        devices: Arc<Mutex<Self::HardwareType>>,
     ) -> impl Future<Output = Infallible> + Send + '_;
-}
-
-// Blanket implementation for the `Registrator` trait.
-
-impl<D> Registrator for D
-where
-    D: API,
-{
-    type DeviceSet = <D::HardwareType as Registrator>::DeviceSet;
-
-    fn register_devices<'a>(
-        drc: &'a mut RequestChan,
-        cfg: &DriverConfig,
-        max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::DeviceSet>> + Send + 'a {
-        D::HardwareType::register_devices(drc, cfg, max_history)
-    }
 }
