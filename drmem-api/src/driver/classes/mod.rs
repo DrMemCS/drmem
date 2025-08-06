@@ -10,8 +10,10 @@
 
 mod dimmer_type;
 mod switch_type;
+mod weather_type;
 
 // Make top-level types available to driver writers.
 
 pub use dimmer_type::Dimmer;
 pub use switch_type::Switch;
+pub use weather_type::{Units, Weather};
