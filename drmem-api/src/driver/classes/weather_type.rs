@@ -11,8 +11,8 @@ pub enum Units {
 }
 
 pub struct Weather {
-    station: String,
-    units: Units,
+    pub station: String,
+    pub units: Units,
 
     pub dewpt: driver::ReadOnlyDevice<f64>,
     pub htidx: driver::ReadOnlyDevice<f64>,
