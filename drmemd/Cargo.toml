@@ -113,9 +113,9 @@ optional = true
 # This section defines the optional dependencies for backend storage.
 
 [dependencies.redis]
-version = "0.31"
+version = "0.32"
 default-features = false
-features = ["tokio-comp", "streams"]
+features = ["tokio-comp", "streams", "tcp_nodelay"]
 optional = true
 
 # This section defines the optional dependencies for the 'graphql'
