@@ -21,9 +21,10 @@ use crate::driver::{
 };
 use std::future::Future;
 
-// Define a "marker" trait for registering switches.
-
+/// Defines the common API used by Switches.
 pub struct Switch {
+    /// Indicates the state of the switch. Writing `true` or `false`
+    /// turns the switch on and off, respectively.
     pub state: ReadWriteDevice<bool>,
 }
 
