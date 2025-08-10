@@ -31,10 +31,8 @@ use tracing::{error, warn};
 
 const CHAN_SIZE: usize = 20;
 
-type ReadingState = (
-    broadcast::Sender<device::Reading>,
-    Option<device::Reading>
-);
+type ReadingState =
+    (broadcast::Sender<device::Reading>, Option<device::Reading>);
 
 pub mod config;
 mod glob;
