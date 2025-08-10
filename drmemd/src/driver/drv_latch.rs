@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 use tokio::sync::Mutex;
 
 // This enum represents the two states in which the latch can be.
@@ -18,12 +18,6 @@ pub struct Instance {
     state: LatchState,
     active_value: device::Value,
     inactive_value: device::Value,
-}
-
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_trigger: driver::ReadWriteDevice<bool>,
-    d_reset: driver::ReadWriteDevice<bool>,
 }
 
 impl<'a> Instance {
@@ -95,14 +89,18 @@ impl<'a> Instance {
     }
 }
 
-impl driver::API for Instance {
-    type DeviceSet = Devices;
+pub struct Devices {
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_trigger: driver::ReadWriteDevice<bool>,
+    d_reset: driver::ReadWriteDevice<bool>,
+}
 
-    fn register_devices(
-        core: driver::RequestChan,
+impl driver::Registrator for Devices {
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();
         let trigger_name = "trigger".parse::<device::Base>().unwrap();
         let reset_name = "reset".parse::<device::Base>().unwrap();
@@ -128,14 +126,18 @@ impl driver::API for Instance {
             })
         })
     }
+}
+
+impl driver::API for Instance {
+    type HardwareType = Devices;
 
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let active_value = Instance::get_active_value(cfg);
         let inactive_value = Instance::get_inactive_value(cfg);
 
-        let fut = async move {
+        async move {
             // Validate the configuration.
 
             let active_value = active_value?;
@@ -144,16 +146,14 @@ impl driver::API for Instance {
             // Build and return the future.
 
             Ok(Box::new(Instance::new(active_value, inactive_value)))
-        };
-
-        Box::pin(fut)
+        }
     }
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+        devices: Arc<Mutex<Self::HardwareType>>,
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             let mut devices = devices.lock().await;
 
             let mut reset = false;
@@ -201,9 +201,7 @@ impl driver::API for Instance {
                     }
                 }
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

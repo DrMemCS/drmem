@@ -3,9 +3,9 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
+use std::convert::Infallible;
 use std::future::Future;
 use std::sync::Arc;
-use std::{convert::Infallible, pin::Pin};
 use std::{
     net::{SocketAddr, SocketAddrV4},
     str,
@@ -108,13 +108,6 @@ mod server {
 pub struct Instance {
     sock: UdpSocket,
     seq: u16,
-}
-
-pub struct Devices {
-    d_state: driver::ReadOnlyDevice<bool>,
-    d_source: driver::ReadOnlyDevice<String>,
-    d_offset: driver::ReadOnlyDevice<f64>,
-    d_delay: driver::ReadOnlyDevice<f64>,
 }
 
 impl Instance {
@@ -364,14 +357,19 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
-    type DeviceSet = Devices;
+pub struct Devices {
+    d_state: driver::ReadOnlyDevice<bool>,
+    d_source: driver::ReadOnlyDevice<String>,
+    d_offset: driver::ReadOnlyDevice<f64>,
+    d_delay: driver::ReadOnlyDevice<f64>,
+}
 
-    fn register_devices(
-        core: driver::RequestChan,
+impl driver::Registrator for Devices {
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         _: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         // It's safe to use `.unwrap()` for these names because, in a
         // fully-tested, released version of this driver, we would
         // have seen and fixed any panics.
@@ -403,13 +401,17 @@ impl driver::API for Instance {
             })
         })
     }
+}
+
+impl driver::API for Instance {
+    type HardwareType = Devices;
 
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let addr = Instance::get_cfg_address(cfg);
 
-        let fut = async move {
+        async move {
             // Validate the configuration.
 
             let addr = addr?;
@@ -423,16 +425,14 @@ impl driver::API for Instance {
                 }
             }
             Err(Error::OperationError("couldn't create socket".to_owned()))
-        };
-
-        Box::pin(fut)
+        }
     }
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Devices>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+        devices: Arc<Mutex<Self::HardwareType>>,
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             // Record the peer's address in the "cfg" field of the
             // span.
 
@@ -504,9 +504,7 @@ impl driver::API for Instance {
                     devices.d_state.report_update(false).await;
                 }
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

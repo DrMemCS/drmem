@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 use tokio::{sync::Mutex, time};
 use tracing::{debug, info};
 
@@ -24,11 +24,6 @@ pub struct Instance {
     active_value: device::Value,
     inactive_value: device::Value,
     millis: time::Duration,
-}
-
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_enable: driver::ReadWriteDevice<bool>,
 }
 
 impl Instance {
@@ -185,14 +180,17 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
-    type DeviceSet = Devices;
+pub struct Devices {
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_enable: driver::ReadWriteDevice<bool>,
+}
 
-    fn register_devices(
-        core: driver::RequestChan,
+impl driver::Registrator for Devices {
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();
         let enable_name = "enable".parse::<device::Base>().unwrap();
 
@@ -216,99 +214,92 @@ impl driver::API for Instance {
             Ok(Devices { d_output, d_enable })
         })
     }
+}
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+impl driver::API for Instance {
+    type HardwareType = Devices;
+
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
         let millis = Instance::get_cfg_millis(cfg);
         let active_value = Instance::get_active_value(cfg);
         let inactive_value = Instance::get_inactive_value(cfg);
 
-        let fut = async move {
-            // Validate the configuration.
+        // Validate the configuration.
 
-            let millis = millis?;
-            let active_value = active_value?;
-            let inactive_value = inactive_value?;
+        let millis = millis?;
+        let active_value = active_value?;
+        let inactive_value = inactive_value?;
 
-            // Build and return the future.
+        // Build and return the future.
 
-            Ok(Box::new(Instance::new(
-                active_value,
-                inactive_value,
-                millis,
-            )))
-        };
-
-        Box::pin(fut)
+        Ok(Box::new(Instance::new(
+            active_value,
+            inactive_value,
+            millis,
+        )))
     }
 
-    fn run<'a>(
-        &'a mut self,
-        devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
-            let mut timeout = time::Instant::now();
-            let mut devices = devices.lock().await;
+    async fn run(
+        &mut self,
+        devices: Arc<Mutex<Self::HardwareType>>,
+    ) -> Infallible {
+        let mut timeout = time::Instant::now();
+        let mut devices = devices.lock().await;
 
-            // Initialize the reported state of the timer.
+        // Initialize the reported state of the timer.
 
-            devices.d_enable.report_update(false).await;
-            devices
-                .d_output
-                .report_update(self.inactive_value.clone())
-                .await;
+        devices.d_enable.report_update(false).await;
+        devices
+            .d_output
+            .report_update(self.inactive_value.clone())
+            .await;
 
-            loop {
-                info!("state {:?} : waiting for event", &self.state);
+        loop {
+            info!("state {:?} : waiting for event", &self.state);
 
-                #[rustfmt::skip]
-                tokio::select! {
-                    // If the driver is in a timing cycle, add the
-                    // sleep future to the list of futures to await.
+            #[rustfmt::skip]
+            tokio::select! {
+                // If the driver is in a timing cycle, add the sleep
+                // future to the list of futures to await.
 
-                    _ = time::sleep_until(timeout), if self.timing() => {
-			debug!("state {:?} : timeout occurred", &self.state);
+                _ = time::sleep_until(timeout), if self.timing() => {
+		    debug!("state {:?} : timeout occurred", &self.state);
 
-			// If the timeout occurs, update the state and
-			// set the output to the inactive value.
+		    // If the timeout occurs, update the state and set
+		    // the output to the inactive value.
 
-			self.time_expired();
-			devices
-                            .d_output
-                            .report_update(self.inactive_value.clone())
-                            .await;
+		    self.time_expired();
+		    devices
+                        .d_output
+                        .report_update(self.inactive_value.clone())
+                        .await;
+                }
+
+                // Always look for settings. We're pattern matching
+                // so, if all clients close their handles, this branch
+                // will forever be disabled. That should never happen
+                // since one handle is saved in the device look-up
+                // table. All other handles are cloned from it.
+
+                Some((b, reply)) = devices.d_enable.next_setting() => {
+                    let (out, tmo) = self.update_state(b);
+
+                    reply(Ok(b));
+
+                    debug!("state {:?} : new input -> {}", &self.state, b);
+
+                    if let Some(tmo) = tmo {
+			timeout = tmo
                     }
 
-                    // Always look for settings. We're pattern
-                    // matching so, if all clients close their
-                    // handles, this branch will forever be
-                    // disabled. That should never happen since one
-                    // handle is saved in the device look-up
-                    // table. All other handles are cloned from it.
+                    devices.d_enable.report_update(b).await;
 
-                    Some((b, reply)) = devices.d_enable.next_setting() => {
-                        let (out, tmo) = self.update_state(b);
-
-                        reply(Ok(b));
-
-                        debug!("state {:?} : new input -> {}", &self.state, b);
-
-                        if let Some(tmo) = tmo {
-			    timeout = tmo
-                        }
-
-                        devices.d_enable.report_update(b).await;
-
-                        if let Some(out) = out {
-			    devices.d_output.report_update(out).await;
-                        }
+                    if let Some(out) = out {
+			devices.d_output.report_update(out).await;
                     }
                 }
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

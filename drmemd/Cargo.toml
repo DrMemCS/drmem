@@ -1,6 +1,6 @@
 [package]
 name = "drmemd"
-version = "0.5.1"
+version = "0.6.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 description = "Main process of the DrMem control system"
@@ -19,9 +19,6 @@ lrlex = "0.13"
 lrpar = "0.13"
 
 [dependencies]
-async-trait.workspace = true
-async-trait.default-features = false
-
 futures.workspace = true
 futures.default-features = false
 futures.features = ["alloc"]
@@ -70,7 +67,7 @@ palette.features = ["libm", "named", "named_from_str"]
 
 lazy_static = { version = "1", default-features = false }
 
-drmem-api = { path = "../drmem-api", version = "0.5" }
+drmem-api = { path = "../drmem-api", version = "0.6" }
 
 cfgrammar.version = "0.13"
 cfgrammar.default-features = false
@@ -95,30 +92,30 @@ noop-waker = "0.1"
 
 [dependencies.drmem-drv-ntp]
 path = "../drivers/drmem-drv-ntp"
-version = "0.5"
+version = "0.6"
 optional = true
 
 [dependencies.drmem-drv-sump]
 path = "../drivers/drmem-drv-sump"
-version = "0.5"
+version = "0.6"
 optional = true
 
 [dependencies.drmem-drv-tplink]
 path = "../drivers/drmem-drv-tplink"
-version = "0.5"
+version = "0.6"
 optional = true
 
 [dependencies.drmem-drv-weather-wu]
 path = "../drivers/drmem-drv-weather-wu"
-version = "0.5"
+version = "0.6"
 optional = true
 
 # This section defines the optional dependencies for backend storage.
 
 [dependencies.redis]
-version = "0.31"
+version = "0.32"
 default-features = false
-features = ["tokio-comp", "streams"]
+features = ["tokio-comp", "streams", "tcp_nodelay"]
 optional = true
 
 # This section defines the optional dependencies for the 'graphql'

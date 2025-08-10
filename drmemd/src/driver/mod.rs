@@ -1,4 +1,8 @@
-use drmem_api::{device, driver, Result};
+use drmem_api::{
+    device,
+    driver::{self, Registrator, API},
+    Result,
+};
 use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
@@ -31,11 +35,11 @@ type DriverInfo = (&'static str, &'static str, Launcher);
 
 fn mgr_body<T>(
     name: driver::Name,
-    devices: T::DeviceSet,
+    devices: T::HardwareType,
     cfg: driver::DriverConfig,
 ) -> MgrTask
 where
-    T: driver::API + Send + 'static,
+    T: API + Send + 'static,
 {
     Box::pin(
         async move {
@@ -119,11 +123,11 @@ fn manage_instance<T>(
     name: driver::Name,
     prefix: device::Path,
     cfg: driver::DriverConfig,
-    req_chan: driver::RequestChan,
+    mut req_chan: driver::RequestChan,
     max_history: Option<usize>,
 ) -> MgrFuncRet
 where
-    T: driver::API + Send + 'static,
+    T: API + Send + 'static,
 {
     // Return a future that returns an error if the devices couldn't
     // be registered, or returns a future that manages the running
@@ -132,23 +136,22 @@ where
     Box::pin(async move {
         // Let the driver API register the necessary devices.
 
-        let devices = T::register_devices(req_chan, &cfg, max_history)
-            .instrument(info_span!("one-time-init", name = name.as_ref()))
-            .await?;
+        let devices =
+            T::HardwareType::register_devices(&mut req_chan, &cfg, max_history)
+                .instrument(info_span!("one-time-init", name = name.as_ref()))
+                .await?;
 
         // Create a future that manages the instance.
 
-        Ok(Box::pin(async move {
-            let drv_name = name.clone();
+        let drv_name = name.clone();
 
-            mgr_body::<T>(name, devices, cfg)
-                .instrument(info_span!(
-                    "mngr",
-                    drvr = drv_name.as_ref(),
-                    path = ?prefix
-                ))
-                .await
-        }) as MgrTask)
+        Ok(
+            Box::pin(mgr_body::<T>(name, devices, cfg).instrument(info_span!(
+                "mngr",
+                drvr = drv_name.as_ref(),
+                path = ?prefix
+            ))) as MgrTask,
+        )
     }) as MgrFuncRet
 }
 

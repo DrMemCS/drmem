@@ -4,8 +4,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::{
-    convert::Infallible, future::Future, ops::RangeInclusive, pin::Pin,
-    sync::Arc,
+    convert::Infallible, future::Future, ops::RangeInclusive, sync::Arc,
 };
 use tokio::sync::Mutex;
 
@@ -20,11 +19,6 @@ pub struct Instance {
     init_index: Option<i32>,
     def_val: device::Value,
     values: Vec<Entry>,
-}
-
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_index: driver::ReadWriteDevice<i32>,
 }
 
 impl Instance {
@@ -201,14 +195,17 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
-    type DeviceSet = Devices;
+pub struct Devices {
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_index: driver::ReadWriteDevice<i32>,
+}
 
-    fn register_devices(
-        core: driver::RequestChan,
+impl driver::Registrator for Devices {
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();
         let index_name = "index".parse::<device::Base>().unwrap();
 
@@ -229,10 +226,14 @@ impl driver::API for Instance {
             Ok(Devices { d_output, d_index })
         })
     }
+}
+
+impl driver::API for Instance {
+    type HardwareType = Devices;
 
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let init_index = Instance::get_cfg_init_val(cfg);
         let def_value = Instance::get_cfg_def_val(cfg);
         let values = if let Ok(ref def_value) = def_value {
@@ -241,16 +242,14 @@ impl driver::API for Instance {
             Ok(vec![])
         };
 
-        Box::pin(async move {
-            Ok(Box::new(Instance::new(init_index?, def_value?, values?)))
-        })
+        async move { Ok(Box::new(Instance::new(init_index?, def_value?, values?))) }
     }
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+        devices: Arc<Mutex<Self::HardwareType>>,
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             let mut devices = devices.lock().await;
 
             // If we have an initial value, use it.
@@ -278,9 +277,7 @@ impl driver::API for Instance {
                 devices.d_index.report_update(v).await
             }
             panic!("can no longer receive settings");
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

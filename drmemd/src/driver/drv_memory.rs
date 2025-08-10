@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 use tokio::sync::Mutex;
 
 // Defines the signature if a function that validates a
@@ -94,21 +94,6 @@ impl Devices {
             Poll::Pending
         })
     }
-}
-
-pub struct Instance;
-
-impl Instance {
-    pub const NAME: &'static str = "memory";
-
-    pub const SUMMARY: &'static str = "An area in memory to set values.";
-
-    pub const DESCRIPTION: &'static str = include_str!("drv_memory.md");
-
-    /// Creates a new `Instance` instance.
-    pub fn new() -> Instance {
-        Instance {}
-    }
 
     fn read_name(m: &toml::Table) -> Result<device::Base> {
         match m.get("name") {
@@ -173,14 +158,27 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
-    type DeviceSet = Devices;
+pub struct Instance;
 
-    fn register_devices(
-        core: driver::RequestChan,
+impl Instance {
+    pub const NAME: &'static str = "memory";
+
+    pub const SUMMARY: &'static str = "An area in memory to set values.";
+
+    pub const DESCRIPTION: &'static str = include_str!("drv_memory.md");
+
+    /// Creates a new `Instance` instance.
+    pub fn new() -> Instance {
+        Instance {}
+    }
+}
+
+impl driver::Registrator for Devices {
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let vars = Self::get_cfg_vars(cfg);
 
         Box::pin(async move {
@@ -220,18 +218,22 @@ impl driver::API for Instance {
             Ok(Devices { set: devs })
         })
     }
+}
+
+impl driver::API for Instance {
+    type HardwareType = Devices;
 
     fn create_instance(
         _cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
-        Box::pin(async move { Ok(Box::new(Instance::new())) })
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
+        async move { Ok(Box::new(Instance::new())) }
     }
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        Box::pin(async move {
+        devices: Arc<Mutex<Self::HardwareType>>,
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             let mut devices = devices.lock().await;
 
             loop {
@@ -239,7 +241,7 @@ impl driver::API for Instance {
 
                 devices.set[idx].0.report_update(val).await
             }
-        })
+        }
     }
 }
 
@@ -308,7 +310,7 @@ mod tests {
     #[test]
     fn test_configuration() {
         use super::device;
-        use super::Instance;
+        use super::Devices;
         use toml::{map::Map, Table, Value};
 
         // Test for an empty Map or a Map that doesn't have the "vars"
@@ -319,23 +321,23 @@ mod tests {
         {
             let mut map = Map::new();
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Devices::get_cfg_vars(&map).is_err());
 
             let _ = map.insert("junk".into(), Value::Boolean(true));
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Devices::get_cfg_vars(&map).is_err());
 
             let _ = map.insert("vars".into(), Value::Boolean(true));
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Devices::get_cfg_vars(&map).is_err());
 
             let _ = map.insert("vars".into(), Value::Table(Table::new()));
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Devices::get_cfg_vars(&map).is_err());
 
             let _ = map.insert("vars".into(), Value::Array(vec![]));
 
-            assert!(Instance::get_cfg_vars(&map).is_err());
+            assert!(Devices::get_cfg_vars(&map).is_err());
         }
 
         // Now make sure the config code creates a single memory
@@ -371,7 +373,7 @@ mod tests {
                     Value::Array(vec![Value::Table(tbl)]),
                 );
 
-                let result = Instance::get_cfg_vars(&map).unwrap();
+                let result = Devices::get_cfg_vars(&map).unwrap();
 
                 assert!(result.len() == 1);
                 assert_eq!(result[0].0.to_string(), entry.0);

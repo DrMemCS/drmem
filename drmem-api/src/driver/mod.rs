@@ -3,7 +3,7 @@
 
 use crate::types::{device, Error};
 use std::future::Future;
-use std::{convert::Infallible, pin::Pin, sync::Arc};
+use std::{convert::Infallible, sync::Arc};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use toml::value;
 
@@ -19,6 +19,7 @@ pub type Name = Arc<str>;
 /// values.
 pub type DriverConfig = value::Table;
 
+pub mod classes;
 mod ro_device;
 mod rw_device;
 
@@ -67,7 +68,6 @@ pub enum Request {
 ///
 /// This type wraps the `mpsc::Sender<>` and defines a set of helper
 /// methods to send requests and receive replies with the core.
-#[derive(Clone)]
 pub struct RequestChan {
     driver_name: Name,
     prefix: device::Path,
@@ -198,22 +198,28 @@ impl RequestChan {
     }
 }
 
-/// Defines a boxed type that supports the `driver::API` trait.
-pub type DriverType<T> = Box<dyn API<DeviceSet = <T as API>::DeviceSet>>;
+/// A trait which manages details about driver registration.
+///
+/// All drivers will implement a type, or use one of the predefined
+/// types, that registers the set of needed devices.
+///
+/// The only function in this trait is one to register the device(s)
+/// with core and return the set of handles.
+pub trait Registrator: Sized + Send {
+    fn register_devices<'a>(
+        drc: &'a mut RequestChan,
+        cfg: &DriverConfig,
+        max_history: Option<usize>,
+    ) -> impl Future<Output = Result<Self>> + Send + 'a;
+}
 
 /// All drivers implement the `driver::API` trait.
 ///
 /// The `API` trait defines methods that are expected to be available
 /// from a driver instance. By supporting this API, the framework can
 /// create driver instances and monitor them as they run.
-pub trait API: Send {
-    type DeviceSet: Send + Sync;
-
-    fn register_devices(
-        drc: RequestChan,
-        cfg: &DriverConfig,
-        max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>>;
+pub trait API: Send + Sync {
+    type HardwareType: Registrator;
 
     /// Creates an instance of the driver.
     ///
@@ -243,9 +249,7 @@ pub trait API: Send {
     /// bound.
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>>
-    where
-        Self: Sized;
+    ) -> impl Future<Output = Result<Box<Self>>> + Send + '_;
 
     /// Runs the instance of the driver.
     ///
@@ -255,8 +259,8 @@ pub trait API: Send {
     /// and if a driver panics or returns an error from this method,
     /// it gets reported in the log and then, after a short delay, the
     /// driver is restarted.
-    fn run<'a>(
-        &'a mut self,
-        devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>>;
+    fn run(
+        &mut self,
+        devices: Arc<Mutex<Self::HardwareType>>,
+    ) -> impl Future<Output = Infallible> + Send + '_;
 }

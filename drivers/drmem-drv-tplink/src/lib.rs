@@ -30,14 +30,13 @@
 //   Received:  {"system":{"set_bright":{"err_code":-2,"err_msg":"member not support"}}}
 
 use drmem_api::{
-    device,
-    driver::{self, DriverConfig},
+    driver::{self, classes, DriverConfig},
     Error, Result,
 };
 use futures::{Future, FutureExt};
+use std::convert::Infallible;
 use std::net::SocketAddrV4;
 use std::sync::Arc;
-use std::{convert::Infallible, pin::Pin};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -54,12 +53,6 @@ pub struct Instance {
     addr: SocketAddrV4,
     reported_error: Option<bool>,
     buf: [u8; BUF_TOTAL],
-}
-
-pub struct Devices {
-    d_error: driver::ReadOnlyDevice<bool>,
-    d_brightness: driver::ReadWriteDevice<f64>,
-    d_led: driver::ReadWriteDevice<bool>,
 }
 
 impl Instance {
@@ -437,7 +430,7 @@ impl Instance {
     async fn main_loop<'a>(
         &mut self,
         s: &mut TcpStream,
-        devices: &mut MutexGuard<'_, Devices>,
+        devices: &mut MutexGuard<'_, <Instance as driver::API>::HardwareType>,
     ) {
         // Create a 5-second interval timer which will be used to poll
         // the device to see if its state was changed by some outside
@@ -451,13 +444,13 @@ impl Instance {
         // Main loop of the driver. This loop never ends.
 
         'main: loop {
-            self.sync_error_state(&mut devices.d_error, false).await;
+            self.sync_error_state(&mut devices.error, false).await;
 
             // Get mutable references to the setting channels.
 
-            let Devices {
-                d_brightness: ref mut d_b,
-                d_led: ref mut d_l,
+            let classes::Dimmer {
+                brightness: ref mut d_b,
+                indicator: ref mut d_l,
                 ..
             } = **devices;
 
@@ -489,7 +482,7 @@ impl Instance {
 			if current_brightness != br {
 			    debug!("external brightness update: {}", br);
 			    current_brightness = br;
-			    devices.d_brightness.report_update(br).await;
+			    devices.brightness.report_update(br).await;
 			}
 		    } else {
 			break 'main
@@ -533,7 +526,7 @@ impl Instance {
 
 		    if current_led != v {
 			if self.handle_led_setting(
-			    s, v, reply, &mut devices.d_led
+			    s, v, reply, &mut devices.indicator
 			).await == Ok(()) {
 			    current_led = v;
 			} else {
@@ -556,67 +549,32 @@ impl Instance {
 }
 
 impl driver::API for Instance {
-    type DeviceSet = Devices;
-
-    // Registers two devices, `error` and `brightness`.
-
-    fn register_devices(
-        core: driver::RequestChan,
-        _cfg: &DriverConfig,
-        max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
-        let error_name = "error"
-            .parse::<device::Base>()
-            .expect("parsing 'error' should never fail");
-        let brightness_name = "brightness"
-            .parse::<device::Base>()
-            .expect("parsing 'brightness' should never fail");
-        let led_name = "led"
-            .parse::<device::Base>()
-            .expect("parsing 'led' should never fail");
-
-        Box::pin(async move {
-            // Define the devices managed by this driver.
-
-            let d_error =
-                core.add_ro_device(error_name, None, max_history).await?;
-            let d_brightness = core
-                .add_rw_device(brightness_name, None, max_history)
-                .await?;
-            let d_led = core.add_rw_device(led_name, None, max_history).await?;
-
-            Ok(Devices {
-                d_error,
-                d_brightness,
-                d_led,
-            })
-        })
-    }
+    type HardwareType = classes::Dimmer;
 
     // This driver doesn't store any data in its instance; it's all
     // stored in local variables in the `.run()` method.
 
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let cfg_addr = Instance::get_cfg_address(cfg);
 
-        Box::pin(async {
+        async {
             Ok(Box::new(Instance {
                 addr: cfg_addr?,
                 reported_error: None,
                 buf: [0; BUF_TOTAL],
             }))
-        })
+        }
     }
 
     // Main run loop for the driver.
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Devices>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+        devices: Arc<Mutex<Self::HardwareType>>,
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             // Lock the mutex for the life of the driver. There is no
             // other task that wants access to these device handles.
             // An Arc<Mutex<>> is the only way I know of sharing a
@@ -644,16 +602,14 @@ impl driver::API for Instance {
                     }
                 }
 
-                self.sync_error_state(&mut devices.d_error, true).await;
+                self.sync_error_state(&mut devices.error, true).await;
 
                 // Log the error and then sleep for 10 seconds.
                 // Hopefully the device will be available then.
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

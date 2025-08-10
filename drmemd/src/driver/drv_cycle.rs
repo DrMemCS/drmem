@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, pin::Pin, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 use tokio::{sync::Mutex, time};
 use tracing::{self, debug};
 
@@ -24,11 +24,6 @@ pub struct Instance {
     state: CycleState,
     index: usize,
     millis: time::Duration,
-}
-
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_enable: driver::ReadWriteDevice<bool>,
 }
 
 impl Instance {
@@ -198,14 +193,17 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
-    type DeviceSet = Devices;
+pub struct Devices {
+    d_output: driver::ReadOnlyDevice<device::Value>,
+    d_enable: driver::ReadWriteDevice<bool>,
+}
 
-    fn register_devices(
-        core: driver::RequestChan,
+impl driver::Registrator for Devices {
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();
         let enable_name = "enable".parse::<device::Base>().unwrap();
 
@@ -230,32 +228,34 @@ impl driver::API for Instance {
             Ok(Devices { d_output, d_enable })
         })
     }
+}
+
+impl driver::API for Instance {
+    type HardwareType = Devices;
 
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let millis = Instance::get_cfg_millis(cfg);
         let enabled_at_boot = Instance::get_cfg_enabled(cfg);
         let disabled = Instance::get_inactive_value(cfg);
         let enabled = Instance::get_active_values(cfg);
 
-        let fut = async move {
+        async move {
             Ok(Box::new(Instance::new(
                 enabled_at_boot?,
                 millis?,
                 disabled?,
                 enabled?,
             )))
-        };
-
-        Box::pin(fut)
+        }
     }
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Self::DeviceSet>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+        devices: Arc<Mutex<Self::HardwareType>>,
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             let mut timer = time::interval(self.millis);
             let mut devices = devices.lock().await;
 
@@ -318,9 +318,7 @@ impl driver::API for Instance {
                     }
                 }
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 

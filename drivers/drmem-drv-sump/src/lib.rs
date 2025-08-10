@@ -3,10 +3,10 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
+use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddrV4;
 use std::sync::Arc;
-use std::{convert::Infallible, pin::Pin};
 use tokio::{
     io::{self, AsyncReadExt},
     net::{
@@ -150,14 +150,6 @@ pub struct Instance {
     _tx: OwnedWriteHalf,
 }
 
-pub struct Devices {
-    d_service: driver::ReadOnlyDevice<bool>,
-    d_state: driver::ReadOnlyDevice<bool>,
-    d_duty: driver::ReadOnlyDevice<f64>,
-    d_inflow: driver::ReadOnlyDevice<f64>,
-    d_duration: driver::ReadOnlyDevice<f64>,
-}
-
 impl Instance {
     pub const NAME: &'static str = "sump-gpio";
 
@@ -282,14 +274,20 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
-    type DeviceSet = Devices;
+pub struct Devices {
+    d_service: driver::ReadOnlyDevice<bool>,
+    d_state: driver::ReadOnlyDevice<bool>,
+    d_duty: driver::ReadOnlyDevice<f64>,
+    d_inflow: driver::ReadOnlyDevice<f64>,
+    d_duration: driver::ReadOnlyDevice<f64>,
+}
 
-    fn register_devices(
-        core: driver::RequestChan,
+impl driver::Registrator for Devices {
+    fn register_devices<'a>(
+        core: &'a mut driver::RequestChan,
         _: &DriverConfig,
         max_history: Option<usize>,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::DeviceSet>> + Send>> {
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let service_name = "service".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
         let duty_name = "duty".parse::<device::Base>().unwrap();
@@ -322,14 +320,18 @@ impl driver::API for Instance {
             })
         })
     }
+}
+
+impl driver::API for Instance {
+    type HardwareType = Devices;
 
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<Self>>> + Send>> {
+    ) -> impl Future<Output = Result<Box<Self>>> + Send {
         let addr = Instance::get_cfg_address(cfg);
         let gpm = Instance::get_cfg_gpm(cfg);
 
-        let fut = async move {
+        async move {
             // Validate the configuration.
 
             let addr = addr?;
@@ -348,16 +350,14 @@ impl driver::API for Instance {
                 rx,
                 _tx,
             }))
-        };
-
-        Box::pin(fut)
+        }
     }
 
     fn run<'a>(
         &'a mut self,
-        devices: Arc<Mutex<Devices>>,
-    ) -> Pin<Box<dyn Future<Output = Infallible> + Send + 'a>> {
-        let fut = async move {
+        devices: Arc<Mutex<Self::HardwareType>>,
+    ) -> impl Future<Output = Infallible> + Send + 'a {
+        async move {
             // Record the peer's address in the "cfg" field of the
             // span.
 
@@ -415,9 +415,7 @@ impl driver::API for Instance {
                     }
                 }
             }
-        };
-
-        Box::pin(fut)
+        }
     }
 }
 
