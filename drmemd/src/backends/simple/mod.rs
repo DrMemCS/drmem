@@ -33,8 +33,7 @@ const CHAN_SIZE: usize = 20;
 
 type ReadingState = (
     broadcast::Sender<device::Reading>,
-    Option<device::Reading>,
-    time::SystemTime,
+    Option<device::Reading>
 );
 
 pub mod config;
@@ -61,7 +60,7 @@ impl DeviceInfo {
             owner: owner.into(),
             units: units.cloned(),
             tx_setting,
-            reading: Arc::new(Mutex::new((tx, None, time::UNIX_EPOCH))),
+            reading: Arc::new(Mutex::new((tx, None))),
         }
     }
 }
@@ -103,18 +102,20 @@ fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
             // timestamp will be used for this sample (as well as
             // future samples.)
 
-            if ts <= data.2 {
-                if let Some(nts) =
-                    data.2.checked_add(time::Duration::from_micros(1))
-                {
-                    ts = nts
-                } else {
-                    ts = time::UNIX_EPOCH
-                        .checked_add(time::Duration::new(
-                            i64::MAX as u64,
-                            999_999_999,
-                        ))
-                        .unwrap()
+            if let Some(prev) = &data.1 {
+                if ts <= prev.ts {
+                    if let Some(nts) =
+                        prev.ts.checked_add(time::Duration::from_micros(1))
+                    {
+                        ts = nts
+                    } else {
+                        ts = time::UNIX_EPOCH
+                            .checked_add(time::Duration::new(
+                                i64::MAX as u64,
+                                999_999_999,
+                            ))
+                            .unwrap()
+                    }
                 }
             }
 
@@ -124,7 +125,6 @@ fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
             // Update the device's state.
 
             data.1 = Some(reading);
-            data.2 = ts
         } else {
             error!("couldn't set current value of {}", &name)
         }
