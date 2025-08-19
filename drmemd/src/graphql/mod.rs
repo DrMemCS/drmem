@@ -161,6 +161,25 @@ impl DeviceInfo {
     }
 }
 
+pub struct LogicBlockVariable {
+    name: String,
+    device: String
+}
+
+pub struct LogicBlockExpression {
+    name: String,
+    expr: String
+}
+
+pub struct LogicBlock {
+    name: String,
+    description: String,
+    inputs: Vec<LogicBlockVariable>,
+    outputs: Vec<LogicBlockVariable>,
+    defs: Vec<LogicBlockExpression>,
+    expr: [String]
+}
+
 // This defines the top-level Query API.
 
 struct Config;
