@@ -1,8 +1,7 @@
 use crate::backends::store;
 use drmem_api::{Error, Result};
 use serde_derive::Deserialize;
-use std::collections::HashMap;
-use std::env;
+use std::{collections::HashMap, env, sync::Arc};
 use toml::{self, value};
 use tracing::Level;
 
@@ -79,7 +78,7 @@ pub struct Driver {
 #[derive(Deserialize)]
 pub struct Logic {
     pub name: String,
-    pub summary: Option<String>,
+    pub summary: Option<Arc<str>>,
     #[serde(default)]
     pub defs: HashMap<String, String>,
     pub exprs: Vec<String>,
