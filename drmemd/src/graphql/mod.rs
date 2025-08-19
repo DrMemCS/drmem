@@ -161,23 +161,91 @@ impl DeviceInfo {
     }
 }
 
-pub struct LogicBlockVariable {
+struct LogicBlockVariable {
     name: String,
-    device: String
+    device: String,
 }
 
-pub struct LogicBlockExpression {
-    name: String,
-    expr: String
+#[graphql_object(
+    Context = ConfigDb,
+    description = "Shows the input/output variable mapping in a logic block."
+)]
+impl LogicBlockVariable {
+    #[graphql(description = "The name of the variable.")]
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[graphql(description = "The name of the variable.")]
+    fn device(&self) -> &str {
+        &self.device
+    }
 }
 
-pub struct LogicBlock {
+struct LogicBlockExpression {
+    name: String,
+    expr: String,
+}
+
+#[graphql_object(
+    Context = ConfigDb,
+    description = "Shows the expression definitions in a logic block."
+)]
+impl LogicBlockExpression {
+    #[graphql(description = "The name of the definition.")]
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[graphql(description = "The expression.")]
+    fn expr(&self) -> &str {
+        &self.expr
+    }
+}
+
+struct LogicBlock {
     name: String,
     description: String,
     inputs: Vec<LogicBlockVariable>,
     outputs: Vec<LogicBlockVariable>,
     defs: Vec<LogicBlockExpression>,
-    expr: [String]
+    expr: Vec<String>,
+}
+
+#[graphql_object(
+    Context = ConfigDb,
+    description = "Shows the configuration of a logic block."
+)]
+impl LogicBlock {
+    #[graphql(description = "The name of the logic block.")]
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[graphql(description = "A description of the logic block's purpose.")]
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    #[graphql(description = "The inputs needed by the logic block.")]
+    fn inputs(&self) -> &[LogicBlockVariable] {
+        &self.inputs
+    }
+
+    #[graphql(description = "The outputs controlled by the logic block.")]
+    fn outputs(&self) -> &[LogicBlockVariable] {
+        &self.outputs
+    }
+
+    #[graphql(description = "Shared expressions used by the logic block.")]
+    fn defs(&self) -> &[LogicBlockExpression] {
+        &self.defs
+    }
+
+    #[graphql(description = "Control expressions used by the logic block.")]
+    fn expr(&self) -> &[String] {
+        &self.expr
+    }
 }
 
 // This defines the top-level Query API.
