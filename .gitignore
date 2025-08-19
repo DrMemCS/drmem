@@ -4,6 +4,9 @@
 # the project.
 
 CHAT-GPT.md
+CONTRIBUTING.md
+ARCHITECTURE.md
+check.sh
 test.sh
 watch.sh
 build-dev.sh
@@ -18,3 +21,6 @@ test-publish-api.sh
 test-publish-backends.sh
 test-publish-drivers.sh
 test-publish-drmemd.sh
+
+*.sql
+drmem.toml
