@@ -410,8 +410,8 @@ impl Node {
         loop {
             // Create a future that yields the time-of-day using the
             // TimeFilter. If no expression uses time, then `time_ch`
-            // will be `None` and we return a future that immediately
-            // yields `None`.
+            // will be `None` and we return a future that never
+            // resolves.
 
             let wait_for_time = async {
                 match self.time_ch.as_mut() {
@@ -422,8 +422,8 @@ impl Node {
 
             // Create a future that yields the next solar update. If
             // no expression uses solar data, `solar_ch` will be
-            // `None` and we, instead, return a future that
-            // immediately yields `None`.
+            // `None` and we, instead, return a future that never
+            // resolves.
 
             let wait_for_solar = async {
                 match self.solar_ch.as_mut() {
@@ -517,18 +517,19 @@ impl Node {
             async move {
                 let name = cfg.name.clone();
 
-                // Create a new instance and let it initialize itself. If
-                // an error occurs, return it.
+                // Create a new instance and let it initialize itself.
+                // Hold onto the result -- success or failure -- and
+                // handle it after the barrier.
 
                 let node = Node::init(c_req, rx_tod, rx_solar, cfg)
                     .instrument(info_span!("init", name = &name))
                     .await;
 
-                // This barrier syncs this tasks with the start-up task.
-                // When both wait on the barrier, they both wake up and
-                // continue. The start-up task then knows this logic block
-                // has registered all the devices and tod and solar
-                // handles it needs.
+                // This barrier syncs this tasks with the start-up
+                // task. When both wait on the barrier, they both wake
+                // up and continue. The start-up task then knows this
+                // logic block has registered all the devices, tod,
+                // and solar handles it needs.
 
                 barrier.wait().await;
 
@@ -537,8 +538,8 @@ impl Node {
                 // NOTE: We used the '?' operator here instead of the
                 // assignment above because we have to wait on the
                 // barrier. If we let the '?' operator return before
-                // waiting on the barrier, the initialization loop would
-                // wait forever.
+                // waiting on the barrier, the initialization loop
+                // would wait forever.
 
                 node?.run().await
             }
