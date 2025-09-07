@@ -23,7 +23,11 @@ impl reject::Reject for NoAuthorization {}
 // The Context parameter for Queries.
 
 #[derive(Clone)]
-struct ConfigDb(crate::driver::DriverDb, client::RequestChan);
+struct ConfigDb(
+    crate::driver::DriverDb,
+    client::RequestChan,
+    Vec<Arc<LogicBlock>>,
+);
 
 impl juniper::Context for ConfigDb {}
 
@@ -267,6 +271,51 @@ impl Config {
     fn is_true(_e: &&client::DevInfoReply) -> bool {
         true
     }
+
+    // This method returns a closure that can be used with
+    // `Iterator<Item = Arc<LogicBlock>>::filter`.
+
+    fn logic_block_filter(
+        name: Option<String>,
+        devices: Option<Vec<String>>,
+    ) -> impl FnMut(&Arc<LogicBlock>) -> bool {
+        move |lb: &Arc<LogicBlock>| {
+            // If a name was specified, return `false` if the current
+            // LogicBlock doesn't that name. If it has the name, we
+            // still need to see if the device name  filter further
+            // restricts the results.
+
+            if let Some(ref name) = name {
+                if *name != lb.name {
+                    return false;
+                }
+            }
+
+            // If a list of device names was specified, look through
+            // the inputs and outputs to see if any devices match any
+            // in the list.
+
+            if let Some(ref devices) = devices {
+                for ins in lb.inputs.iter() {
+                    if devices.iter().any(|v| v == &ins.device) {
+                        return true;
+                    }
+                }
+                for outs in lb.outputs.iter() {
+                    if devices.iter().any(|v| v == &outs.device) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // If neither filter was given or the name filter matched,
+            // then return `true` to keep the current entry in the
+            // results.
+
+            return true;
+        }
+    }
 }
 
 #[graphql_object(
@@ -274,6 +323,32 @@ impl Config {
     description = "Reports configuration information for `drmemd`."
 )]
 impl Config {
+    #[graphql(description = "Returns logic blocks configured in the node. By \
+                             default, all logic blocks are returned. If either \
+                             parameter is given, the results are filtered to \
+                             only return information that matches the selection \
+                             values.")]
+    fn logic_blocks(
+        #[graphql(context)] db: &ConfigDb,
+        #[graphql(description = "If provided, only the logic block with the \
+                                 specified name will be returned.")]
+        sel_name: Option<String>,
+        #[graphql(
+            description = "This parameter can specify a list of device \
+                                 names. Only logic blocks that use any of the \
+                                 devices in either input or output will be \
+                                 included in the results."
+        )]
+        sel_devices: Option<Vec<String>>,
+    ) -> result::Result<Vec<Arc<LogicBlock>>, FieldError> {
+        Ok(db
+            .2
+            .iter()
+            .cloned()
+            .filter(Self::logic_block_filter(sel_name, sel_devices))
+            .collect())
+    }
+
     #[graphql(description = "Returns information about the available drivers \
 			     in the running instance of `drmemd`. If `name` \
 			     isn't provided, an array of all driver \
@@ -862,7 +937,7 @@ fn build_base_site(
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    let context = ConfigDb(db, cchan);
+    let context = ConfigDb(db, cchan, vec![]);
     let ctxt = context.clone();
 
     // Create filter that handles GraphQL queries and mutations.
