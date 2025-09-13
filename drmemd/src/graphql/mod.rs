@@ -1,3 +1,4 @@
+use crate::config::Logic;
 use chrono::prelude::*;
 use drmem_api::{client, device, driver, Error};
 use futures::Future;
@@ -208,7 +209,7 @@ impl LogicBlockExpression {
 }
 
 struct LogicBlock {
-    name: String,
+    name: Arc<str>,
     description: String,
     inputs: Vec<LogicBlockVariable>,
     outputs: Vec<LogicBlockVariable>,
@@ -286,7 +287,7 @@ impl Config {
             // restricts the results.
 
             if let Some(ref name) = name {
-                if *name != lb.name {
+                if *name != *lb.name {
                     return false;
                 }
             }
@@ -931,13 +932,55 @@ mod paths {
     }
 }
 
+fn logic_to_gql(logic: &Logic) -> Arc<LogicBlock> {
+    LogicBlock {
+        name: logic.name.clone().into(),
+        description: logic
+            .summary
+            .clone()
+            .unwrap_or_else(|| "".into())
+            .to_string(),
+        inputs: logic
+            .inputs
+            .iter()
+            .map(|v| LogicBlockVariable {
+                name: v.0.clone(),
+                device: v.1.to_string(),
+            })
+            .collect(),
+        outputs: logic
+            .outputs
+            .iter()
+            .map(|v| LogicBlockVariable {
+                name: v.0.clone(),
+                device: v.1.to_string(),
+            })
+            .collect(),
+        defs: logic
+            .defs
+            .iter()
+            .map(|v| LogicBlockExpression {
+                name: v.0.clone(),
+                expr: v.1.clone(),
+            })
+            .collect(),
+        expr: logic.exprs.clone(),
+    }
+    .into()
+}
+
 // Build `warp::Filter`s that define the entire webspace.
 
 fn build_base_site(
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
+    db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    let context = ConfigDb(db, cchan, vec![]);
+    let context = ConfigDb(
+        db,
+        cchan,
+        db_logic.iter().map(logic_to_gql).collect::<Vec<_>>(),
+    );
     let ctxt = context.clone();
 
     // Create filter that handles GraphQL queries and mutations.
@@ -1017,15 +1060,17 @@ fn build_base_site(
 fn build_site(
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
+    db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
 {
-    build_base_site(db, cchan).recover(handle_rejection)
+    build_base_site(db, cchan, db_logic).recover(handle_rejection)
 }
 
 fn build_secure_site(
     cfg: &config::Security,
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
+    db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
 {
     // Clone the table of clients that are allowed in to the system.
@@ -1051,7 +1096,7 @@ fn build_secure_site(
     warp::header::<String>("X-DrMem-Client-Id")
         .and_then(check_client)
         .untuple_one()
-        .and(build_base_site(db, cchan))
+        .and(build_base_site(db, cchan, db_logic))
         .recover(handle_rejection)
 }
 
@@ -1087,19 +1132,20 @@ fn cmp_fprints(a: &str, b: &str) -> bool {
 
 fn build_server(
     cfg: &config::Config,
+    db_logic: &[Logic],
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     if let Some(security) = &cfg.security {
         Box::pin(
-            warp::serve(build_secure_site(security, db, cchan))
+            warp::serve(build_secure_site(security, db, cchan, db_logic))
                 .tls()
                 .key_path(security.key_file.clone())
                 .cert_path(security.cert_file.clone())
                 .bind(cfg.addr),
         ) as Pin<Box<dyn Future<Output = ()> + Send>>
     } else {
-        Box::pin(warp::serve(build_site(db, cchan)).bind(cfg.addr))
+        Box::pin(warp::serve(build_site(db, cchan, db_logic)).bind(cfg.addr))
             as Pin<Box<dyn Future<Output = ()> + Send>>
     }
 }
@@ -1207,11 +1253,12 @@ fn build_mdns_payload(cfg: &config::Config) -> Result<Vec<String>, Error> {
 
 pub fn server(
     cfg: &config::Config,
+    db_logic: &[Logic],
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
     let (resp, task) = Responder::with_default_handle().unwrap();
-    let http_task = build_server(cfg, db, cchan);
+    let http_task = build_server(cfg, db_logic, db, cchan);
 
     match build_mdns_payload(cfg) {
         Ok(payload) => {
