@@ -221,7 +221,7 @@ impl Node {
         c_req: client::RequestChan,
         c_time: broadcast::Receiver<tod::Info>,
         c_solar: broadcast::Receiver<solar::Info>,
-        cfg: &'a config::Logic,
+        cfg: config::Logic,
     ) -> Result<Node> {
         debug!("compiling expressions");
 
@@ -506,23 +506,25 @@ impl Node {
         c_req: client::RequestChan,
         rx_tod: broadcast::Receiver<tod::Info>,
         rx_solar: broadcast::Receiver<solar::Info>,
-        cfg: &config::Logic,
+        cfg: config::Logic,
         barrier: Arc<Barrier>,
     ) -> JoinHandle<Result<Infallible>> {
         let name = cfg.name.clone();
-
-        // Create a new instance and let it initialize itself.  Hold
-        // onto the result -- success or failure -- and handle it
-        // after the barrier.
-
-        let node = Node::init(c_req, rx_tod, rx_solar, cfg)
-            .instrument(info_span!("init", name = &name))
-            .await;
 
         // Put the node in the background.
 
         tokio::spawn(
             async move {
+                let name = cfg.name.clone();
+
+                // Create a new instance and let it initialize itself.
+                // Hold onto the result -- success or failure -- and
+                // handle it after the barrier.
+
+                let node = Node::init(c_req, rx_tod, rx_solar, cfg)
+                    .instrument(info_span!("init", name = &name))
+                    .await;
+
                 // This barrier syncs this tasks with the start-up
                 // task. When both wait on the barrier, they both wake
                 // up and continue. The start-up task then knows this
@@ -616,7 +618,7 @@ mod test {
                 client::RequestChan::new(tx_req),
                 tx_tod.subscribe(),
                 tx_solar.subscribe(),
-                &cfg,
+                cfg,
                 barrier,
             )
             .await;
@@ -764,10 +766,10 @@ mod test {
     // requests can be monitoring requests for other devices or
     // requests for a setting channel to a device.
 
-    fn init_node<'a>(
-        cfg: &'a config::Logic,
+    fn init_node(
+        cfg: config::Logic,
     ) -> (
-        impl Future<Output = Result<Node>> + 'a,
+        impl Future<Output = Result<Node>>,
         mpsc::Receiver<client::Request>,
         broadcast::Sender<tod::Info>,
         broadcast::Sender<solar::Info>,
@@ -818,7 +820,7 @@ mod test {
 
         {
             let cfg = build_config(&[], &[], &[], &[]);
-            let (node, _, tod_tx, sol_tx) = init_node(&cfg);
+            let (node, _, tod_tx, sol_tx) = init_node(cfg);
 
             tokio::pin!(node);
 
@@ -850,7 +852,7 @@ mod test {
                 &[],
                 &["{in} -> {out}"],
             );
-            let (node, _, _, _) = init_node(&cfg);
+            let (node, _, _, _) = init_node(cfg);
 
             // `await` on the future. This should return immediately
             // as an error because there are no expressions to
@@ -868,7 +870,7 @@ mod test {
                 &[("in", "{in}")],
                 &["{in} -> {out}"],
             );
-            let (node, _, _, _) = init_node(&cfg);
+            let (node, _, _, _) = init_node(cfg);
 
             // `await` on the future. This should return immediately
             // as an error because there are no expressions to
@@ -886,7 +888,7 @@ mod test {
                 &[],
                 &["{in} -> {out}"],
             );
-            let (node, _, _, _) = init_node(&cfg);
+            let (node, _, _, _) = init_node(cfg);
 
             // `await` on the future. This should return immediately
             // as an error because there are no expressions to

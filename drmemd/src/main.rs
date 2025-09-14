@@ -174,7 +174,7 @@ async fn run() -> Result<()> {
                     tx_clnt_req.clone(),
                     tx_tod.subscribe(),
                     tx_solar.subscribe(),
-                    logic,
+                    logic.clone(),
                     init_barrier.clone(),
                 )
                 .await;
