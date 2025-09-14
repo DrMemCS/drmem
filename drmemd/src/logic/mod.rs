@@ -516,7 +516,8 @@ impl Node {
         // after the barrier.
 
         let node = Node::init(c_req, rx_tod, rx_solar, cfg)
-            .instrument(info_span!("init", name = &name)).await;
+            .instrument(info_span!("init", name = &name))
+            .await;
 
         // Put the node in the background.
 
@@ -572,8 +573,8 @@ mod test {
 
     impl Emulator {
         pub async fn start(
-            inputs: Vec<(Arc<str>, mpsc::Receiver<device::Value>)>,
-            outputs: Vec<(Arc<str>, driver::TxDeviceSetting)>,
+            mut inputs: Vec<(Arc<str>, mpsc::Receiver<device::Value>)>,
+            mut outputs: Vec<(Arc<str>, driver::TxDeviceSetting)>,
             cfg: config::Logic,
         ) -> Result<(
             broadcast::Sender<tod::Info>,
@@ -581,20 +582,12 @@ mod test {
             task::JoinHandle<Result<bool>>,
             oneshot::Sender<()>,
         )> {
-            Emulator::new(inputs, outputs).launch(cfg).await
-        }
-
-        // Creates a new instance of an Emulator and loads it with the
-        // input and output names and channels.
-
-        fn new(
-            mut inputs: Vec<(Arc<str>, mpsc::Receiver<device::Value>)>,
-            mut outputs: Vec<(Arc<str>, driver::TxDeviceSetting)>,
-        ) -> Self {
             Emulator {
                 inputs: HashMap::from_iter(inputs.drain(..)),
                 outputs: HashMap::from_iter(outputs.drain(..)),
             }
+            .launch(cfg)
+            .await
         }
 
         // Launches a logic block with the provided configuration.
