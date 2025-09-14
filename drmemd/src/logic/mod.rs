@@ -1,8 +1,5 @@
 use drmem_api::{client, device, driver, Result};
-use futures::{
-    future::{join_all, pending},
-    Future,
-};
+use futures::future::{join_all, pending};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -220,191 +217,186 @@ impl Node {
     // Creates an instance of `Node` and initializes its state using
     // the configuration information.
 
-    fn init<'b, 'a: 'b>(
+    async fn init<'a>(
         c_req: client::RequestChan,
         c_time: broadcast::Receiver<tod::Info>,
         c_solar: broadcast::Receiver<solar::Info>,
         cfg: &'a config::Logic,
-    ) -> impl Future<Output = Result<Node>> + 'b {
-        async move {
-            debug!("compiling expressions");
+    ) -> Result<Node> {
+        debug!("compiling expressions");
 
-            if cfg.exprs.is_empty() {
+        if cfg.exprs.is_empty() {
+            return Err(drmem_api::Error::ConfigError(
+                "configuration doesn't define any expressions".into(),
+            ));
+        }
+
+        // Validate the inputs.
+        //
+        // We add the names of the `inputs` and `defs` variables to a
+        // set. If a name is already in the set, we return an error.
+        // We add the devices in another set and make sure all are
+        // unique.
+
+        {
+            use std::collections::HashSet;
+
+            let mut name_set: HashSet<&String> =
+                HashSet::with_capacity(cfg.inputs.len() + cfg.defs.len());
+            let mut dev_set: HashSet<&device::Name> =
+                HashSet::with_capacity(cfg.inputs.len());
+
+            for (ref k, ref v) in &cfg.inputs {
+                if !name_set.insert(k) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "name '{}' is defined more than once in 'inputs'",
+                        k
+                    )));
+                }
+                if !dev_set.insert(v) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "device '{}' is defined more than once in 'inputs'",
+                        v
+                    )));
+                }
+            }
+
+            for ref k in cfg.defs.keys() {
+                if !name_set.insert(k) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "'{}' is defined in 'defs' and 'inputs' sections",
+                        k
+                    )));
+                }
+            }
+        }
+
+        // Validate the outputs.
+        //
+        // We add the names of the `outputs` variables to a set. If a
+        // name is already in the set, we return an error. We add the
+        // devices in another set and make sure all are unique.
+
+        {
+            use std::collections::HashSet;
+
+            if cfg.outputs.is_empty() {
                 return Err(drmem_api::Error::ConfigError(
-                    "configuration doesn't define any expressions".into(),
+                    "configuration doesn't define any outputs".into(),
                 ));
             }
 
-            // Validate the inputs.
-            //
-            // We add the names of the `inputs` and `defs` variables
-            // to a set. If a name is already in the set, we return an
-            // error. We add the devices in another set and make sure
-            // all are unique.
+            let mut name_set: HashSet<&str> =
+                HashSet::with_capacity(cfg.outputs.len());
+            let mut dev_set: HashSet<&device::Name> =
+                HashSet::with_capacity(cfg.outputs.len());
 
-            {
-                use std::collections::HashSet;
-
-                let mut name_set: HashSet<&String> =
-                    HashSet::with_capacity(cfg.inputs.len() + cfg.defs.len());
-                let mut dev_set: HashSet<&device::Name> =
-                    HashSet::with_capacity(cfg.inputs.len());
-
-                for (ref k, ref v) in &cfg.inputs {
-                    if !name_set.insert(k) {
-                        return Err(drmem_api::Error::ConfigError(format!(
-                            "name '{}' is defined more than once in 'inputs'",
-                            k
-                        )));
-                    }
-                    if !dev_set.insert(v) {
-                        return Err(drmem_api::Error::ConfigError(format!(
-                            "device '{}' is defined more than once in 'inputs'",
-                            v
-                        )));
-                    }
+            for (ref k, ref v) in &cfg.outputs {
+                if !name_set.insert(k.as_str()) {
+                    return Err(drmem_api::Error::ConfigError(format!(
+                        "name '{}' is defined more than once in 'outputs'",
+                        k
+                    )));
                 }
-
-                for ref k in cfg.defs.keys() {
-                    if !name_set.insert(k) {
-                        return Err(drmem_api::Error::ConfigError(format!(
-                            "'{}' is defined in 'defs' and 'inputs' sections",
-                            k
-                        )));
-                    }
-                }
-            }
-
-            // Validate the outputs.
-            //
-            // We add the names of the `outputs` variables to a set.
-            // If a name is already in the set, we return an error. We
-            // add the devices in another set and make sure all are
-            // unique.
-
-            {
-                use std::collections::HashSet;
-
-                if cfg.outputs.is_empty() {
-                    return Err(drmem_api::Error::ConfigError(
-                        "configuration doesn't define any outputs".into(),
-                    ));
-                }
-
-                let mut name_set: HashSet<&str> =
-                    HashSet::with_capacity(cfg.outputs.len());
-                let mut dev_set: HashSet<&device::Name> =
-                    HashSet::with_capacity(cfg.outputs.len());
-
-                for (ref k, ref v) in &cfg.outputs {
-                    if !name_set.insert(k.as_str()) {
-                        return Err(drmem_api::Error::ConfigError(format!(
-                            "name '{}' is defined more than once in 'outputs'",
-                            k
-                        )));
-                    }
-                    if !dev_set.insert(v) {
-                        return Err(drmem_api::Error::ConfigError(format!(
+                if !dev_set.insert(v) {
+                    return Err(drmem_api::Error::ConfigError(format!(
                         "device '{}' is defined more than once in 'outputs'",
                         v
                     )));
-                    }
                 }
             }
+        }
 
-            let (inputs, in_stream, def_exprs) =
-                Node::setup_inputs(&c_req, &cfg.inputs, &cfg.defs).await?;
+        let (inputs, in_stream, def_exprs) =
+            Node::setup_inputs(&c_req, &cfg.inputs, &cfg.defs).await?;
 
-            let (outputs, out_chans) =
-                Node::setup_outputs(&c_req, &cfg.outputs).await?;
+        let (outputs, out_chans) =
+            Node::setup_outputs(&c_req, &cfg.outputs).await?;
 
-            // Create the input/output environment that the compiler
-            // can use to compute the variables in the expression.
+        // Create the input/output environment that the compiler can
+        // use to compute the variables in the expression.
 
-            let env = (&inputs[..], &outputs[..]);
+        let env = (&inputs[..], &outputs[..]);
 
-            // Iterate through the vector of strings. For each,
-            // compile it into a `Program` type. Report the success or
-            // failure.
+        // Iterate through the vector of strings. For each, compile it
+        // into a `Program` type. Report the success or failure.
 
-            let exprs: Result<Vec<compile::Program>> = cfg
-                .exprs
-                .iter()
-                .map(|s| {
-                    compile::Program::compile(s.as_str(), &env)
-                        .map(compile::Program::optimize)
-                })
-                .inspect(|e| match e {
-                    Ok(ex) => {
-                        if ex.0 == compile::Expr::Nothing {
-                            warn!(
+        let exprs: Result<Vec<compile::Program>> = cfg
+            .exprs
+            .iter()
+            .map(|s| {
+                compile::Program::compile(s.as_str(), &env)
+                    .map(compile::Program::optimize)
+            })
+            .inspect(|e| match e {
+                Ok(ex) => {
+                    if ex.0 == compile::Expr::Nothing {
+                        warn!(
                             "expression for out[{}] never generates a value",
                             ex.1
                         )
-                        } else {
-                            debug!("out[{}] = {}", ex.1, &ex.0)
-                        }
+                    } else {
+                        debug!("out[{}] = {}", ex.1, &ex.0)
                     }
-                    Err(e) => error!("{}", &e),
-                })
-                .collect();
-            let mut exprs = exprs?;
-
-            // Sort the expressions based on the index of the outputs.
-            // The output variables are in a hash map, so the vector
-            // is built in whatever order the map uses. This might not
-            // be the same order that the expressions are given. By
-            // sorting the expressions, we line them up so they can be
-            // zipped together later in this function.
-            //
-            // XXX: This should be refactored. The parser should
-            // return the output variable name instead of an index in
-            // the output environment. Then we should go through the
-            // expressions, in order, and add the target output to the
-            // output vector. This would have two benefits:
-            //
-            // 1) Even though multiple expressions send their results
-            // at roughly the same time, the actual settings would go
-            // out quickly in expression order.
-            //
-            // 2) If the user specified more output variables than
-            // expressions that use them, resources wouldn't be
-            // allocated for unused output devices.
-
-            exprs[..].sort_unstable_by(
-                |compile::Program(_, a), compile::Program(_, b)| a.cmp(b),
-            );
-
-            // Look at each expression and see if it needs the
-            // time-of-day.
-
-            let needs_time = exprs
-                .iter()
-                .chain(&def_exprs)
-                .filter_map(|compile::Program(e, _)| e.uses_time())
-                .min();
-
-            // Look at each expression and see if it needs any solar
-            // information.
-
-            let needs_solar = exprs
-                .iter()
-                .chain(&def_exprs)
-                .any(|compile::Program(e, _)| e.uses_solar());
-
-            // Return the initialized `Node`.
-
-            Ok(Node {
-                inputs: vec![None; inputs.len()],
-                in_stream,
-                time_ch: needs_time.map(|tf| {
-                    tod::time_filter(BroadcastStream::new(c_time), tf)
-                }),
-                solar_ch: if needs_solar { Some(c_solar) } else { None },
-                def_exprs,
-                exprs: exprs.drain(..).zip(out_chans).collect(),
+                }
+                Err(e) => error!("{}", &e),
             })
-        }
+            .collect();
+        let mut exprs = exprs?;
+
+        // Sort the expressions based on the index of the outputs.
+        // The output variables are in a hash map, so the vector is
+        // built in whatever order the map uses. This might not be the
+        // same order that the expressions are given. By sorting the
+        // expressions, we line them up so they can be zipped together
+        // later in this function.
+        //
+        // XXX: This should be refactored. The parser should return
+        // the output variable name instead of an index in the output
+        // environment. Then we should go through the expressions, in
+        // order, and add the target output to the output vector. This
+        // would have two benefits:
+        //
+        // 1) Even though multiple expressions send their results at
+        // roughly the same time, the actual settings would go out
+        // quickly in expression order.
+        //
+        // 2) If the user specified more output variables than
+        // expressions that use them, resources wouldn't be allocated
+        // for unused output devices.
+
+        exprs[..].sort_unstable_by(
+            |compile::Program(_, a), compile::Program(_, b)| a.cmp(b),
+        );
+
+        // Look at each expression and see if it needs the
+        // time-of-day.
+
+        let needs_time = exprs
+            .iter()
+            .chain(&def_exprs)
+            .filter_map(|compile::Program(e, _)| e.uses_time())
+            .min();
+
+        // Look at each expression and see if it needs any solar
+        // information.
+
+        let needs_solar = exprs
+            .iter()
+            .chain(&def_exprs)
+            .any(|compile::Program(e, _)| e.uses_solar());
+
+        // Return the initialized `Node`.
+
+        Ok(Node {
+            inputs: vec![None; inputs.len()],
+            in_stream,
+            time_ch: needs_time
+                .map(|tf| tod::time_filter(BroadcastStream::new(c_time), tf)),
+            solar_ch: if needs_solar { Some(c_solar) } else { None },
+            def_exprs,
+            exprs: exprs.drain(..).zip(out_chans).collect(),
+        })
     }
 
     // Runs the node logic. This method should never return.
@@ -524,8 +516,7 @@ impl Node {
         // after the barrier.
 
         let node = Node::init(c_req, rx_tod, rx_solar, cfg)
-            .instrument(info_span!("init", name = &name))
-            .await;
+            .instrument(info_span!("init", name = &name)).await;
 
         // Put the node in the background.
 
@@ -632,9 +623,10 @@ mod test {
                 client::RequestChan::new(tx_req),
                 tx_tod.subscribe(),
                 tx_solar.subscribe(),
-                cfg,
+                &cfg,
                 barrier,
-            );
+            )
+            .await;
 
             // Create the 'stop' channel.
 
@@ -780,7 +772,7 @@ mod test {
     // requests for a setting channel to a device.
 
     fn init_node<'a>(
-        cfg: config::Logic,
+        cfg: &'a config::Logic,
     ) -> (
         impl Future<Output = Result<Node>> + 'a,
         mpsc::Receiver<client::Request>,
@@ -833,7 +825,7 @@ mod test {
 
         {
             let cfg = build_config(&[], &[], &[], &[]);
-            let (node, _, tod_tx, sol_tx) = init_node(cfg);
+            let (node, _, tod_tx, sol_tx) = init_node(&cfg);
 
             tokio::pin!(node);
 
@@ -865,7 +857,7 @@ mod test {
                 &[],
                 &["{in} -> {out}"],
             );
-            let (node, _, _, _) = init_node(cfg);
+            let (node, _, _, _) = init_node(&cfg);
 
             // `await` on the future. This should return immediately
             // as an error because there are no expressions to
@@ -883,7 +875,7 @@ mod test {
                 &[("in", "{in}")],
                 &["{in} -> {out}"],
             );
-            let (node, _, _, _) = init_node(cfg);
+            let (node, _, _, _) = init_node(&cfg);
 
             // `await` on the future. This should return immediately
             // as an error because there are no expressions to
@@ -901,7 +893,7 @@ mod test {
                 &[],
                 &["{in} -> {out}"],
             );
-            let (node, _, _, _) = init_node(cfg);
+            let (node, _, _, _) = init_node(&cfg);
 
             // `await` on the future. This should return immediately
             // as an error because there are no expressions to

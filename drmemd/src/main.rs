@@ -169,7 +169,7 @@ async fn run() -> Result<()> {
 
             // Iterate through the [[logic]] sections of the config.
 
-            for logic in &cfg.logic {
+            for logic in cfg.logic.iter() {
                 let node_task = logic::Node::start(
                     tx_clnt_req.clone(),
                     tx_tod.subscribe(),

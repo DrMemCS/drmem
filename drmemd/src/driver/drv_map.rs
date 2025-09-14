@@ -245,39 +245,37 @@ impl driver::API for Instance {
         async move { Ok(Box::new(Instance::new(init_index?, def_value?, values?))) }
     }
 
-    fn run<'a>(
-        &'a mut self,
+    async fn run(
+        &mut self,
         devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + 'a {
-        async move {
-            let mut devices = devices.lock().await;
+    ) -> Infallible {
+        let mut devices = devices.lock().await;
 
-            // If we have an initial value, use it.
+        // If we have an initial value, use it.
 
-            if let Some(idx) = self.init_index {
-                // Send the updated values to the backend.
+        if let Some(idx) = self.init_index {
+            // Send the updated values to the backend.
 
-                devices.d_output.report_update(self.map_to(idx)).await;
-                devices.d_index.report_update(idx).await
-            } else {
-                devices.d_output.report_update(self.def_val.clone()).await;
-            }
-
-            // The driver blocks, waiting for a new index. As long as
-            // our setting channel is healthy, we handle each setting.
-
-            while let Some((v, reply)) = devices.d_index.next_setting().await {
-                // Send the reply to the setter.
-
-                reply(Ok(v));
-
-                // Send the updated values to the backend.
-
-                devices.d_output.report_update(self.map_to(v)).await;
-                devices.d_index.report_update(v).await
-            }
-            panic!("can no longer receive settings");
+            devices.d_output.report_update(self.map_to(idx)).await;
+            devices.d_index.report_update(idx).await
+        } else {
+            devices.d_output.report_update(self.def_val.clone()).await;
         }
+
+        // The driver blocks, waiting for a new index. As long as our
+        // setting channel is healthy, we handle each setting.
+
+        while let Some((v, reply)) = devices.d_index.next_setting().await {
+            // Send the reply to the setter.
+
+            reply(Ok(v));
+
+            // Send the updated values to the backend.
+
+            devices.d_output.report_update(self.map_to(v)).await;
+            devices.d_index.report_update(v).await
+        }
+        panic!("can no longer receive settings");
     }
 }
 

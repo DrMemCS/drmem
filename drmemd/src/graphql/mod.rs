@@ -314,7 +314,7 @@ impl Config {
             // then return `true` to keep the current entry in the
             // results.
 
-            return true;
+            true
         }
     }
 }
@@ -1329,7 +1329,7 @@ mod test {
         use tokio::sync::mpsc;
 
         let (tx, _) = mpsc::channel(100);
-        let filter = build_site(DriverDb::create(), RequestChan::new(tx));
+        let filter = build_site(DriverDb::create(), RequestChan::new(tx), &[]);
 
         #[cfg(not(feature = "graphiql"))]
         {
@@ -1390,7 +1390,8 @@ mod test {
 
         {
             let (tx, _) = mpsc::channel(100);
-            let filter = build_site(DriverDb::create(), RequestChan::new(tx));
+            let filter =
+                build_site(DriverDb::create(), RequestChan::new(tx), &[]);
             let client =
                 warp::test::ws().path("/drmem/s").handshake(filter).await;
 
@@ -1415,8 +1416,12 @@ mod test {
             cert_file: Path::new("").into(),
             key_file: Path::new("").into(),
         };
-        let filter =
-            build_secure_site(&cfg, DriverDb::create(), RequestChan::new(tx));
+        let filter = build_secure_site(
+            &cfg,
+            DriverDb::create(),
+            RequestChan::new(tx),
+            &[],
+        );
 
         // Test a client that didn't define the Client ID
         // header. Should generate a FORBIDDEN status.
@@ -1515,6 +1520,7 @@ mod test {
                 &cfg,
                 DriverDb::create(),
                 RequestChan::new(tx),
+                &[],
             );
             let client =
                 warp::test::ws().path("/drmem/s").handshake(filter).await;
@@ -1528,6 +1534,7 @@ mod test {
                 &cfg,
                 DriverDb::create(),
                 RequestChan::new(tx),
+                &[],
             );
             let client = warp::test::ws()
                 .header("X-DrMem-Client-Id", "77:66:55:44:33:22:11:00")
@@ -1544,6 +1551,7 @@ mod test {
                 &cfg,
                 DriverDb::create(),
                 RequestChan::new(tx),
+                &[],
             );
             let client = warp::test::ws()
                 .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")

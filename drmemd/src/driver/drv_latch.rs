@@ -149,56 +149,53 @@ impl driver::API for Instance {
         }
     }
 
-    fn run<'a>(
-        &'a mut self,
+    async fn run(
+        &mut self,
         devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + 'a {
-        async move {
-            let mut devices = devices.lock().await;
+    ) -> Infallible {
+        let mut devices = devices.lock().await;
+        let mut reset = false;
+        let mut trigger = false;
 
-            let mut reset = false;
-            let mut trigger = false;
+        // Initialize the reported state of the latch.
 
-            // Initialize the reported state of the latch.
+        devices.d_trigger.report_update(false).await;
+        devices.d_reset.report_update(false).await;
+        devices
+            .d_output
+            .report_update(self.inactive_value.clone())
+            .await;
 
-            devices.d_trigger.report_update(false).await;
-            devices.d_reset.report_update(false).await;
-            devices
-                .d_output
-                .report_update(self.inactive_value.clone())
-                .await;
+        loop {
+            let Devices {
+                d_trigger, d_reset, ..
+            } = &mut *devices;
 
-            loop {
-                let Devices {
-                    d_trigger, d_reset, ..
-                } = &mut *devices;
+            #[rustfmt::skip]
+            let result = tokio::select! {
+                Some((b, reply)) = d_trigger.next_setting() => {
+                    let result = self.update_state(reset, !trigger && b);
 
-                #[rustfmt::skip]
-                let result = tokio::select! {
-                    Some((b, reply)) = d_trigger.next_setting() => {
-                        let result = self.update_state(reset, !trigger && b);
+                    reply(Ok(b));
+                    devices.d_trigger.report_update(b).await;
+                    trigger = b;
+                    result
+                }
 
-                        reply(Ok(b));
-                        devices.d_trigger.report_update(b).await;
-                        trigger = b;
-                        result
-                    }
+                Some((b, reply)) = d_reset.next_setting() => {
+                    let result = self.update_state(reset, false);
 
-                    Some((b, reply)) = d_reset.next_setting() => {
-                        let result = self.update_state(reset, false);
+                    reply(Ok(b));
+                    devices.d_reset.report_update(b).await;
+                    reset = b;
+                    result
+                }
+            };
 
-                        reply(Ok(b));
-                        devices.d_reset.report_update(b).await;
-                        reset = b;
-                        result
-                    }
-                };
-
-                if let Some(v) = result.0 {
+            if let Some(v) = result.0 {
+                devices.d_output.report_update(v.clone()).await;
+                if let Some(v) = result.1 {
                     devices.d_output.report_update(v.clone()).await;
-                    if let Some(v) = result.1 {
-                        devices.d_output.report_update(v.clone()).await;
-                    }
                 }
             }
         }

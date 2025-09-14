@@ -251,70 +251,67 @@ impl driver::API for Instance {
         }
     }
 
-    fn run<'a>(
-        &'a mut self,
+    async fn run(
+        &mut self,
         devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + 'a {
-        async move {
-            let mut timer = time::interval(self.millis);
-            let mut devices = devices.lock().await;
+    ) -> Infallible {
+        let mut timer = time::interval(self.millis);
+        let mut devices = devices.lock().await;
 
-            if self.enabled_at_boot {
-                self.state = CycleState::Cycling;
-                devices.d_enable.report_update(true).await;
-                devices
-                    .d_output
-                    .report_update(self.enabled[self.index].clone())
-                    .await;
-            } else {
-                devices.d_enable.report_update(false).await;
-                devices.d_output.report_update(self.disabled.clone()).await;
-            }
+        if self.enabled_at_boot {
+            self.state = CycleState::Cycling;
+            devices.d_enable.report_update(true).await;
+            devices
+                .d_output
+                .report_update(self.enabled[self.index].clone())
+                .await;
+        } else {
+            devices.d_enable.report_update(false).await;
+            devices.d_output.report_update(self.disabled.clone()).await;
+        }
 
-            loop {
-                debug!("state {:?} : waiting for event", &self.state);
+        loop {
+            debug!("state {:?} : waiting for event", &self.state);
 
-                #[rustfmt::skip]
-                tokio::select! {
-                    // If the driver is in a timing cycle, add the
-                    // sleep future to the list of futures to await.
+            #[rustfmt::skip]
+            tokio::select! {
+                // If the driver is in a timing cycle, add the sleep
+                // future to the list of futures to await.
 
-                    _ = timer.tick() => {
+                _ = timer.tick() => {
 
-			// If the timeout occurs, update the state and
-			// set the output to the inactive value.
+		    // If the timeout occurs, update the state and set
+		    // the output to the inactive value.
 
-			if let Some(v) = self.time_expired() {
-			    debug!("state {:?} : timeout occurred -- output {}",
-				   &self.state, v);
-			    devices.d_output.report_update(v).await;
-			}
+		    if let Some(v) = self.time_expired() {
+			debug!("state {:?} : timeout occurred -- output {}",
+			       &self.state, v);
+			devices.d_output.report_update(v).await;
+		    }
+                }
+
+                // Always look for settings. We're pattern matching
+                // so, if all clients close their handles, this branch
+                // will forever be disabled. That should never happen
+                // since one handle is saved in the device look-up
+                // table. All other handles are cloned from it.
+
+                Some((b, reply)) = devices.d_enable.next_setting() => {
+                    let (reset, out) = self.update_state(b);
+
+                    if reset {
+			timer.reset()
                     }
 
-                    // Always look for settings. We're pattern
-                    // matching so, if all clients close their
-                    // handles, this branch will forever be
-                    // disabled. That should never happen since one
-                    // handle is saved in the device look-up
-                    // table. All other handles are cloned from it.
+                    reply(Ok(b));
 
-                    Some((b, reply)) = devices.d_enable.next_setting() => {
-                        let (reset, out) = self.update_state(b);
+                    debug!("state {:?} : new input -> {}",
+			   &self.state, b);
 
-                        if reset {
-			    timer.reset()
-                        }
+                    devices.d_enable.report_update(b).await;
 
-                        reply(Ok(b));
-
-                        debug!("state {:?} : new input -> {}",
-			       &self.state, b);
-
-                        devices.d_enable.report_update(b).await;
-
-                        if let Some(out) = out {
-			    devices.d_output.report_update(out.clone()).await;
-                        }
+                    if let Some(out) = out {
+			devices.d_output.report_update(out.clone()).await;
                     }
                 }
             }

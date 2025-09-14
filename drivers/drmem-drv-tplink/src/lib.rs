@@ -427,7 +427,7 @@ impl Instance {
         }
     }
 
-    async fn main_loop<'a>(
+    async fn main_loop(
         &mut self,
         s: &mut TcpStream,
         devices: &mut MutexGuard<'_, <Instance as driver::API>::HardwareType>,
@@ -570,45 +570,43 @@ impl driver::API for Instance {
 
     // Main run loop for the driver.
 
-    fn run<'a>(
-        &'a mut self,
+    async fn run(
+        &mut self,
         devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + 'a {
-        async move {
-            // Lock the mutex for the life of the driver. There is no
-            // other task that wants access to these device handles.
-            // An Arc<Mutex<>> is the only way I know of sharing a
-            // mutable value with async tasks.
+    ) -> Infallible {
+        // Lock the mutex for the life of the driver. There is no
+        // other task that wants access to these device handles. An
+        // Arc<Mutex<>> is the only way I know of sharing a mutable
+        // value with async tasks.
 
-            let mut devices = devices.lock().await;
+        let mut devices = devices.lock().await;
 
-            // Record the devices's address in the "cfg" field of the
-            // span.
+        // Record the devices's address in the "cfg" field of the
+        // span.
 
-            Span::current().record("cfg", self.addr.to_string());
+        Span::current().record("cfg", self.addr.to_string());
 
-            loop {
-                // First, connect to the device. We'll leave the TCP
-                // connection open so we're ready for the next
-                // transaction. Tests have shown that the HS220
-                // handles multiple client connections.
+        loop {
+            // First, connect to the device. We'll leave the TCP
+            // connection open so we're ready for the next
+            // transaction. Tests have shown that the HS220 handles
+            // multiple client connections.
 
-                match Instance::connect(&self.addr).await {
-                    Ok(mut s) => {
-                        self.main_loop(&mut s, &mut devices).await;
-                    }
-                    Err(e) => {
-                        warn!("couldn't connect : '{}'", e);
-                    }
+            match Instance::connect(&self.addr).await {
+                Ok(mut s) => {
+                    self.main_loop(&mut s, &mut devices).await;
                 }
-
-                self.sync_error_state(&mut devices.error, true).await;
-
-                // Log the error and then sleep for 10 seconds.
-                // Hopefully the device will be available then.
-
-                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await
+                Err(e) => {
+                    warn!("couldn't connect : '{}'", e);
+                }
             }
+
+            self.sync_error_state(&mut devices.error, true).await;
+
+            // Log the error and then sleep for 10 seconds. Hopefully
+            // the device will be available then.
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await
         }
     }
 }
