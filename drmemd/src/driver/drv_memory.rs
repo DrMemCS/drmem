@@ -223,24 +223,20 @@ impl driver::Registrator for Devices {
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        _cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        async move { Ok(Box::new(Instance::new())) }
+    async fn create_instance(_cfg: &DriverConfig) -> Result<Box<Self>> {
+        Ok(Box::new(Instance::new()))
     }
 
-    fn run<'a>(
-        &'a mut self,
+    async fn run(
+        &mut self,
         devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + 'a {
-        async move {
-            let mut devices = devices.lock().await;
+    ) -> Infallible {
+        let mut devices = devices.lock().await;
 
-            loop {
-                let (idx, val) = devices.get_next().await;
+        loop {
+            let (idx, val) = devices.get_next().await;
 
-                devices.set[idx].0.report_update(val).await
-            }
+            devices.set[idx].0.report_update(val).await
         }
     }
 }

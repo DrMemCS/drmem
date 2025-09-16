@@ -169,14 +169,17 @@ async fn run() -> Result<()> {
 
             // Iterate through the [[logic]] sections of the config.
 
-            for logic in cfg.logic {
-                tasks.push(wrap_task(logic::Node::start(
+            for logic in cfg.logic.iter() {
+                let node_task = logic::Node::start(
                     tx_clnt_req.clone(),
                     tx_tod.subscribe(),
                     tx_solar.subscribe(),
-                    logic,
+                    logic.clone(),
                     init_barrier.clone(),
-                )));
+                )
+                .await;
+
+                tasks.push(wrap_task(node_task));
                 init_barrier.wait().await;
             }
 
@@ -200,6 +203,7 @@ async fn run() -> Result<()> {
 
             let f = graphql::server(
                 &cfg.graphql,
+                &cfg.logic,
                 drv_tbl.clone(),
                 tx_clnt_req.clone(),
             )

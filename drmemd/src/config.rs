@@ -75,7 +75,7 @@ pub struct Driver {
     pub cfg: Option<DriverConfig>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Logic {
     pub name: String,
     pub summary: Option<Arc<str>>,

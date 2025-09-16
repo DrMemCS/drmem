@@ -428,81 +428,77 @@ impl driver::API for Instance {
         }
     }
 
-    fn run<'a>(
-        &'a mut self,
+    async fn run(
+        &mut self,
         devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + 'a {
-        async move {
-            // Record the peer's address in the "cfg" field of the
-            // span.
+    ) -> Infallible {
+        // Record the peer's address in the "cfg" field of the span.
 
-            {
-                let addr = self
-                    .sock
-                    .peer_addr()
-                    .map(|v| format!("{}", v))
-                    .unwrap_or_else(|_| String::from("**unknown**"));
+        {
+            let addr = self
+                .sock
+                .peer_addr()
+                .map(|v| format!("{}", v))
+                .unwrap_or_else(|_| String::from("**unknown**"));
 
-                Span::current().record("cfg", addr.as_str());
-            }
+            Span::current().record("cfg", addr.as_str());
+        }
 
-            // Set `info` to an initial, unmatchable value. `None`
-            // would be preferrable here but, if DrMem had a problem
-            // at startup getting the NTP state, it wouldn't print the
-            // warning(s).
+        // Set `info` to an initial, unmatchable value. `None` would
+        // be preferrable here but, if DrMem had a problem at startup
+        // getting the NTP state, it wouldn't print the warning(s).
 
-            let mut info = Some(server::Info::bad_value());
-            let mut interval = time::interval(Duration::from_millis(20_000));
+        let mut info = Some(server::Info::bad_value());
+        let mut interval = time::interval(Duration::from_millis(20_000));
 
-            let mut devices = devices.lock().await;
+        let mut devices = devices.lock().await;
 
-            loop {
-                interval.tick().await;
+        loop {
+            interval.tick().await;
 
-                if let Some(id) = self.get_synced_host().await {
-                    debug!("synced to host ID: {:#04x}", id);
+            if let Some(id) = self.get_synced_host().await {
+                debug!("synced to host ID: {:#04x}", id);
 
-                    let host_info = self.get_host_info(id).await;
+                let host_info = self.get_host_info(id).await;
 
-                    match host_info {
-                        Some(ref tmp) => {
-                            if info != host_info {
-                                debug!(
-                                    "host: {}, offset: {} ms, delay: {} ms",
-                                    tmp.get_host(),
-                                    tmp.get_offset(),
-                                    tmp.get_delay()
-                                );
-                                devices
-                                    .d_source
-                                    .report_update(tmp.get_host().clone())
-                                    .await;
-                                devices
-                                    .d_offset
-                                    .report_update(tmp.get_offset())
-                                    .await;
-                                devices
-                                    .d_delay
-                                    .report_update(tmp.get_delay())
-                                    .await;
-                                devices.d_state.report_update(true).await;
-                                info = host_info;
-                            }
-                            continue;
+                match host_info {
+                    Some(ref tmp) => {
+                        if info != host_info {
+                            debug!(
+                                "host: {}, offset: {} ms, delay: {} ms",
+                                tmp.get_host(),
+                                tmp.get_offset(),
+                                tmp.get_delay()
+                            );
+                            devices
+                                .d_source
+                                .report_update(tmp.get_host().clone())
+                                .await;
+                            devices
+                                .d_offset
+                                .report_update(tmp.get_offset())
+                                .await;
+                            devices
+                                .d_delay
+                                .report_update(tmp.get_delay())
+                                .await;
+                            devices.d_state.report_update(true).await;
+                            info = host_info;
                         }
-                        None => {
-                            if info.is_some() {
-                                warn!("no synced host information found");
-                                info = None;
-                                devices.d_state.report_update(false).await;
-                            }
+                        continue;
+                    }
+                    None => {
+                        if info.is_some() {
+                            warn!("no synced host information found");
+                            info = None;
+                            devices.d_state.report_update(false).await;
                         }
                     }
-                } else if info.is_some() {
-                    warn!("we're not synced to any host");
-                    info = None;
-                    devices.d_state.report_update(false).await;
                 }
+            } else if info.is_some() {
+                warn!("we're not synced to any host");
+                info = None;
+                devices.d_state.report_update(false).await;
             }
         }
     }

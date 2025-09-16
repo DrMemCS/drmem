@@ -217,7 +217,7 @@ impl Node {
     // Creates an instance of `Node` and initializes its state using
     // the configuration information.
 
-    async fn init(
+    async fn init<'a>(
         c_req: client::RequestChan,
         c_time: broadcast::Receiver<tod::Info>,
         c_solar: broadcast::Receiver<solar::Info>,
@@ -234,9 +234,9 @@ impl Node {
         // Validate the inputs.
         //
         // We add the names of the `inputs` and `defs` variables to a
-        // set. If a name is already in the set, we return an
-        // error. We add the devices in another set and make sure all
-        // are unique.
+        // set. If a name is already in the set, we return an error.
+        // We add the devices in another set and make sure all are
+        // unique.
 
         {
             use std::collections::HashSet;
@@ -344,10 +344,10 @@ impl Node {
             .collect();
         let mut exprs = exprs?;
 
-        // Sort the expressions based on the index of the outputs. The
-        // output variables are in a hash map, so the vector is built
-        // in whatever order the map uses. This might not be the same
-        // order that the expressions are given. By sorting the
+        // Sort the expressions based on the index of the outputs.
+        // The output variables are in a hash map, so the vector is
+        // built in whatever order the map uses. This might not be the
+        // same order that the expressions are given. By sorting the
         // expressions, we line them up so they can be zipped together
         // later in this function.
         //
@@ -410,8 +410,8 @@ impl Node {
         loop {
             // Create a future that yields the time-of-day using the
             // TimeFilter. If no expression uses time, then `time_ch`
-            // will be `None` and we return a future that immediately
-            // yields `None`.
+            // will be `None` and we return a future that never
+            // resolves.
 
             let wait_for_time = async {
                 match self.time_ch.as_mut() {
@@ -422,8 +422,8 @@ impl Node {
 
             // Create a future that yields the next solar update. If
             // no expression uses solar data, `solar_ch` will be
-            // `None` and we, instead, return a future that
-            // immediately yields `None`.
+            // `None` and we, instead, return a future that never
+            // resolves.
 
             let wait_for_solar = async {
                 match self.solar_ch.as_mut() {
@@ -502,7 +502,7 @@ impl Node {
 
     // Starts a new instance of a logic node.
 
-    pub fn start(
+    pub async fn start(
         c_req: client::RequestChan,
         rx_tod: broadcast::Receiver<tod::Info>,
         rx_solar: broadcast::Receiver<solar::Info>,
@@ -517,18 +517,19 @@ impl Node {
             async move {
                 let name = cfg.name.clone();
 
-                // Create a new instance and let it initialize itself. If
-                // an error occurs, return it.
+                // Create a new instance and let it initialize itself.
+                // Hold onto the result -- success or failure -- and
+                // handle it after the barrier.
 
                 let node = Node::init(c_req, rx_tod, rx_solar, cfg)
                     .instrument(info_span!("init", name = &name))
                     .await;
 
-                // This barrier syncs this tasks with the start-up task.
-                // When both wait on the barrier, they both wake up and
-                // continue. The start-up task then knows this logic block
-                // has registered all the devices and tod and solar
-                // handles it needs.
+                // This barrier syncs this tasks with the start-up
+                // task. When both wait on the barrier, they both wake
+                // up and continue. The start-up task then knows this
+                // logic block has registered all the devices, tod,
+                // and solar handles it needs.
 
                 barrier.wait().await;
 
@@ -537,8 +538,8 @@ impl Node {
                 // NOTE: We used the '?' operator here instead of the
                 // assignment above because we have to wait on the
                 // barrier. If we let the '?' operator return before
-                // waiting on the barrier, the initialization loop would
-                // wait forever.
+                // waiting on the barrier, the initialization loop
+                // would wait forever.
 
                 node?.run().await
             }
@@ -574,8 +575,8 @@ mod test {
 
     impl Emulator {
         pub async fn start(
-            inputs: Vec<(Arc<str>, mpsc::Receiver<device::Value>)>,
-            outputs: Vec<(Arc<str>, driver::TxDeviceSetting)>,
+            mut inputs: Vec<(Arc<str>, mpsc::Receiver<device::Value>)>,
+            mut outputs: Vec<(Arc<str>, driver::TxDeviceSetting)>,
             cfg: config::Logic,
         ) -> Result<(
             broadcast::Sender<tod::Info>,
@@ -583,20 +584,12 @@ mod test {
             task::JoinHandle<Result<bool>>,
             oneshot::Sender<()>,
         )> {
-            Emulator::new(inputs, outputs).launch(cfg).await
-        }
-
-        // Creates a new instance of an Emulator and loads it with the
-        // input and output names and channels.
-
-        fn new(
-            mut inputs: Vec<(Arc<str>, mpsc::Receiver<device::Value>)>,
-            mut outputs: Vec<(Arc<str>, driver::TxDeviceSetting)>,
-        ) -> Self {
             Emulator {
                 inputs: HashMap::from_iter(inputs.drain(..)),
                 outputs: HashMap::from_iter(outputs.drain(..)),
             }
+            .launch(cfg)
+            .await
         }
 
         // Launches a logic block with the provided configuration.
@@ -627,7 +620,8 @@ mod test {
                 tx_solar.subscribe(),
                 cfg,
                 barrier,
-            );
+            )
+            .await;
 
             // Create the 'stop' channel.
 
@@ -772,10 +766,10 @@ mod test {
     // requests can be monitoring requests for other devices or
     // requests for a setting channel to a device.
 
-    fn init_node<'a>(
+    fn init_node(
         cfg: config::Logic,
     ) -> (
-        impl Future<Output = Result<Node>> + 'a,
+        impl Future<Output = Result<Node>>,
         mpsc::Receiver<client::Request>,
         broadcast::Sender<tod::Info>,
         broadcast::Sender<solar::Info>,

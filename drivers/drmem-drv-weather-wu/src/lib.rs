@@ -409,82 +409,72 @@ impl driver::API for Instance {
         }
     }
 
-    fn run<'a>(
-        &'a mut self,
+    async fn run(
+        &mut self,
         devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + 'a {
-        async move {
-            let mut devices = devices.lock().await;
+    ) -> Infallible {
+        let mut devices = devices.lock().await;
 
-            Span::current().record("cfg", devices.station.as_str());
+        Span::current().record("cfg", devices.station.as_str());
 
-            let mut timer = interval_at(Instant::now(), self.interval);
+        let mut timer = interval_at(Instant::now(), self.interval);
 
-            // Loop forever.
+        // Loop forever.
 
-            loop {
-                debug!("waiting for next poll time");
+        loop {
+            debug!("waiting for next poll time");
 
-                // Wait for the next sample time.
+            // Wait for the next sample time.
 
-                timer.tick().await;
+            timer.tick().await;
 
-                debug!("fetching next observation");
+            debug!("fetching next observation");
 
-                let result = wu::fetch_observation(
-                    &self.con,
-                    &self.api_key,
-                    &devices.station,
-                    &xlat_units(&devices.units),
-                )
-                .await;
+            let result = wu::fetch_observation(
+                &self.con,
+                &self.api_key,
+                &devices.station,
+                &xlat_units(&devices.units),
+            )
+            .await;
 
-                match result {
-                    Ok(Some(response)) => {
-                        match wu::ObservationResponse::try_from(response) {
-                            Ok(resp) => {
-                                if let Some(obs) = resp.observations {
-                                    if !obs.is_empty() {
-                                        // The API we're using should
-                                        // only return 1 set of
-                                        // observations. If it, for
-                                        // some reason, changes and
-                                        // returns more, log it.
+            match result {
+                Ok(Some(response)) => {
+                    match wu::ObservationResponse::try_from(response) {
+                        Ok(resp) => {
+                            if let Some(obs) = resp.observations {
+                                if !obs.is_empty() {
+                                    // The API we're using should only
+                                    // return 1 set of observations.
+                                    // If it, for some reason, changes
+                                    // and returns more, log it.
 
-                                        if obs.len() > 1 {
-                                            warn!("ignoring {} extra weather observations", obs.len() - 1);
-                                        }
-                                        devices
-                                            .error
-                                            .report_update(false)
-                                            .await;
-                                        self.handle(&obs[0], &mut devices)
-                                            .await;
-                                        continue;
+                                    if obs.len() > 1 {
+                                        warn!("ignoring {} extra weather observations", obs.len() - 1);
                                     }
+                                    devices.error.report_update(false).await;
+                                    self.handle(&obs[0], &mut devices).await;
+                                    continue;
                                 }
-                                warn!("no weather data received")
                             }
+                            warn!("no weather data received")
+                        }
 
-                            Err(e) => {
-                                devices.error.report_update(true).await;
-                                panic!("error response from Weather Underground -- {:?}", &e)
-                            }
+                        Err(e) => {
+                            devices.error.report_update(true).await;
+                            panic!("error response from Weather Underground -- {:?}", &e)
                         }
                     }
+                }
 
-                    Ok(None) => {
-                        devices.error.report_update(true).await;
-                        panic!("no response from Weather Underground")
-                    }
+                Ok(None) => {
+                    devices.error.report_update(true).await;
+                    panic!("no response from Weather Underground")
+                }
 
-                    Err(e) => {
-                        devices.error.report_update(true).await;
-                        panic!(
-                            "error accessing Weather Underground -- {:?}",
-                            &e
-                        )
-                    }
+                Err(e) => {
+                    devices.error.report_update(true).await;
+                    panic!("error accessing Weather Underground -- {:?}", &e)
                 }
             }
         }

@@ -353,66 +353,63 @@ impl driver::API for Instance {
         }
     }
 
-    fn run<'a>(
-        &'a mut self,
+    async fn run(
+        &mut self,
         devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + 'a {
-        async move {
-            // Record the peer's address in the "cfg" field of the
-            // span.
+    ) -> Infallible {
+        // Record the peer's address in the "cfg" field of the span.
 
-            {
-                let addr = self
-                    .rx
-                    .peer_addr()
-                    .map(|v| format!("{}", v))
-                    .unwrap_or_else(|_| String::from("**unknown**"));
+        {
+            let addr = self
+                .rx
+                .peer_addr()
+                .map(|v| format!("{}", v))
+                .unwrap_or_else(|_| String::from("**unknown**"));
 
-                Span::current().record("cfg", addr.as_str());
-            }
+            Span::current().record("cfg", addr.as_str());
+        }
 
-            let mut devices = devices.lock().await;
+        let mut devices = devices.lock().await;
 
-            devices.d_service.report_update(true).await;
+        devices.d_service.report_update(true).await;
 
-            loop {
-                match self.get_reading().await {
-                    Ok((stamp, true)) => {
-                        if self.state.on_event(stamp) {
-                            devices.d_state.report_update(true).await;
-                        }
+        loop {
+            match self.get_reading().await {
+                Ok((stamp, true)) => {
+                    if self.state.on_event(stamp) {
+                        devices.d_state.report_update(true).await;
                     }
+                }
 
-                    Ok((stamp, false)) => {
-                        let gpm = self.gpm;
+                Ok((stamp, false)) => {
+                    let gpm = self.gpm;
 
-                        if let Some((cycle, duty, in_flow)) =
-                            self.state.off_event(stamp, gpm)
-                        {
-                            debug!(
-                                "cycle: {}, duty: {:.1}%, inflow: {:.2} gpm",
-                                Instance::elapsed(cycle),
-                                duty,
-                                in_flow
-                            );
+                    if let Some((cycle, duty, in_flow)) =
+                        self.state.off_event(stamp, gpm)
+                    {
+                        debug!(
+                            "cycle: {}, duty: {:.1}%, inflow: {:.2} gpm",
+                            Instance::elapsed(cycle),
+                            duty,
+                            in_flow
+                        );
 
-                            devices.d_state.report_update(false).await;
-                            devices.d_duty.report_update(duty).await;
-                            devices.d_inflow.report_update(in_flow).await;
-                            devices
-                                .d_duration
-                                .report_update(
-                                    ((cycle as f64) / 600.0).round() / 100.0,
-                                )
-                                .await;
-                        }
-                    }
-
-                    Err(e) => {
                         devices.d_state.report_update(false).await;
-                        devices.d_service.report_update(false).await;
-                        panic!("couldn't read sump state -- {:?}", e);
+                        devices.d_duty.report_update(duty).await;
+                        devices.d_inflow.report_update(in_flow).await;
+                        devices
+                            .d_duration
+                            .report_update(
+                                ((cycle as f64) / 600.0).round() / 100.0,
+                            )
+                            .await;
                     }
+                }
+
+                Err(e) => {
+                    devices.d_state.report_update(false).await;
+                    devices.d_service.report_update(false).await;
+                    panic!("couldn't read sump state -- {:?}", e);
                 }
             }
         }

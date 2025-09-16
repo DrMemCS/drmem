@@ -337,7 +337,7 @@ fn get_utc_month(info: &tod::Info) -> device::Value {
 }
 
 fn get_utc_start_from_month(info: &tod::Info) -> device::Value {
-    device::Value::Int(((info.0.day() + 6) / 7) as i32)
+    device::Value::Int(info.0.day().div_ceil(7) as i32)
 }
 
 fn get_utc_end_from_month(info: &tod::Info) -> device::Value {
@@ -390,7 +390,7 @@ fn get_local_month(info: &tod::Info) -> device::Value {
 }
 
 fn get_local_start_from_month(info: &tod::Info) -> device::Value {
-    device::Value::Int(((info.1.day() + 6) / 7) as i32)
+    device::Value::Int(info.1.day().div_ceil(7) as i32)
 }
 
 fn get_local_end_from_month(info: &tod::Info) -> device::Value {

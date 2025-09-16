@@ -1,3 +1,4 @@
+use crate::config::Logic;
 use chrono::prelude::*;
 use drmem_api::{client, device, driver, Error};
 use futures::Future;
@@ -23,7 +24,11 @@ impl reject::Reject for NoAuthorization {}
 // The Context parameter for Queries.
 
 #[derive(Clone)]
-struct ConfigDb(crate::driver::DriverDb, client::RequestChan);
+struct ConfigDb(
+    crate::driver::DriverDb,
+    client::RequestChan,
+    Vec<Arc<LogicBlock>>,
+);
 
 impl juniper::Context for ConfigDb {}
 
@@ -161,6 +166,93 @@ impl DeviceInfo {
     }
 }
 
+struct LogicBlockVariable {
+    name: String,
+    device: String,
+}
+
+#[graphql_object(
+    Context = ConfigDb,
+    description = "Shows the input/output variable mapping in a logic block."
+)]
+impl LogicBlockVariable {
+    #[graphql(description = "The name of the variable.")]
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[graphql(description = "The name of the variable.")]
+    fn device(&self) -> &str {
+        &self.device
+    }
+}
+
+struct LogicBlockExpression {
+    name: String,
+    expr: String,
+}
+
+#[graphql_object(
+    Context = ConfigDb,
+    description = "Shows the expression definitions in a logic block."
+)]
+impl LogicBlockExpression {
+    #[graphql(description = "The name of the definition.")]
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[graphql(description = "The expression.")]
+    fn expr(&self) -> &str {
+        &self.expr
+    }
+}
+
+struct LogicBlock {
+    name: Arc<str>,
+    description: String,
+    inputs: Vec<LogicBlockVariable>,
+    outputs: Vec<LogicBlockVariable>,
+    defs: Vec<LogicBlockExpression>,
+    expr: Vec<String>,
+}
+
+#[graphql_object(
+    Context = ConfigDb,
+    description = "Shows the configuration of a logic block."
+)]
+impl LogicBlock {
+    #[graphql(description = "The name of the logic block.")]
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[graphql(description = "A description of the logic block's purpose.")]
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    #[graphql(description = "The inputs needed by the logic block.")]
+    fn inputs(&self) -> &[LogicBlockVariable] {
+        &self.inputs
+    }
+
+    #[graphql(description = "The outputs controlled by the logic block.")]
+    fn outputs(&self) -> &[LogicBlockVariable] {
+        &self.outputs
+    }
+
+    #[graphql(description = "Shared expressions used by the logic block.")]
+    fn defs(&self) -> &[LogicBlockExpression] {
+        &self.defs
+    }
+
+    #[graphql(description = "Control expressions used by the logic block.")]
+    fn expr(&self) -> &[String] {
+        &self.expr
+    }
+}
+
 // This defines the top-level Query API.
 
 struct Config;
@@ -180,6 +272,51 @@ impl Config {
     fn is_true(_e: &&client::DevInfoReply) -> bool {
         true
     }
+
+    // This method returns a closure that can be used with
+    // `Iterator<Item = Arc<LogicBlock>>::filter`.
+
+    fn logic_block_filter(
+        name: Option<String>,
+        devices: Option<Vec<String>>,
+    ) -> impl FnMut(&Arc<LogicBlock>) -> bool {
+        move |lb: &Arc<LogicBlock>| {
+            // If a name was specified, return `false` if the current
+            // LogicBlock doesn't that name. If it has the name, we
+            // still need to see if the device name  filter further
+            // restricts the results.
+
+            if let Some(ref name) = name {
+                if *name != *lb.name {
+                    return false;
+                }
+            }
+
+            // If a list of device names was specified, look through
+            // the inputs and outputs to see if any devices match any
+            // in the list.
+
+            if let Some(ref devices) = devices {
+                for ins in lb.inputs.iter() {
+                    if devices.iter().any(|v| v == &ins.device) {
+                        return true;
+                    }
+                }
+                for outs in lb.outputs.iter() {
+                    if devices.iter().any(|v| v == &outs.device) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // If neither filter was given or the name filter matched,
+            // then return `true` to keep the current entry in the
+            // results.
+
+            true
+        }
+    }
 }
 
 #[graphql_object(
@@ -187,6 +324,32 @@ impl Config {
     description = "Reports configuration information for `drmemd`."
 )]
 impl Config {
+    #[graphql(description = "Returns logic blocks configured in the node. By \
+                             default, all logic blocks are returned. If either \
+                             parameter is given, the results are filtered to \
+                             only return information that matches the selection \
+                             values.")]
+    fn logic_blocks(
+        #[graphql(context)] db: &ConfigDb,
+        #[graphql(description = "If provided, only the logic block with the \
+                                 specified name will be returned.")]
+        sel_name: Option<String>,
+        #[graphql(
+            description = "This parameter can specify a list of device \
+                                 names. Only logic blocks that use any of the \
+                                 devices in either input or output will be \
+                                 included in the results."
+        )]
+        sel_devices: Option<Vec<String>>,
+    ) -> result::Result<Vec<Arc<LogicBlock>>, FieldError> {
+        Ok(db
+            .2
+            .iter()
+            .cloned()
+            .filter(Self::logic_block_filter(sel_name, sel_devices))
+            .collect())
+    }
+
     #[graphql(description = "Returns information about the available drivers \
 			     in the running instance of `drmemd`. If `name` \
 			     isn't provided, an array of all driver \
@@ -769,13 +932,55 @@ mod paths {
     }
 }
 
+fn logic_to_gql(logic: &Logic) -> Arc<LogicBlock> {
+    LogicBlock {
+        name: logic.name.clone().into(),
+        description: logic
+            .summary
+            .clone()
+            .unwrap_or_else(|| "".into())
+            .to_string(),
+        inputs: logic
+            .inputs
+            .iter()
+            .map(|v| LogicBlockVariable {
+                name: v.0.clone(),
+                device: v.1.to_string(),
+            })
+            .collect(),
+        outputs: logic
+            .outputs
+            .iter()
+            .map(|v| LogicBlockVariable {
+                name: v.0.clone(),
+                device: v.1.to_string(),
+            })
+            .collect(),
+        defs: logic
+            .defs
+            .iter()
+            .map(|v| LogicBlockExpression {
+                name: v.0.clone(),
+                expr: v.1.clone(),
+            })
+            .collect(),
+        expr: logic.exprs.clone(),
+    }
+    .into()
+}
+
 // Build `warp::Filter`s that define the entire webspace.
 
 fn build_base_site(
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
+    db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    let context = ConfigDb(db, cchan);
+    let context = ConfigDb(
+        db,
+        cchan,
+        db_logic.iter().map(logic_to_gql).collect::<Vec<_>>(),
+    );
     let ctxt = context.clone();
 
     // Create filter that handles GraphQL queries and mutations.
@@ -855,15 +1060,17 @@ fn build_base_site(
 fn build_site(
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
+    db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
 {
-    build_base_site(db, cchan).recover(handle_rejection)
+    build_base_site(db, cchan, db_logic).recover(handle_rejection)
 }
 
 fn build_secure_site(
     cfg: &config::Security,
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
+    db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
 {
     // Clone the table of clients that are allowed in to the system.
@@ -889,7 +1096,7 @@ fn build_secure_site(
     warp::header::<String>("X-DrMem-Client-Id")
         .and_then(check_client)
         .untuple_one()
-        .and(build_base_site(db, cchan))
+        .and(build_base_site(db, cchan, db_logic))
         .recover(handle_rejection)
 }
 
@@ -925,19 +1132,20 @@ fn cmp_fprints(a: &str, b: &str) -> bool {
 
 fn build_server(
     cfg: &config::Config,
+    db_logic: &[Logic],
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     if let Some(security) = &cfg.security {
         Box::pin(
-            warp::serve(build_secure_site(security, db, cchan))
+            warp::serve(build_secure_site(security, db, cchan, db_logic))
                 .tls()
                 .key_path(security.key_file.clone())
                 .cert_path(security.cert_file.clone())
                 .bind(cfg.addr),
         ) as Pin<Box<dyn Future<Output = ()> + Send>>
     } else {
-        Box::pin(warp::serve(build_site(db, cchan)).bind(cfg.addr))
+        Box::pin(warp::serve(build_site(db, cchan, db_logic)).bind(cfg.addr))
             as Pin<Box<dyn Future<Output = ()> + Send>>
     }
 }
@@ -1045,11 +1253,12 @@ fn build_mdns_payload(cfg: &config::Config) -> Result<Vec<String>, Error> {
 
 pub fn server(
     cfg: &config::Config,
+    db_logic: &[Logic],
     db: crate::driver::DriverDb,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
     let (resp, task) = Responder::with_default_handle().unwrap();
-    let http_task = build_server(cfg, db, cchan);
+    let http_task = build_server(cfg, db_logic, db, cchan);
 
     match build_mdns_payload(cfg) {
         Ok(payload) => {
@@ -1120,7 +1329,7 @@ mod test {
         use tokio::sync::mpsc;
 
         let (tx, _) = mpsc::channel(100);
-        let filter = build_site(DriverDb::create(), RequestChan::new(tx));
+        let filter = build_site(DriverDb::create(), RequestChan::new(tx), &[]);
 
         #[cfg(not(feature = "graphiql"))]
         {
@@ -1181,7 +1390,8 @@ mod test {
 
         {
             let (tx, _) = mpsc::channel(100);
-            let filter = build_site(DriverDb::create(), RequestChan::new(tx));
+            let filter =
+                build_site(DriverDb::create(), RequestChan::new(tx), &[]);
             let client =
                 warp::test::ws().path("/drmem/s").handshake(filter).await;
 
@@ -1206,8 +1416,12 @@ mod test {
             cert_file: Path::new("").into(),
             key_file: Path::new("").into(),
         };
-        let filter =
-            build_secure_site(&cfg, DriverDb::create(), RequestChan::new(tx));
+        let filter = build_secure_site(
+            &cfg,
+            DriverDb::create(),
+            RequestChan::new(tx),
+            &[],
+        );
 
         // Test a client that didn't define the Client ID
         // header. Should generate a FORBIDDEN status.
@@ -1306,6 +1520,7 @@ mod test {
                 &cfg,
                 DriverDb::create(),
                 RequestChan::new(tx),
+                &[],
             );
             let client =
                 warp::test::ws().path("/drmem/s").handshake(filter).await;
@@ -1319,6 +1534,7 @@ mod test {
                 &cfg,
                 DriverDb::create(),
                 RequestChan::new(tx),
+                &[],
             );
             let client = warp::test::ws()
                 .header("X-DrMem-Client-Id", "77:66:55:44:33:22:11:00")
@@ -1335,6 +1551,7 @@ mod test {
                 &cfg,
                 DriverDb::create(),
                 RequestChan::new(tx),
+                &[],
             );
             let client = warp::test::ws()
                 .header("X-DrMem-Client-Id", "00:11:22:33:44:55:66:77")

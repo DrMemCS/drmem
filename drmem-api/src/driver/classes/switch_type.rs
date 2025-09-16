@@ -34,10 +34,14 @@ impl Registrator for Switch {
         _cfg: &DriverConfig,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
+        let nm_state = "state".parse();
+
         async move {
+            let nm_state = nm_state?;
+
             Ok(Switch {
                 state: drc
-                    .add_rw_device::<bool>("state".parse()?, None, max_history)
+                    .add_rw_device::<bool>(nm_state, None, max_history)
                     .await?,
             })
         }
