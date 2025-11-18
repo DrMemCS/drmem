@@ -391,6 +391,7 @@ name = "drmem-api"
 version = "0.6.0"
 dependencies = [
  "chrono",
+ "noop-waker",
  "palette",
  "serde",
  "serde_derive",

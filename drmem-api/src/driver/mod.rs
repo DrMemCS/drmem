@@ -22,12 +22,14 @@ pub type DriverConfig = value::Table;
 pub mod classes;
 mod ro_device;
 mod rw_device;
+mod shared_rw_device;
 
 pub use ro_device::{ReadOnlyDevice, ReportReading};
 pub use rw_device::{
     ReadWriteDevice, RxDeviceSetting, SettingReply, SettingRequest,
     TxDeviceSetting,
 };
+pub use shared_rw_device::SharedReadWriteDevice;
 
 /// Defines the requests that can be sent to core. Drivers don't use
 /// this type directly. They are indirectly used by `RequestChan`.
@@ -103,9 +105,7 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device<
-        T: Into<device::Value> + TryFrom<device::Value> + Clone,
-    >(
+    pub async fn add_ro_device<T: device::ReadCompat>(
         &self,
         name: device::Base,
         units: Option<&str>,
@@ -159,15 +159,12 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_rw_device<T>(
+    pub async fn add_rw_device<T: device::ReadWriteCompat>(
         &self,
         name: device::Base,
         units: Option<&str>,
         max_history: Option<usize>,
-    ) -> Result<ReadWriteDevice<T>>
-    where
-        T: Into<device::Value> + TryFrom<device::Value> + Clone,
-    {
+    ) -> Result<ReadWriteDevice<T>> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan

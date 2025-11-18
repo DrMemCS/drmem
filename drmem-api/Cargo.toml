@@ -25,6 +25,7 @@ toml.default-features = false
 
 tokio.workspace = true
 tokio.default-features = false
+tokio.features = ["time", "macros"]
 
 tokio-stream.workspace = true
 tokio-stream.default-features = false
@@ -38,3 +39,9 @@ serde_derive.default-features = false
 palette.workspace = true
 palette.default-features = false
 palette.features = ["libm"]
+
+[dev-dependencies]
+tokio.workspace = true
+tokio.features = ["rt"]
+
+noop-waker = "0.1"

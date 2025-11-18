@@ -4,7 +4,7 @@ use std::{pin::Pin, time};
 use tokio_stream::Stream;
 
 mod value;
-pub use value::Value;
+pub use value::{ReadCompat, ReadWriteCompat, Value};
 
 /// Represents the value of a device at a specific moment.
 ///

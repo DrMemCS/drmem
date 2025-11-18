@@ -21,11 +21,11 @@ pub type SettingReply<T> = Box<dyn FnOnce(Result<T>) + Send>;
 
 pub type SettingTransaction<T> = (T, SettingReply<T>);
 
-// The driver is given a stream that yields setting requests. If the
-// driver uses a type that can be converted to and from a
-// `device::Value`, this stream will automatically reject settings
-// that aren't of the correct type and pass on converted values.
-type SettingStream<T> =
+/// The driver is given a stream that yields setting requests. If the
+/// driver uses a type that can be converted to and from a
+/// `device::Value`, this stream will automatically reject settings
+/// that aren't of the correct type and pass on converted values.
+pub type SettingStream<T> =
     Pin<Box<dyn Stream<Item = SettingTransaction<T>> + Send + Sync>>;
 
 // Creates a stream of incoming settings. Since settings are provided
@@ -34,9 +34,9 @@ type SettingStream<T> =
 // sent back to the client and the message isn't forwarded to the
 // driver. Otherwise the converted value is yielded.
 
-fn create_setting_stream<T>(rx: RxDeviceSetting) -> SettingStream<T>
+pub fn create_setting_stream<T>(rx: RxDeviceSetting) -> SettingStream<T>
 where
-    T: TryFrom<device::Value> + Into<device::Value> + Clone,
+    T: device::ReadWriteCompat,
 {
     Box::pin(ReceiverStream::new(rx).filter_map(
         |(v, tx_rpy)| match T::try_from(v) {
@@ -56,9 +56,7 @@ where
     ))
 }
 
-pub struct ReadWriteDevice<
-    T: TryFrom<device::Value> + Into<device::Value> + Clone,
-> {
+pub struct ReadWriteDevice<T: device::ReadWriteCompat> {
     report_chan: ReportReading,
     set_stream: SettingStream<T>,
     prev_val: Option<T>,
@@ -66,7 +64,7 @@ pub struct ReadWriteDevice<
 
 impl<T> ReadWriteDevice<T>
 where
-    T: TryFrom<device::Value> + Into<device::Value> + Clone,
+    T: device::ReadWriteCompat,
 {
     pub fn new(
         report_chan: ReportReading,
