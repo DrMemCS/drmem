@@ -177,7 +177,29 @@ where
                     self.state = State::Synced { value: new_value }
                 }
             }
-            State::SettingTrans { .. } => todo!(),
+            State::SettingTrans {
+                value: (value, f_ref),
+            } => {
+                // If the polled value happens to equal the incoming
+                // setting that's still being processed, we should go
+                // into the `Synced` state.
+
+                if value == &new_value {
+                    let value = value.clone();
+
+                    // If there was a function to reply to the client,
+                    // we need to perform the reply.
+
+                    if let Some(f) = f_ref.take() {
+                        f(Ok(value.clone()));
+                    }
+
+                    // Go to the `SyncedTrans` state, which will
+                    // report the new value to the backend.
+
+                    self.state = State::SyncedTrans { value };
+                }
+            }
             State::SyncedTrans { .. } => todo!(),
         }
     }
