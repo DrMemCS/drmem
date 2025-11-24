@@ -177,6 +177,7 @@ where
                     self.state = State::Synced { value: new_value }
                 }
             }
+
             State::SettingTrans {
                 value: (value, f_ref),
             } => {
@@ -200,6 +201,7 @@ where
                     self.state = State::SyncedTrans { value };
                 }
             }
+
             State::SyncedTrans { .. } => todo!(),
         }
     }
@@ -313,6 +315,7 @@ where
                                 value: (reply.0, Some(reply.1)),
                             }
                         } else {
+                            (reply.1)(Ok(reply.0.clone()));
                             State::SyncedTrans { value: reply.0 }
                         };
                     }
@@ -865,6 +868,34 @@ mod tests {
                 rx_rdg.try_recv(),
                 Err(mpsc::error::TryRecvError::Empty)
             );
+        }
+
+        // Now a new setting (2). It matches the synced state so it
+        // should get reported to the backend and the client should
+        // get a reply. The driver should get a pending.
+
+        {
+            let (os_tx, mut os_rx) = oneshot::channel();
+
+            assert!(matches!(tx_set.blocking_send((2.into(), os_tx)), Ok(_)));
+            assert!(matches!(
+                {
+                    let fut = sh_dev.next_setting();
+
+                    tokio::pin!(fut);
+                    fut.poll(&mut context)
+                },
+                Poll::Pending
+            ));
+
+            // Client should get a success reply.
+
+            assert!(matches!(os_rx.try_recv(), Ok(Ok(device::Value::Int(2)))));
+
+            // Since we have a new setting, it should have been
+            // reported.
+
+            assert_eq!(rx_rdg.try_recv(), Ok(device::Value::Int(2)));
         }
 
         // Now a new setting (7) will get reported and returned, etc.
