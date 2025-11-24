@@ -179,7 +179,7 @@ impl Instance {
                 format!("{}m{}s", dur / 60, dur % 60)
             }
             dur => {
-                format!("{}s", dur)
+                format!("{dur}s")
             }
         }
     }
@@ -363,7 +363,7 @@ impl driver::API for Instance {
             let addr = self
                 .rx
                 .peer_addr()
-                .map(|v| format!("{}", v))
+                .map(|v| format!("{v}"))
                 .unwrap_or_else(|_| String::from("**unknown**"));
 
             Span::current().record("cfg", addr.as_str());
@@ -409,7 +409,7 @@ impl driver::API for Instance {
                 Err(e) => {
                     devices.d_state.report_update(false).await;
                     devices.d_service.report_update(false).await;
-                    panic!("couldn't read sump state -- {:?}", e);
+                    panic!("couldn't read sump state -- {e:?}");
                 }
             }
         }

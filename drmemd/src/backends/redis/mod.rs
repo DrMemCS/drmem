@@ -516,14 +516,14 @@ impl RedisStore {
     // Returns the key that returns meta information for the device.
 
     fn info_key(name: &str) -> String {
-        format!("{}#info", name)
+        format!("{name}#info")
     }
 
     // Returns the key that returns time-series information for the
     // device.
 
     fn hist_key(name: &str) -> String {
-        format!("{}#hist", name)
+        format!("{name}#hist")
     }
 
     fn init_device_cmd(

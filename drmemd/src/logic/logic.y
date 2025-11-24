@@ -174,7 +174,7 @@ Factor -> Result<Expr>:
 			            .with_alpha(255u8)
 		            ))),
 		            None => Err(Error::ParseError(
-			        format!("invalid color '{}'", s)
+			        format!("invalid color '{s}'")
 		            ))
 		        }
 	        }
@@ -236,7 +236,7 @@ fn get_str<'a, 'input>(
     lexer: &'a (dyn NonStreamingLexer<'input, DefaultLexerTypes> + 'a)
 ) -> Result<&'input str> {
     let lexeme = lexeme.map_err(|_| Error::ParseError(
-        format!("error reading {}", label)
+        format!("error reading {label}")
     ))?;
 
     Ok(lexer.span_str(lexeme.span()))
@@ -248,7 +248,7 @@ fn parse_int(s: &str) -> Result<Expr> {
     s.parse::<i32>()
 	.map(|v| Expr::Lit(device::Value::Int(v)))
 	.map_err(|_| Error::ParseError(
-	     format!("{} cannot be represented as an i32", s)
+	     format!("{s} cannot be represented as an i32")
 	))
 }
 
@@ -256,7 +256,7 @@ fn parse_flt(s: &str) -> Result<Expr> {
     s.parse::<f64>()
 	.map(|v| Expr::Lit(device::Value::Flt(v)))
 	.map_err(|_| Error::ParseError(
-	     format!("{} cannot be represented as an f64", s)
+	     format!("{s} cannot be represented as an f64")
 	))
 }
 
@@ -515,7 +515,7 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
             SolarField::Declination, get_solar_declination
         )),
 	_ => Err(Error::ParseError(
-		 format!("unknown built-in: {}:{}", cat, fld)
+		 format!("unknown built-in: {cat}:{fld}")
 	     ))
     }
 }

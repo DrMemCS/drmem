@@ -296,9 +296,9 @@ impl fmt::Display for Expr {
             Expr::Lit(v) => write!(f, "{}", &v),
             Expr::Var(v) => write!(f, "inp[{}]", &v),
 
-            Expr::TimeVal(cat, fld, _) => write!(f, "{{{}:{}}}", cat, fld),
+            Expr::TimeVal(cat, fld, _) => write!(f, "{{{cat}:{fld}}}"),
 
-            Expr::SolarVal(fld, _) => write!(f, "{{solar:{}}}", fld),
+            Expr::SolarVal(fld, _) => write!(f, "{{solar:{fld}}}"),
 
             Expr::Not(e) => {
                 write!(f, "not ")?;

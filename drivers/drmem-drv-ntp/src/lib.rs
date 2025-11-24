@@ -438,7 +438,7 @@ impl driver::API for Instance {
             let addr = self
                 .sock
                 .peer_addr()
-                .map(|v| format!("{}", v))
+                .map(|v| format!("{v}"))
                 .unwrap_or_else(|_| String::from("**unknown**"));
 
             Span::current().record("cfg", addr.as_str());
