@@ -93,7 +93,7 @@ where
     /// Saves a new value, returned by the device, to the backend
     /// storage. This only writes values that have changed.
     ///
-    /// This method is cancel-safe.
+    /// This method is not cancel-safe.
     pub async fn report_update(&mut self, new_value: T) {
         match &mut self.state {
             State::Unknown => {
@@ -202,7 +202,28 @@ where
                 }
             }
 
-            State::SyncedTrans { .. } => todo!(),
+            State::SyncedTrans { value } => {
+                if value != &new_value {
+                    // These two statements are the reason this method
+                    // isn't cancel-safe. We could try to add an
+                    // `OverriddenTrans` state, but then we have to
+                    // figure out what to do when settings or new
+                    // polled values arrive.
+                    //
+                    // The sad part is that this state and the
+                    // previous `SettingTrans` state are probably
+                    // never going to be active when a new value is
+                    // reported with this method.
+
+                    (self.report_chan)(value.clone().into()).await;
+                    (self.report_chan)(new_value.clone().into()).await;
+                    self.state = State::Overridden {
+                        tmo: tokio::time::Instant::now(),
+                        setting: value.clone(),
+                        r#override: new_value,
+                    }
+                }
+            }
         }
     }
 
@@ -225,7 +246,7 @@ where
 
     /// Waits for the next setting to arrive.
     ///
-    /// XXX: This method is not cancel-safe but needs to be.
+    /// This method is cancel-safe.
     pub async fn next_setting(&mut self) -> Option<SettingTransaction<T>> {
         loop {
             match &mut self.state {
