@@ -23,6 +23,7 @@ use crate::{
     driver::{rw_device, ReportReading, RxDeviceSetting, SettingReply},
 };
 use tokio_stream::StreamExt;
+use tracing::info;
 
 pub type SettingTransaction<T> = (T, Option<SettingReply<T>>);
 
@@ -129,14 +130,16 @@ where
                     (self.report_chan)(new_value.clone().into()).await;
                     self.state = State::Synced {
                         value: setting.clone(),
-                    }
+                    };
+                    info!("value matches setting ... exiting override mode")
                 } else if value != &new_value {
                     (self.report_chan)(new_value.clone().into()).await;
                     self.state = State::Overridden {
                         tmo: tokio::time::Instant::now(),
                         setting: value.clone(),
                         r#override: new_value,
-                    }
+                    };
+                    info!("override timer reset")
                 }
             }
 
@@ -150,7 +153,8 @@ where
                         tmo: tokio::time::Instant::now(),
                         setting: value.clone(),
                         r#override: new_value,
-                    }
+                    };
+                    info!("device in override mode")
                 }
             }
 
@@ -423,6 +427,7 @@ where
                                 // hardware can be adjusted.
 
                                 self.state = if setting != r#override {
+                                    info!("timer expired ... restoring setting");
                                     State::SettingTrans {
                                         value: (setting.clone(), None)
                                     }

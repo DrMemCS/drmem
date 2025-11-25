@@ -30,6 +30,9 @@ tokio.features = ["time", "macros"]
 tokio-stream.workspace = true
 tokio-stream.default-features = false
 
+tracing.workspace = true
+tracing.default-features = false
+
 serde.workspace = true
 serde.default-features = false
 
