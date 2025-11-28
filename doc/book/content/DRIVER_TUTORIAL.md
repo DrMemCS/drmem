@@ -9,9 +9,12 @@
 
 - Create async task that implements the `Driver` trait.
 
+- The `register()` method is called once to define and register the
+  devices created by this instance of the driver.
+
 - The `create()` method is called once to initialize the driver.
-  - Set up persistent resources for the instance
-  - Register the devices that are controlled by the instance
+  - Set up persistent resources for the instance.
+  - Initialize the instance of the driver..
 
 - The `run()` method gets called and isn't expected to return.
   - Driver can do practically anything -- it's an `async` task
