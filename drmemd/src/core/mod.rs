@@ -41,7 +41,7 @@ impl State {
                         max_history,
                     )
                     .await
-                    .map_err(|_| Error::DeviceDefined(format!("{}", dev_name)));
+                    .map_err(|_| Error::DeviceDefined(format!("{dev_name}")));
 
                 if rpy_chan.send(result).is_err() {
                     warn!("driver exited before a reply could be sent")
@@ -64,7 +64,7 @@ impl State {
                         max_history,
                     )
                     .await
-                    .map_err(|_| Error::DeviceDefined(format!("{}", dev_name)));
+                    .map_err(|_| Error::DeviceDefined(format!("{dev_name}")));
 
                 if rpy_chan.send(result).is_err() {
                     warn!("driver exited before a reply could be sent")

@@ -46,3 +46,7 @@ serde_json.default-features = false
 serde_json.features = ["std"]
 
 drmem-api = { path = "../../drmem-api", version = "0.6" }
+
+[dev-dependencies]
+tokio.workspace = true
+tokio.features = ["rt"]

@@ -51,10 +51,10 @@ impl Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Bool(v) => write!(f, "{}", v),
-            Value::Int(v) => write!(f, "{}", v),
-            Value::Flt(v) => write!(f, "{}", v),
-            Value::Str(v) => write!(f, "\"{}\"", v),
+            Value::Bool(v) => write!(f, "{v}"),
+            Value::Int(v) => write!(f, "{v}"),
+            Value::Flt(v) => write!(f, "{v}"),
+            Value::Str(v) => write!(f, "\"{v}\""),
             Value::Color(v) => {
                 write!(f, "\"#{:02x}{:02x}{:02x}", v.red, v.green, v.blue)?;
                 if v.alpha < 255 {
@@ -65,6 +65,14 @@ impl fmt::Display for Value {
         }
     }
 }
+
+pub trait ReadCompat: Into<Value> + PartialEq + Clone + Send {}
+
+pub trait ReadWriteCompat: ReadCompat + TryFrom<Value> {}
+
+impl ReadCompat for Value {}
+
+impl ReadWriteCompat for Value {}
 
 impl TryFrom<Value> for bool {
     type Error = Error;
@@ -84,6 +92,10 @@ impl From<bool> for Value {
     }
 }
 
+impl ReadCompat for bool {}
+
+impl ReadWriteCompat for bool {}
+
 impl TryFrom<Value> for i32 {
     type Error = Error;
 
@@ -100,6 +112,10 @@ impl From<i32> for Value {
         Value::Int(value)
     }
 }
+
+impl ReadCompat for i32 {}
+
+impl ReadWriteCompat for i32 {}
 
 impl TryFrom<Value> for i16 {
     type Error = Error;
@@ -120,6 +136,10 @@ impl From<i16> for Value {
     }
 }
 
+impl ReadCompat for i16 {}
+
+impl ReadWriteCompat for i16 {}
+
 impl TryFrom<Value> for u16 {
     type Error = Error;
 
@@ -139,6 +159,10 @@ impl From<u16> for Value {
     }
 }
 
+impl ReadCompat for u16 {}
+
+impl ReadWriteCompat for u16 {}
+
 impl TryFrom<Value> for f64 {
     type Error = Error;
 
@@ -156,6 +180,10 @@ impl From<f64> for Value {
         Value::Flt(value)
     }
 }
+
+impl ReadCompat for f64 {}
+
+impl ReadWriteCompat for f64 {}
 
 impl TryFrom<Value> for String {
     type Error = Error;
@@ -199,6 +227,16 @@ impl From<&str> for Value {
     }
 }
 
+impl ReadCompat for String {}
+
+impl ReadWriteCompat for String {}
+
+impl ReadCompat for Arc<str> {}
+
+impl ReadWriteCompat for Arc<str> {}
+
+impl ReadCompat for &str {}
+
 impl From<palette::LinSrgba<u8>> for Value {
     fn from(value: palette::LinSrgba<u8>) -> Self {
         Value::Color(value)
@@ -216,6 +254,10 @@ impl TryFrom<Value> for palette::LinSrgba<u8> {
         }
     }
 }
+
+impl ReadCompat for palette::LinSrgba<u8> {}
+
+impl ReadWriteCompat for palette::LinSrgba<u8> {}
 
 // Parses a color from a string. The only forms currently supported
 // are "#RRGGBB" and "#RRGGBBAA" where the red, green, blue, and alpha

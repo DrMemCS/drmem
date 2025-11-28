@@ -72,7 +72,7 @@ impl fmt::Display for Error {
                 write!(f, "device {} is already defined", &name)
             }
             Error::MissingPeer(detail) => {
-                write!(f, "{} is missing peer", detail)
+                write!(f, "{detail} is missing peer")
             }
             Error::TypeError => write!(f, "incorrect type"),
             Error::InvArgument(v) => write!(f, "{}", &v),

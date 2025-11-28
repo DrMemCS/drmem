@@ -13,14 +13,14 @@ pub type ReportReading = Box<
 /// Represents a read-only device that uses a specified type for its
 /// reading. Any type that can be converted to a `device::Value` is
 /// acceptable.
-pub struct ReadOnlyDevice<T: Into<device::Value> + Clone> {
+pub struct ReadOnlyDevice<T: device::ReadCompat> {
     report_chan: ReportReading,
     phantom: PhantomData<T>,
 }
 
 impl<T> ReadOnlyDevice<T>
 where
-    T: Into<device::Value> + Clone,
+    T: device::ReadCompat,
 {
     /// Returns a new `ReadOnlyDevice` type.
     pub fn new(report_chan: ReportReading) -> Self {

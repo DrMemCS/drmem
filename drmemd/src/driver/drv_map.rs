@@ -69,8 +69,7 @@ impl Instance {
             .and_then(|v| {
                 device::Value::try_from(v).map_err(|e| {
                     Error::ConfigError(format!(
-                        "`default` config paramter : {}",
-                        e
+                        "`default` config paramter : {e}"
                     ))
                 })
             })

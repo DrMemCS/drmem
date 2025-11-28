@@ -217,7 +217,7 @@ impl Node {
     // Creates an instance of `Node` and initializes its state using
     // the configuration information.
 
-    async fn init<'a>(
+    async fn init(
         c_req: client::RequestChan,
         c_time: broadcast::Receiver<tod::Info>,
         c_solar: broadcast::Receiver<solar::Info>,
@@ -249,14 +249,12 @@ impl Node {
             for (ref k, ref v) in &cfg.inputs {
                 if !name_set.insert(k) {
                     return Err(drmem_api::Error::ConfigError(format!(
-                        "name '{}' is defined more than once in 'inputs'",
-                        k
+                        "name '{k}' is defined more than once in 'inputs'"
                     )));
                 }
                 if !dev_set.insert(v) {
                     return Err(drmem_api::Error::ConfigError(format!(
-                        "device '{}' is defined more than once in 'inputs'",
-                        v
+                        "device '{v}' is defined more than once in 'inputs'"
                     )));
                 }
             }
@@ -264,8 +262,7 @@ impl Node {
             for ref k in cfg.defs.keys() {
                 if !name_set.insert(k) {
                     return Err(drmem_api::Error::ConfigError(format!(
-                        "'{}' is defined in 'defs' and 'inputs' sections",
-                        k
+                        "'{k}' is defined in 'defs' and 'inputs' sections",
                     )));
                 }
             }
@@ -294,14 +291,12 @@ impl Node {
             for (ref k, ref v) in &cfg.outputs {
                 if !name_set.insert(k.as_str()) {
                     return Err(drmem_api::Error::ConfigError(format!(
-                        "name '{}' is defined more than once in 'outputs'",
-                        k
+                        "name '{k}' is defined more than once in 'outputs'",
                     )));
                 }
                 if !dev_set.insert(v) {
                     return Err(drmem_api::Error::ConfigError(format!(
-                        "device '{}' is defined more than once in 'outputs'",
-                        v
+                        "device '{v}' is defined more than once in 'outputs'",
                     )));
                 }
             }

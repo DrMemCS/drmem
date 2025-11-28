@@ -22,12 +22,14 @@ pub type DriverConfig = value::Table;
 pub mod classes;
 mod ro_device;
 mod rw_device;
+mod shared_rw_device;
 
 pub use ro_device::{ReadOnlyDevice, ReportReading};
 pub use rw_device::{
     ReadWriteDevice, RxDeviceSetting, SettingReply, SettingRequest,
     TxDeviceSetting,
 };
+pub use shared_rw_device::SharedReadWriteDevice;
 
 /// Defines the requests that can be sent to core. Drivers don't use
 /// this type directly. They are indirectly used by `RequestChan`.
@@ -103,9 +105,7 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device<
-        T: Into<device::Value> + TryFrom<device::Value> + Clone,
-    >(
+    pub async fn add_ro_device<T: device::ReadCompat>(
         &self,
         name: device::Base,
         units: Option<&str>,
@@ -159,15 +159,12 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_rw_device<T>(
+    pub async fn add_rw_device<T: device::ReadWriteCompat>(
         &self,
         name: device::Base,
         units: Option<&str>,
         max_history: Option<usize>,
-    ) -> Result<ReadWriteDevice<T>>
-    where
-        T: Into<device::Value> + TryFrom<device::Value> + Clone,
-    {
+    ) -> Result<ReadWriteDevice<T>> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
@@ -187,6 +184,65 @@ impl RequestChan {
                         rr,
                         rs,
                         prev.and_then(|v| T::try_from(v).ok()),
+                    )
+                });
+            }
+        }
+
+        Err(Error::MissingPeer(String::from(
+            "can't communicate with core",
+        )))
+    }
+
+    /// Registers a device, with the framework, that is read-write but
+    /// which can also change state via external means. WiFi LED
+    /// bulbs, for instance, can be controlled by DrMem but can also
+    /// be adjusted by a person in the room or an app or another
+    /// automation agent, like Google Home.
+    ///
+    /// `name` is the last section of the full device name. Typically
+    /// a driver will register several devices, each representing a
+    /// portion of the hardware being controlled. All devices for a
+    /// given driver instance will have the same prefix; the `name`
+    /// parameter is appended to it.
+    ///
+    /// If it returns `Ok()`, the value is a pair containing a
+    /// broadcast channel that the driver uses to announce new values
+    /// of the associated hardware and a receive channel for incoming
+    /// settings to be applied to the hardware.
+    ///
+    /// If it returns `Err()`, the underlying value could be `InUse`,
+    /// meaning the device name is already registered. If the error is
+    /// `InternalError`, then the core has exited and the
+    /// `RequestChan` has been closed. Since the driver can't report
+    /// any more updates or accept new settings, it may as well shutdown.
+    pub async fn add_shared_rw_device<T: device::ReadWriteCompat>(
+        &self,
+        name: device::Base,
+        units: Option<&str>,
+        override_duration: Option<tokio::time::Duration>,
+        max_history: Option<usize>,
+    ) -> Result<SharedReadWriteDevice<T>> {
+        let (tx, rx) = oneshot::channel();
+        let result = self
+            .req_chan
+            .send(Request::AddReadWriteDevice {
+                driver_name: self.driver_name.clone(),
+                dev_name: device::Name::build(self.prefix.clone(), name),
+                dev_units: units.map(String::from),
+                max_history,
+                rpy_chan: tx,
+            })
+            .await;
+
+        if result.is_ok() {
+            if let Ok(v) = rx.await {
+                return v.map(|(rr, rs, prev)| {
+                    SharedReadWriteDevice::new(
+                        rr,
+                        rs,
+                        prev.and_then(|v| T::try_from(v).ok()),
+                        override_duration,
                     )
                 });
             }

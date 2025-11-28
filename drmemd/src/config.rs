@@ -135,7 +135,7 @@ fn from_cmdline(mut cfg: Config) -> (bool, Config) {
 
 fn parse_config(contents: &str) -> Result<Config> {
     toml::from_str(contents)
-        .map_err(|e| Error::ConfigError(format!("{}", e)))
+        .map_err(|e| Error::ConfigError(format!("{e}")))
         .and_then(|cfg: Config| {
             // Make sure latitude is between -90 and 90 degrees.
 
@@ -183,7 +183,7 @@ async fn find_cfg() -> Result<Config> {
     // directory. (Kind of hack-y, I know.)
 
     if let Ok(home) = env::var("HOME") {
-        dirs.push(format!("{}/.", home))
+        dirs.push(format!("{home}/."))
     }
 
     // Add other, common configuration areas.
@@ -257,7 +257,7 @@ pub async fn get() -> Option<Config> {
             }
         }
         Err(e) => {
-            println!("{}", e);
+            println!("{e}");
             None
         }
     }

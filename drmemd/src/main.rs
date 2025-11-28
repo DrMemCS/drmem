@@ -226,6 +226,6 @@ async fn run() -> Result<()> {
 #[tokio::main]
 async fn main() {
     if let Err(e) = run().await {
-        eprintln!("ERROR: {:?}", e)
+        eprintln!("ERROR: {e:?}")
     }
 }
