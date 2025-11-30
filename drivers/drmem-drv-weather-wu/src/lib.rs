@@ -417,6 +417,8 @@ impl driver::API for Instance {
 
         Span::current().record("cfg", devices.station.as_str());
 
+        devices.error.report_update(false).await;
+
         let mut timer = interval_at(Instant::now(), self.interval);
 
         // Loop forever.
