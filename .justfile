@@ -40,6 +40,12 @@ _test-redis-graphql: test-api
 
 test-drmemd: _test-simple _test-simple-graphql _test-redis-graphql
 
+release : test-all
+	@echo "Building release"
+	time nice cargo build \
+	    --release \
+	    --features simple-backend,graphql,all-drivers
+
 # This section has the targets for checking the syntax and
 # correctness. These commands run faster than the tests because they
 # don't generate object files and it doesn't link anything together.

@@ -880,7 +880,7 @@ impl Subscription {
         use tokio_stream::StreamExt;
 
         if let Ok(name) = device.parse::<device::Name>() {
-            info!("setting monitor for '{}'", &name);
+            debug!("setting monitor for '{}'", &name);
 
             let start = range.as_ref().and_then(|v| v.start);
             let end = range.as_ref().and_then(|v| v.end);
