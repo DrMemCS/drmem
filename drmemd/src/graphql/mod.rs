@@ -10,7 +10,7 @@ use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::subscriptions::serve_graphql_ws;
 use libmdns::Responder;
 use std::{pin::Pin, result, sync::Arc, time::Duration};
-use tracing::{error, info, info_span};
+use tracing::{debug, error, info, info_span};
 use tracing_futures::Instrument;
 use warp::{http::StatusCode, reject, reply, Filter, Rejection, Reply};
 
@@ -880,7 +880,7 @@ impl Subscription {
         use tokio_stream::StreamExt;
 
         if let Ok(name) = device.parse::<device::Name>() {
-            info!("setting monitor for '{}'", &name);
+            debug!("setting monitor for '{}'", &name);
 
             let start = range.as_ref().and_then(|v| v.start);
             let end = range.as_ref().and_then(|v| v.end);

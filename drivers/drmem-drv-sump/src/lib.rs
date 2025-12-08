@@ -371,6 +371,12 @@ impl driver::API for Instance {
 
         let mut devices = devices.lock().await;
 
+        // Set initial, default values for the devices. Pick values
+        // that would make sense.
+
+        devices.d_state.report_update(false).await;
+        devices.d_duty.report_update(0.0).await;
+        devices.d_inflow.report_update(0.0).await;
         devices.d_service.report_update(true).await;
 
         loop {
