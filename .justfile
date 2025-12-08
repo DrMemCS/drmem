@@ -67,7 +67,7 @@ check: _check-simple _check-simple-graphql _check-redis-graphql
 
 # This section helps publish the project to crates.io.
 
-publish:
+publish: test-all
 	@echo "DrMem Project published successfully!"
 
 # Local variables:
