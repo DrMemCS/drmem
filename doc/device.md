@@ -1,3 +1,8 @@
+**NOTE: This is a document from the earliest days of the project. It's
+contents are mostly out-of-date but it contains a few items that are
+still of interest. Once all of it has been obsoleted or rolled into
+the actual documentation, this file will get deleted.**
+
 # Device Names
 
 The control points in the system are called devices. Devices provide

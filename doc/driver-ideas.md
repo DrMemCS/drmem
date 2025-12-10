@@ -15,7 +15,7 @@ These are devices around my house which would be fun to control with DrMem.
   - [ ] Color LED bulb
   - [ ] On/Off Outlet Plugs
   - [ ] Motion Sensor / Flood Light
-- [ ] Kasa Switches / Dimmers (Wifi)
+- [X] Kasa Switches / Dimmers (Wifi)
 - [ ] Electric Meter (via software radio)
 - [ ] Water Meter (via software radio)
 - [ ] Computer information, (local and remote?)
@@ -40,3 +40,4 @@ always be available in DrMem.
 - [X] Cycling boolean output
 - [X] Memory device (RW: `value`) Each time `value` is set, it gets
       logged.
+- [X] Mapping device (maps ranges of integers into values.)
