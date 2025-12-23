@@ -45,7 +45,7 @@ use tokio::{
 };
 use tracing::{debug, error, warn, Span};
 
-mod tplink_api;
+mod tplink;
 
 const BUF_TOTAL: usize = 4_096;
 
@@ -85,11 +85,11 @@ impl Instance {
         }
     }
 
-    // Attempts to read a `tplink_api::Reply` type from the socket.
+    // Attempts to read a `tplink::Reply` type from the socket.
     // All replies have a 4-byte length header so we know how much
     // data to read.
 
-    async fn read_reply<R>(&mut self, s: &mut R) -> Result<tplink_api::Reply>
+    async fn read_reply<R>(&mut self, s: &mut R) -> Result<tplink::Reply>
     where
         R: AsyncReadExt + std::marker::Unpin,
     {
@@ -102,7 +102,7 @@ impl Instance {
                 if let Err(e) = s.read_exact(filled).await {
                     Err(Error::MissingPeer(e.to_string()))
                 } else {
-                    tplink_api::Reply::decode(filled).ok_or_else(|| {
+                    tplink::Reply::decode(filled).ok_or_else(|| {
                         Error::ParseError(format!(
                             "bad reply : {}",
                             String::from_utf8_lossy(filled)
@@ -121,7 +121,7 @@ impl Instance {
 
     // Attempts to send a command to the socket.
 
-    async fn send_cmd<S>(s: &mut S, cmd: tplink_api::Cmd) -> Result<()>
+    async fn send_cmd<S>(s: &mut S, cmd: tplink::Cmd) -> Result<()>
     where
         S: AsyncWriteExt + std::marker::Unpin,
     {
@@ -149,8 +149,8 @@ impl Instance {
         &mut self,
         rx: &mut R,
         tx: &mut S,
-        cmd: tplink_api::Cmd,
-    ) -> Result<tplink_api::Reply>
+        cmd: tplink::Cmd,
+    ) -> Result<tplink::Reply>
     where
         R: AsyncReadExt + std::marker::Unpin,
         S: AsyncWriteExt + std::marker::Unpin,
@@ -179,7 +179,7 @@ impl Instance {
         s: &mut TcpStream,
         v: bool,
     ) -> Result<()> {
-        use tplink_api::{active_cmd, ErrorStatus, Reply};
+        use tplink::{active_cmd, ErrorStatus, Reply};
 
         let (mut rx, mut tx) = s.split();
 
@@ -211,7 +211,7 @@ impl Instance {
         s: &mut TcpStream,
         v: bool,
     ) -> Result<()> {
-        use tplink_api::{led_cmd, ErrorStatus, Reply};
+        use tplink::{led_cmd, ErrorStatus, Reply};
 
         let (mut rx, mut tx) = s.split();
 
@@ -242,7 +242,7 @@ impl Instance {
     // Retrieves info.
 
     async fn info_rpc(&mut self, s: &mut TcpStream) -> Result<(bool, u8)> {
-        use tplink_api::{info_cmd, Reply};
+        use tplink::{info_cmd, Reply};
 
         let (mut rx, mut tx) = s.split();
 
@@ -275,7 +275,7 @@ impl Instance {
     // argument.
 
     async fn brightness_rpc(&mut self, s: &mut TcpStream, v: u8) -> Result<()> {
-        use tplink_api::{brightness_cmd, ErrorStatus, Reply};
+        use tplink::{brightness_cmd, ErrorStatus, Reply};
 
         let (mut rx, mut tx) = s.split();
 
@@ -625,7 +625,7 @@ impl driver::API for Instance {
 
 #[cfg(test)]
 mod test {
-    use super::{tplink_api, Instance};
+    use super::{tplink, Instance};
     use crate::BUF_TOTAL;
     use std::{
         io::Write,
@@ -657,7 +657,7 @@ mod test {
             let mut buf = vec![0, 0, 0, REPLY.len() as u8];
 
             {
-                let mut wr = tplink_api::CmdWriter::create(&mut buf);
+                let mut wr = tplink::CmdWriter::create(&mut buf);
 
                 assert_eq!(wr.write(REPLY).unwrap(), REPLY.len());
             }
