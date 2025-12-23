@@ -3,7 +3,6 @@
 // converted to the expected JSON layout.
 
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
 
 mod wr;
 
@@ -42,10 +41,7 @@ pub struct LedValue {
 // to convert to `{}`.
 
 #[derive(Serialize, PartialEq, Debug)]
-pub struct InfoValue {
-    #[serde(skip)]
-    pub nothing: PhantomData<()>,
-}
+pub struct InfoValue {}
 
 // Defines the internal value used by the `Brightness` command. Needs
 // to convert to `{"brightness":value}`.
@@ -157,9 +153,7 @@ pub fn brightness_cmd(v: u8) -> Cmd {
 pub fn info_cmd() -> Cmd {
     Cmd::System {
         set_relay_state: None,
-        get_sysinfo: Some(InfoValue {
-            nothing: PhantomData,
-        }),
+        get_sysinfo: Some(InfoValue {}),
         set_led_off: None,
     }
 }
@@ -176,6 +170,7 @@ pub fn led_cmd(v: bool) -> Cmd {
 mod tests {
     use super::*;
     use serde_json;
+    use std::io::Write;
 
     #[test]
     fn test_crypt() {
