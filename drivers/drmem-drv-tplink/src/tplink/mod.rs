@@ -21,34 +21,38 @@ fn decrypt(buf: &mut [u8]) {
     }
 }
 
-// Defines the internal value used by the `set_relay_state` command.
-// Needs to convert to `{"state":value}`.
+mod value {
+    use serde::Serialize;
 
-#[derive(Serialize, PartialEq, Debug)]
-pub struct ActiveValue {
-    pub state: u8,
-}
+    // Defines the internal value used by the `set_relay_state`
+    // command. Needs to convert to `{"state":value}`.
 
-// Defines the internal value used by the `set_led_off` command. Needs
-// to convert to `{"off":value}`.
+    #[derive(Serialize, PartialEq, Debug)]
+    pub struct Active {
+        pub state: u8,
+    }
 
-#[derive(Serialize, PartialEq, Debug)]
-pub struct LedValue {
-    pub off: u8,
-}
+    // Defines the internal value used by the `set_led_off`
+    // command. Needs to convert to `{"off":value}`.
 
-// Defines the internal value used by the `get_sysinfo` command. Needs
-// to convert to `{}`.
+    #[derive(Serialize, PartialEq, Debug)]
+    pub struct Led {
+        pub off: u8,
+    }
 
-#[derive(Serialize, PartialEq, Debug)]
-pub struct InfoValue {}
+    // Defines the internal value used by the `get_sysinfo`
+    // command. Needs to convert to `{}`.
 
-// Defines the internal value used by the `Brightness` command. Needs
-// to convert to `{"brightness":value}`.
+    #[derive(Serialize, PartialEq, Debug)]
+    pub struct Info {}
 
-#[derive(Serialize, PartialEq, Debug)]
-pub struct BrightnessValue {
-    pub brightness: u8,
+    // Defines the internal value used by the `Brightness`
+    // command. Needs to convert to `{"brightness":value}`.
+
+    #[derive(Serialize, PartialEq, Debug)]
+    pub struct Brightness {
+        pub brightness: u8,
+    }
 }
 
 #[derive(Serialize, PartialEq, Debug)]
@@ -56,15 +60,15 @@ pub enum Cmd {
     #[serde(rename = "system")]
     System {
         #[serde(skip_serializing_if = "Option::is_none")]
-        set_relay_state: Option<ActiveValue>,
+        set_relay_state: Option<value::Active>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        get_sysinfo: Option<InfoValue>,
+        get_sysinfo: Option<value::Info>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        set_led_off: Option<LedValue>,
+        set_led_off: Option<value::Led>,
     },
 
     #[serde(rename = "smartlife.iot.dimmer")]
-    Dimmer { set_brightness: BrightnessValue },
+    Dimmer { set_brightness: value::Brightness },
 }
 
 impl Cmd {
@@ -138,7 +142,7 @@ impl Reply {
 
 pub fn active_cmd(v: u8) -> Cmd {
     Cmd::System {
-        set_relay_state: Some(ActiveValue { state: v }),
+        set_relay_state: Some(value::Active { state: v }),
         get_sysinfo: None,
         set_led_off: None,
     }
@@ -146,14 +150,14 @@ pub fn active_cmd(v: u8) -> Cmd {
 
 pub fn brightness_cmd(v: u8) -> Cmd {
     Cmd::Dimmer {
-        set_brightness: BrightnessValue { brightness: v },
+        set_brightness: value::Brightness { brightness: v },
     }
 }
 
 pub fn info_cmd() -> Cmd {
     Cmd::System {
         set_relay_state: None,
-        get_sysinfo: Some(InfoValue {}),
+        get_sysinfo: Some(value::Info {}),
         set_led_off: None,
     }
 }
@@ -162,7 +166,7 @@ pub fn led_cmd(v: bool) -> Cmd {
     Cmd::System {
         set_relay_state: None,
         get_sysinfo: None,
-        set_led_off: Some(LedValue { off: (!v) as u8 }),
+        set_led_off: Some(value::Led { off: (!v) as u8 }),
     }
 }
 
