@@ -179,11 +179,14 @@ impl Instance {
         s: &mut TcpStream,
         v: bool,
     ) -> Result<()> {
-        use tplink::{active_cmd, ErrorStatus, Reply};
+        use tplink::{Cmd, ErrorStatus, Reply};
 
         let (mut rx, mut tx) = s.split();
 
-        match self.rpc(&mut rx, &mut tx, active_cmd(v as u8)).await? {
+        match self
+            .rpc(&mut rx, &mut tx, Cmd::mk_active_cmd(v as u8))
+            .await?
+        {
             Reply::System {
                 set_relay_state: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -211,14 +214,14 @@ impl Instance {
         s: &mut TcpStream,
         v: bool,
     ) -> Result<()> {
-        use tplink::{led_cmd, ErrorStatus, Reply};
+        use tplink::{Cmd, ErrorStatus, Reply};
 
         let (mut rx, mut tx) = s.split();
 
         // Send the request and receive the reply. Use pattern
         // matching to determine the return value of the function.
 
-        match self.rpc(&mut rx, &mut tx, led_cmd(v)).await? {
+        match self.rpc(&mut rx, &mut tx, Cmd::mk_led_cmd(v)).await? {
             Reply::System {
                 set_led_off: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -242,14 +245,14 @@ impl Instance {
     // Retrieves info.
 
     async fn info_rpc(&mut self, s: &mut TcpStream) -> Result<(bool, u8)> {
-        use tplink::{info_cmd, Reply};
+        use tplink::{Cmd, Reply};
 
         let (mut rx, mut tx) = s.split();
 
         // Send the request and receive the reply. Use pattern
         // matching to determine the return value of the function.
 
-        match self.rpc(&mut rx, &mut tx, info_cmd()).await? {
+        match self.rpc(&mut rx, &mut tx, Cmd::mk_info_cmd()).await? {
             Reply::System {
                 get_sysinfo: Some(info),
                 ..
@@ -275,11 +278,14 @@ impl Instance {
     // argument.
 
     async fn brightness_rpc(&mut self, s: &mut TcpStream, v: u8) -> Result<()> {
-        use tplink::{brightness_cmd, ErrorStatus, Reply};
+        use tplink::{Cmd, ErrorStatus, Reply};
 
         let (mut rx, mut tx) = s.split();
 
-        match self.rpc(&mut rx, &mut tx, brightness_cmd(v)).await? {
+        match self
+            .rpc(&mut rx, &mut tx, Cmd::mk_brightness_cmd(v))
+            .await?
+        {
             Reply::Dimmer {
                 set_brightness: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -627,10 +633,7 @@ impl driver::API for Instance {
 mod test {
     use super::{tplink, Instance};
     use crate::BUF_TOTAL;
-    use std::{
-        io::Write,
-        net::{Ipv4Addr, SocketAddrV4},
-    };
+    use std::net::{Ipv4Addr, SocketAddrV4};
 
     #[tokio::test]
     async fn test_read_reply() {
@@ -656,11 +659,8 @@ mod test {
 
             let mut buf = vec![0, 0, 0, REPLY.len() as u8];
 
-            {
-                let mut wr = tplink::CmdWriter::create(&mut buf);
-
-                assert_eq!(wr.write(REPLY).unwrap(), REPLY.len());
-            }
+            buf.extend_from_slice(&REPLY[..]);
+            tplink::crypt::encode(&mut buf[4..]);
 
             assert!(buf.len() == 45);
             assert!(buf.as_slice().len() == 45);
