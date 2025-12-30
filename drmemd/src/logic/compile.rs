@@ -594,26 +594,33 @@ fn eval_as_or_expr(
 ) -> Option<device::Value> {
     match eval(a, inp, time, solar) {
         v @ Some(device::Value::Bool(true)) => v,
-        Some(device::Value::Bool(false)) => match eval(b, inp, time, solar) {
-            v @ Some(device::Value::Bool(_)) => v,
-            Some(v) => {
-                error!("OR expression contains non-boolean argument: {}", &v);
-                None
+        Some(device::Value::Bool(false)) => {
+            match eval(b, inp, time, solar) {
+                v @ Some(device::Value::Bool(_)) => v,
+                Some(v) => {
+                    error!("OR expression contains non-boolean, second argument: {}", &v);
+                    None
+                }
+                None => None,
             }
-            None => None,
-        },
+        }
         Some(v) => {
-            error!("OR expression contains non-boolean argument: {}", &v);
+            error!(
+                "OR expression contains non-boolean, first argument: {}",
+                &v
+            );
             None
         }
-        None => match eval(b, inp, time, solar) {
-            v @ Some(device::Value::Bool(true)) => v,
-            Some(device::Value::Bool(false)) | None => None,
-            Some(v) => {
-                error!("OR expression contains non-boolean argument: {}", &v);
-                None
+        None => {
+            match eval(b, inp, time, solar) {
+                v @ Some(device::Value::Bool(true)) => v,
+                Some(device::Value::Bool(false)) | None => None,
+                Some(v) => {
+                    error!("OR expression contains non-boolean, second argument: {}", &v);
+                    None
+                }
             }
-        },
+        }
     }
 }
 
@@ -628,26 +635,33 @@ fn eval_as_and_expr(
 ) -> Option<device::Value> {
     match eval(a, inp, time, solar) {
         v @ Some(device::Value::Bool(false)) => v,
-        Some(device::Value::Bool(true)) => match eval(b, inp, time, solar) {
-            v @ Some(device::Value::Bool(_)) => v,
-            Some(v) => {
-                error!("AND expression contains non-boolean argument: {}", &v);
-                None
+        Some(device::Value::Bool(true)) => {
+            match eval(b, inp, time, solar) {
+                v @ Some(device::Value::Bool(_)) => v,
+                Some(v) => {
+                    error!("AND expression contains non-boolean, second argument: {}", &v);
+                    None
+                }
+                None => None,
             }
-            None => None,
-        },
+        }
         Some(v) => {
-            error!("AND expression contains non-boolean argument: {}", &v);
+            error!(
+                "AND expression contains non-boolean, first argument: {}",
+                &v
+            );
             None
         }
-        None => match eval(b, inp, time, solar) {
-            v @ Some(device::Value::Bool(false)) => v,
-            Some(device::Value::Bool(true)) | None => None,
-            Some(v) => {
-                error!("AND expression contains non-boolean argument: {}", &v);
-                None
+        None => {
+            match eval(b, inp, time, solar) {
+                v @ Some(device::Value::Bool(false)) => v,
+                Some(device::Value::Bool(true)) | None => None,
+                Some(v) => {
+                    error!("AND expression contains non-boolean, second argument: {}", &v);
+                    None
+                }
             }
-        },
+        }
     }
 }
 
