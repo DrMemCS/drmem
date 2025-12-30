@@ -114,11 +114,11 @@ pub enum TimeField {
 }
 
 impl TimeField {
-    fn is_leap_year(year: u32) -> bool {
+    fn is_leap_year(year: i32) -> bool {
         ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0)
     }
 
-    fn get_last_day(month: u32, year: u32) -> u32 {
+    fn get_last_day(month: u32, year: i32) -> u32 {
         match month {
             1 => 31,
             2 if Self::is_leap_year(year) => 29,
@@ -152,22 +152,21 @@ impl TimeField {
             TimeField::DoY => {
                 let doy = time.ordinal0() as i32;
                 let offset =
-                    (doy > 58 && Self::is_leap_year(time.year() as u32)) as i32;
+                    (doy > 58 && Self::is_leap_year(time.year())) as i32;
 
                 device::Value::Int(doy - offset)
             }
             TimeField::SoM => device::Value::Int(time.day().div_ceil(7) as i32),
             TimeField::EoM => {
                 let day = time.day();
-                let last_day =
-                    Self::get_last_day(time.month(), time.year() as u32);
+                let last_day = Self::get_last_day(time.month(), time.year());
 
                 device::Value::Int(((last_day + 7 - day) / 7) as i32)
             }
             TimeField::Month => device::Value::Int(time.month() as i32),
             TimeField::Year => device::Value::Int(time.year()),
             TimeField::LeapYear => {
-                device::Value::Bool(Self::is_leap_year(time.year() as u32))
+                device::Value::Bool(Self::is_leap_year(time.year()))
             }
         }
     }
