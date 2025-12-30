@@ -3123,6 +3123,44 @@ mod tests {
             ("2 + {utc:second}", Some(tod::TimeField::Second)),
             ("{local:hour} + {utc:minute}", Some(tod::TimeField::Minute)),
             ("{local:minute} + {utc:day}", Some(tod::TimeField::Minute)),
+            // Check the complicated if-statement.
+            ("if 5 > 0 then 7 end", None),
+            (
+                "if {local:minute} > 0 then {local:hour} end",
+                Some(tod::TimeField::Minute),
+            ),
+            (
+                "if {local:hour} > 0 then {local:minute} end",
+                Some(tod::TimeField::Minute),
+            ),
+            (
+                "if {local:hour} > 0 then {local:minute} else {local:day} end",
+                Some(tod::TimeField::Minute),
+            ),
+            (
+                "if {local:minute} > 0 then {local:hour} else {local:day} end",
+                Some(tod::TimeField::Minute),
+            ),
+            (
+                "if {local:day} > 0 then {local:hour} else {local:second} end",
+                Some(tod::TimeField::Second),
+            ),
+            (
+                "if {local:hour} > 0 then true else {local:day} end",
+                Some(tod::TimeField::Hour),
+            ),
+            (
+                "if {local:hour} > 0 then {local:day} else true end",
+                Some(tod::TimeField::Hour),
+            ),
+            (
+                "if {local:day} > 0 then true else {local:hour} end",
+                Some(tod::TimeField::Hour),
+            ),
+            (
+                "if {local:day} > 0 then {local:hour} else true end",
+                Some(tod::TimeField::Hour),
+            ),
         ];
 
         for (expr, result) in DATA {
