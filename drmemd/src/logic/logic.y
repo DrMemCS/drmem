@@ -218,9 +218,8 @@ Unknown -> ():
 %%
 
 use drmem_api::{Result, Error, device};
-use chrono::{Timelike, Datelike};
 use palette::{LinSrgba, LinSrgb, Srgb, named, WithAlpha};
-use super::{TimeField, SolarField, super::tod, super::solar, Expr, Program};
+use super::{Zone, TimeField, SolarField, super::solar, Expr, Program};
 use std::str::FromStr;
 
 use lrlex::{DefaultLexeme, DefaultLexerTypes};
@@ -289,135 +288,6 @@ const FLD_AZ: &str = "az";
 const FLD_RA: &str = "ra";
 const FLD_DEC: &str = "dec";
 
-fn is_leap_year(year: u32) -> bool {
-    ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0)
-}
-
-fn get_last_day(month: u32, year: u32) -> u32 {
-    match month {
-        1 => 31,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        3 => 31,
-        4 => 30,
-        5 => 31,
-        6 => 30,
-        7 => 31,
-        8 => 31,
-        9 => 30,
-        10 => 31,
-        11 => 30,
-        12 => 31,
-        _ => unreachable!()
-    }
-}
-
-fn get_utc_second(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.0.second() as i32)
-}
-
-fn get_utc_minute(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.0.minute() as i32)
-}
-
-fn get_utc_hour(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.0.hour() as i32)
-}
-
-fn get_utc_day(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.0.day() as i32)
-}
-
-fn get_utc_day_of_week(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.0.weekday().num_days_from_monday() as i32)
-}
-
-fn get_utc_month(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.0.month() as i32)
-}
-
-fn get_utc_start_from_month(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.0.day().div_ceil(7) as i32)
-}
-
-fn get_utc_end_from_month(info: &tod::Info) -> device::Value {
-    let day = info.0.day();
-    let last_day = get_last_day(info.0.month(), info.0.year() as u32);
-
-    device::Value::Int(((last_day + 7 - day) / 7) as i32)
-}
-
-fn get_utc_year(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.0.year())
-}
-
-fn get_utc_leap_year(info: &tod::Info) -> device::Value {
-    let year = info.0.year();
-
-    device::Value::Bool(((year % 4 == 0) && (year % 100 != 0)) ||
-			(year % 400 == 0))
-}
-
-fn get_utc_day_of_year(info: &tod::Info) -> device::Value {
-    let doy = info.0.ordinal0() as i32;
-    let offset = (doy > 58 && is_leap_year(info.0.year() as u32)) as i32;
-
-    device::Value::Int(doy - offset)
-}
-
-fn get_local_second(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.1.second() as i32)
-}
-
-fn get_local_minute(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.1.minute() as i32)
-}
-
-fn get_local_hour(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.1.hour() as i32)
-}
-
-fn get_local_day(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.1.day() as i32)
-}
-
-fn get_local_day_of_week(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.1.weekday().num_days_from_monday() as i32)
-}
-
-fn get_local_month(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.1.month() as i32)
-}
-
-fn get_local_start_from_month(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.1.day().div_ceil(7) as i32)
-}
-
-fn get_local_end_from_month(info: &tod::Info) -> device::Value {
-    let day = info.1.day();
-    let last_day = get_last_day(info.1.month(), info.1.year() as u32);
-
-    device::Value::Int(((last_day + 7 - day) / 7) as i32)
-}
-
-fn get_local_year(info: &tod::Info) -> device::Value {
-    device::Value::Int(info.1.year())
-}
-
-fn get_local_leap_year(info: &tod::Info) -> device::Value {
-    let year = info.1.year();
-
-    device::Value::Bool(((year % 4 == 0) && (year % 100 != 0)) ||
-			(year % 400 == 0))
-}
-
-fn get_local_day_of_year(info: &tod::Info) -> device::Value {
-    let doy = info.1.ordinal0() as i32;
-    let offset = (doy > 58 && is_leap_year(info.1.year() as u32)) as i32;
-
-    device::Value::Int(doy - offset)
-}
-
 fn get_solar_altitude(info: &solar::Info) -> device::Value {
     device::Value::Flt(info.elevation)
 }
@@ -437,70 +307,70 @@ fn get_solar_declination(info: &solar::Info) -> device::Value {
 fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
     match (cat, fld) {
 	(CAT_UTC, FLD_SECOND) => Ok(Expr::TimeVal(
-	    CAT_UTC, TimeField::Second, get_utc_second
+            Zone::Utc, TimeField::Second
         )),
 	(CAT_UTC, FLD_MINUTE) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::Minute, get_utc_minute
+            Zone::Utc, TimeField::Minute
         )),
 	(CAT_UTC, FLD_HOUR) => Ok(Expr::TimeVal(
-	    CAT_UTC, TimeField::Hour, get_utc_hour
+	    Zone::Utc, TimeField::Hour
         )),
 	(CAT_UTC, FLD_DAY) => Ok(Expr::TimeVal(
-	    CAT_UTC, TimeField::Day, get_utc_day
+	    Zone::Utc, TimeField::Day
         )),
 	(CAT_UTC, FLD_DOW) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::DoW, get_utc_day_of_week
+            Zone::Utc, TimeField::DoW
         )),
 	(CAT_UTC, FLD_MONTH) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::Month, get_utc_month
+            Zone::Utc, TimeField::Month
         )),
 	(CAT_UTC, FLD_SOM) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::SoM, get_utc_start_from_month
+            Zone::Utc, TimeField::SoM
         )),
 	(CAT_UTC, FLD_EOM) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::EoM, get_utc_end_from_month
+            Zone::Utc, TimeField::EoM
         )),
 	(CAT_UTC, FLD_YEAR) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::Year, get_utc_year
+            Zone::Utc, TimeField::Year
         )),
 	(CAT_UTC, FLD_LY) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::LeapYear, get_utc_leap_year
+            Zone::Utc, TimeField::LeapYear
         )),
 	(CAT_UTC, FLD_DOY) => Ok(Expr::TimeVal(
-            CAT_UTC, TimeField::DoY, get_utc_day_of_year
+            Zone::Utc, TimeField::DoY
         )),
 	(CAT_LOCAL, FLD_SECOND) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::Second, get_local_second
+            Zone::Local, TimeField::Second
         )),
 	(CAT_LOCAL, FLD_MINUTE) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::Minute, get_local_minute
+            Zone::Local, TimeField::Minute
         )),
 	(CAT_LOCAL, FLD_HOUR) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::Hour, get_local_hour
+            Zone::Local, TimeField::Hour
         )),
 	(CAT_LOCAL, FLD_DAY) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::Day, get_local_day
+            Zone::Local, TimeField::Day
         )),
 	(CAT_LOCAL, FLD_DOW) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::DoW, get_local_day_of_week
+            Zone::Local, TimeField::DoW
         )),
 	(CAT_LOCAL, FLD_MONTH) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::Month, get_local_month
+            Zone::Local, TimeField::Month
         )),
 	(CAT_LOCAL, FLD_SOM) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::SoM, get_local_start_from_month
+            Zone::Local, TimeField::SoM
         )),
 	(CAT_LOCAL, FLD_EOM) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::EoM, get_local_end_from_month
+            Zone::Local, TimeField::EoM
         )),
 	(CAT_LOCAL, FLD_YEAR) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::Year, get_local_year
+            Zone::Local, TimeField::Year
         )),
 	(CAT_LOCAL, FLD_LY) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::LeapYear, get_local_leap_year
+            Zone::Local, TimeField::LeapYear
         )),
 	(CAT_LOCAL, FLD_DOY) => Ok(Expr::TimeVal(
-            CAT_LOCAL, TimeField::DoY, get_local_day_of_year
+            Zone::Local, TimeField::DoY
         )),
 	(CAT_SOLAR, FLD_ALT) => Ok(Expr::SolarVal(
 	    SolarField::Elevation, get_solar_altitude

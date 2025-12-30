@@ -68,6 +68,7 @@
 
 use super::solar;
 use super::tod;
+use chrono::{Datelike, Timelike};
 use drmem_api::{device, Error, Result};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
@@ -78,6 +79,24 @@ use tracing::error;
 
 lrlex_mod!("logic/logic.l");
 lrpar_mod!("logic/logic.y");
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum Zone {
+    Utc,
+    Local,
+}
+
+impl std::fmt::Display for Zone {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            Zone::Utc => write!(f, "utc"),
+            Zone::Local => write!(f, "local"),
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum TimeField {
@@ -92,6 +111,66 @@ pub enum TimeField {
     Month,
     Year,
     LeapYear,
+}
+
+impl TimeField {
+    fn is_leap_year(year: u32) -> bool {
+        ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0)
+    }
+
+    fn get_last_day(month: u32, year: u32) -> u32 {
+        match month {
+            1 => 31,
+            2 if Self::is_leap_year(year) => 29,
+            2 => 28,
+            3 => 31,
+            4 => 30,
+            5 => 31,
+            6 => 30,
+            7 => 31,
+            8 => 31,
+            9 => 30,
+            10 => 31,
+            11 => 30,
+            12 => 31,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn project<Tz: chrono::TimeZone>(
+        &self,
+        time: &chrono::DateTime<Tz>,
+    ) -> device::Value {
+        match self {
+            TimeField::Second => device::Value::Int(time.second() as i32),
+            TimeField::Minute => device::Value::Int(time.minute() as i32),
+            TimeField::Hour => device::Value::Int(time.hour() as i32),
+            TimeField::Day => device::Value::Int(time.day() as i32),
+            TimeField::DoW => {
+                device::Value::Int(time.weekday().num_days_from_monday() as i32)
+            }
+            TimeField::DoY => {
+                let doy = time.ordinal0() as i32;
+                let offset =
+                    (doy > 58 && Self::is_leap_year(time.year() as u32)) as i32;
+
+                device::Value::Int(doy - offset)
+            }
+            TimeField::SoM => device::Value::Int(time.day().div_ceil(7) as i32),
+            TimeField::EoM => {
+                let day = time.day();
+                let last_day =
+                    Self::get_last_day(time.month(), time.year() as u32);
+
+                device::Value::Int(((last_day + 7 - day) / 7) as i32)
+            }
+            TimeField::Month => device::Value::Int(time.month() as i32),
+            TimeField::Year => device::Value::Int(time.year()),
+            TimeField::LeapYear => {
+                device::Value::Bool(Self::is_leap_year(time.year() as u32))
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for TimeField {
@@ -143,7 +222,7 @@ pub enum Expr {
 
     Lit(device::Value),
     Var(usize),
-    TimeVal(&'static str, TimeField, fn(&tod::Info) -> device::Value),
+    TimeVal(Zone, TimeField),
     SolarVal(SolarField, fn(&solar::Info) -> device::Value),
 
     Not(Box<Expr>),
@@ -190,23 +269,17 @@ impl Expr {
 
     pub fn uses_time(&self) -> Option<tod::TimeField> {
         match self {
-            Expr::TimeVal(_, TimeField::Second, _) => {
-                Some(tod::TimeField::Second)
-            }
-            Expr::TimeVal(_, TimeField::Minute, _) => {
-                Some(tod::TimeField::Minute)
-            }
-            Expr::TimeVal(_, TimeField::Hour, _) => Some(tod::TimeField::Hour),
-            Expr::TimeVal(_, TimeField::Day, _)
-            | Expr::TimeVal(_, TimeField::SoM, _)
-            | Expr::TimeVal(_, TimeField::EoM, _)
-            | Expr::TimeVal(_, TimeField::DoW, _)
-            | Expr::TimeVal(_, TimeField::DoY, _) => Some(tod::TimeField::Day),
-            Expr::TimeVal(_, TimeField::Month, _) => {
-                Some(tod::TimeField::Month)
-            }
-            Expr::TimeVal(_, TimeField::Year, _)
-            | Expr::TimeVal(_, TimeField::LeapYear, _) => {
+            Expr::TimeVal(_, TimeField::Second) => Some(tod::TimeField::Second),
+            Expr::TimeVal(_, TimeField::Minute) => Some(tod::TimeField::Minute),
+            Expr::TimeVal(_, TimeField::Hour) => Some(tod::TimeField::Hour),
+            Expr::TimeVal(_, TimeField::Day)
+            | Expr::TimeVal(_, TimeField::SoM)
+            | Expr::TimeVal(_, TimeField::EoM)
+            | Expr::TimeVal(_, TimeField::DoW)
+            | Expr::TimeVal(_, TimeField::DoY) => Some(tod::TimeField::Day),
+            Expr::TimeVal(_, TimeField::Month) => Some(tod::TimeField::Month),
+            Expr::TimeVal(_, TimeField::Year)
+            | Expr::TimeVal(_, TimeField::LeapYear) => {
                 Some(tod::TimeField::Year)
             }
             Expr::SolarVal(..)
@@ -296,7 +369,7 @@ impl fmt::Display for Expr {
             Expr::Lit(v) => write!(f, "{}", &v),
             Expr::Var(v) => write!(f, "inp[{}]", &v),
 
-            Expr::TimeVal(cat, fld, _) => write!(f, "{{{cat}:{fld}}}"),
+            Expr::TimeVal(cat, fld) => write!(f, "{{{cat}:{fld}}}"),
 
             Expr::SolarVal(fld, _) => write!(f, "{{solar:{fld}}}"),
 
@@ -438,7 +511,9 @@ pub fn eval(
 
         Expr::Var(n) => eval_as_var(*n, inp),
 
-        Expr::TimeVal(_, _, f) => Some(f(time)),
+        Expr::TimeVal(Zone::Utc, field) => Some(field.project(&time.0)),
+
+        Expr::TimeVal(Zone::Local, field) => Some(field.project(&time.1)),
 
         Expr::SolarVal(_, f) => solar.map(f),
 
