@@ -121,8 +121,7 @@ impl TimeField {
     fn get_last_day(month: u32, year: i32) -> u32 {
         match month {
             1 => 31,
-            2 if Self::is_leap_year(year) => 29,
-            2 => 28,
+            2 => 28 + (Self::is_leap_year(year) as u32),
             3 => 31,
             4 => 30,
             5 => 31,
