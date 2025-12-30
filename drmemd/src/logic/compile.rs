@@ -202,6 +202,19 @@ pub enum SolarField {
     Declination,
 }
 
+impl SolarField {
+    pub fn project(&self, solar: &solar::Info) -> device::Value {
+        match self {
+            SolarField::Elevation => device::Value::Flt(solar.elevation),
+            SolarField::Azimuth => device::Value::Flt(solar.azimuth),
+            SolarField::RightAscension => {
+                device::Value::Flt(solar.right_ascension)
+            }
+            SolarField::Declination => device::Value::Flt(solar.declination),
+        }
+    }
+}
+
 impl std::fmt::Display for SolarField {
     fn fmt(
         &self,
@@ -223,7 +236,7 @@ pub enum Expr {
     Lit(device::Value),
     Var(usize),
     TimeVal(Zone, TimeField),
-    SolarVal(SolarField, fn(&solar::Info) -> device::Value),
+    SolarVal(SolarField),
 
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
@@ -371,7 +384,7 @@ impl fmt::Display for Expr {
 
             Expr::TimeVal(cat, fld) => write!(f, "{{{cat}:{fld}}}"),
 
-            Expr::SolarVal(fld, _) => write!(f, "{{solar:{fld}}}"),
+            Expr::SolarVal(fld) => write!(f, "{{solar:{fld}}}"),
 
             Expr::Not(e) => {
                 write!(f, "not ")?;
@@ -515,7 +528,7 @@ pub fn eval(
 
         Expr::TimeVal(Zone::Local, field) => Some(field.project(&time.1)),
 
-        Expr::SolarVal(_, f) => solar.map(f),
+        Expr::SolarVal(field) => solar.map(|v| field.project(v)),
 
         Expr::Not(ref e) => eval_as_not_expr(e, inp, time, solar),
 

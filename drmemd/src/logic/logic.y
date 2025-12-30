@@ -219,7 +219,7 @@ Unknown -> ():
 
 use drmem_api::{Result, Error, device};
 use palette::{LinSrgba, LinSrgb, Srgb, named, WithAlpha};
-use super::{Zone, TimeField, SolarField, super::solar, Expr, Program};
+use super::{Zone, TimeField, SolarField, Expr, Program};
 use std::str::FromStr;
 
 use lrlex::{DefaultLexeme, DefaultLexerTypes};
@@ -287,22 +287,6 @@ const FLD_ALT: &str = "alt";
 const FLD_AZ: &str = "az";
 const FLD_RA: &str = "ra";
 const FLD_DEC: &str = "dec";
-
-fn get_solar_altitude(info: &solar::Info) -> device::Value {
-    device::Value::Flt(info.elevation)
-}
-
-fn get_solar_azimuth(info: &solar::Info) -> device::Value {
-    device::Value::Flt(info.azimuth)
-}
-
-fn get_solar_right_ascension(info: &solar::Info) -> device::Value {
-    device::Value::Flt(info.right_ascension)
-}
-
-fn get_solar_declination(info: &solar::Info) -> device::Value {
-    device::Value::Flt(info.declination)
-}
 
 fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
     match (cat, fld) {
@@ -372,18 +356,10 @@ fn parse_builtin(cat: &str, fld: &str) -> Result<Expr> {
 	(CAT_LOCAL, FLD_DOY) => Ok(Expr::TimeVal(
             Zone::Local, TimeField::DoY
         )),
-	(CAT_SOLAR, FLD_ALT) => Ok(Expr::SolarVal(
-	    SolarField::Elevation, get_solar_altitude
-        )),
-	(CAT_SOLAR, FLD_AZ) => Ok(Expr::SolarVal(
-            SolarField::Azimuth, get_solar_azimuth
-        )),
-	(CAT_SOLAR, FLD_RA) => Ok(Expr::SolarVal(
-            SolarField::RightAscension, get_solar_right_ascension
-        )),
-	(CAT_SOLAR, FLD_DEC) => Ok(Expr::SolarVal(
-            SolarField::Declination, get_solar_declination
-        )),
+	(CAT_SOLAR, FLD_ALT) => Ok(Expr::SolarVal(SolarField::Elevation)),
+	(CAT_SOLAR, FLD_AZ) => Ok(Expr::SolarVal(SolarField::Azimuth)),
+	(CAT_SOLAR, FLD_RA) => Ok(Expr::SolarVal(SolarField::RightAscension)),
+	(CAT_SOLAR, FLD_DEC) => Ok(Expr::SolarVal(SolarField::Declination)),
 	_ => Err(Error::ParseError(
 		 format!("unknown built-in: {cat}:{fld}")
 	     ))
