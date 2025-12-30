@@ -530,31 +530,29 @@ pub fn eval(
 
         Expr::SolarVal(field) => solar.map(|v| field.project(v)),
 
-        Expr::Not(ref e) => eval_as_not_expr(e, inp, time, solar),
+        Expr::Not(e) => eval_as_not_expr(e, inp, time, solar),
 
-        Expr::Or(ref a, ref b) => eval_as_or_expr(a, b, inp, time, solar),
+        Expr::Or(a, b) => eval_as_or_expr(a, b, inp, time, solar),
 
-        Expr::And(ref a, ref b) => eval_as_and_expr(a, b, inp, time, solar),
+        Expr::And(a, b) => eval_as_and_expr(a, b, inp, time, solar),
 
-        Expr::Eq(ref a, ref b) => eval_as_eq_expr(a, b, inp, time, solar),
+        Expr::Eq(a, b) => eval_as_eq_expr(a, b, inp, time, solar),
 
-        Expr::Lt(ref a, ref b) => eval_as_lt_expr(a, b, inp, time, solar),
+        Expr::Lt(a, b) => eval_as_lt_expr(a, b, inp, time, solar),
 
-        Expr::LtEq(ref a, ref b) => eval_as_lteq_expr(a, b, inp, time, solar),
+        Expr::LtEq(a, b) => eval_as_lteq_expr(a, b, inp, time, solar),
 
-        Expr::Add(ref a, ref b) => eval_as_add_expr(a, b, inp, time, solar),
+        Expr::Add(a, b) => eval_as_add_expr(a, b, inp, time, solar),
 
-        Expr::Sub(ref a, ref b) => eval_as_sub_expr(a, b, inp, time, solar),
+        Expr::Sub(a, b) => eval_as_sub_expr(a, b, inp, time, solar),
 
-        Expr::Mul(ref a, ref b) => eval_as_mul_expr(a, b, inp, time, solar),
+        Expr::Mul(a, b) => eval_as_mul_expr(a, b, inp, time, solar),
 
-        Expr::Div(ref a, ref b) => eval_as_div_expr(a, b, inp, time, solar),
+        Expr::Div(a, b) => eval_as_div_expr(a, b, inp, time, solar),
 
-        Expr::Rem(ref a, ref b) => eval_as_rem_expr(a, b, inp, time, solar),
+        Expr::Rem(a, b) => eval_as_rem_expr(a, b, inp, time, solar),
 
-        Expr::If(ref a, ref b, ref c) => {
-            eval_as_if_expr(a, b, c, inp, time, solar)
-        }
+        Expr::If(a, b, c) => eval_as_if_expr(a, b, c, inp, time, solar),
     }
 }
 
@@ -973,24 +971,18 @@ fn eval_as_if_expr(
 // This function takes an expression and tries to reduce it.
 
 pub fn optimize(e: Expr) -> Expr {
-    match e {
+    match &e {
         // Look for optimizations with expressions starting with NOT.
-        Expr::Not(ref ne) => match **ne {
+        Expr::Not(ne) => match &**ne {
             // If the sub-expression is also a NOT expression. If so,
             // we throw them both away.
-            Expr::Not(ref e) => optimize(*e.clone()),
+            Expr::Not(e) => optimize(*e.clone()),
 
             // If the subexpression is either `true` or `false`,
             // return the complement.
-            Expr::Lit(ref v) => match v {
-                device::Value::Bool(false) => {
-                    Expr::Lit(device::Value::Bool(true))
-                }
-                device::Value::Bool(true) => {
-                    Expr::Lit(device::Value::Bool(false))
-                }
-                _ => e,
-            },
+            Expr::Lit(device::Value::Bool(val)) => {
+                Expr::Lit(device::Value::Bool(!val))
+            }
             _ => e,
         },
 
@@ -1022,7 +1014,7 @@ pub fn optimize(e: Expr) -> Expr {
             }
         }
 
-        Expr::If(ref a, ref b, ref c) => {
+        Expr::If(a, b, c) => {
             let condition = optimize(*a.clone());
 
             match condition {
