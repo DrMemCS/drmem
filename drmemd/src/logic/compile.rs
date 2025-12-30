@@ -986,33 +986,21 @@ pub fn optimize(e: Expr) -> Expr {
             _ => e,
         },
 
-        Expr::And(ref a, ref b) => {
-            match (optimize(*a.clone()), optimize(*b.clone())) {
-                (v @ Expr::Lit(device::Value::Bool(false)), _)
-                | (_, v @ Expr::Lit(device::Value::Bool(false))) => v,
-                (
-                    v @ Expr::Lit(device::Value::Bool(true)),
-                    Expr::Lit(device::Value::Bool(true)),
-                ) => v,
-                (Expr::Lit(device::Value::Bool(true)), e)
-                | (e, Expr::Lit(device::Value::Bool(true))) => e,
-                _ => e,
-            }
-        }
+        Expr::And(a, b) => match (optimize(*a.clone()), optimize(*b.clone())) {
+            (v @ Expr::Lit(device::Value::Bool(false)), _)
+            | (_, v @ Expr::Lit(device::Value::Bool(false))) => v,
+            (Expr::Lit(device::Value::Bool(true)), e)
+            | (e, Expr::Lit(device::Value::Bool(true))) => e,
+            _ => e,
+        },
 
-        Expr::Or(ref a, ref b) => {
-            match (optimize(*a.clone()), optimize(*b.clone())) {
-                (v @ Expr::Lit(device::Value::Bool(true)), _)
-                | (_, v @ Expr::Lit(device::Value::Bool(true))) => v,
-                (
-                    v @ Expr::Lit(device::Value::Bool(false)),
-                    Expr::Lit(device::Value::Bool(false)),
-                ) => v,
-                (Expr::Lit(device::Value::Bool(false)), e)
-                | (e, Expr::Lit(device::Value::Bool(false))) => e,
-                _ => e,
-            }
-        }
+        Expr::Or(a, b) => match (optimize(*a.clone()), optimize(*b.clone())) {
+            (v @ Expr::Lit(device::Value::Bool(true)), _)
+            | (_, v @ Expr::Lit(device::Value::Bool(true))) => v,
+            (Expr::Lit(device::Value::Bool(false)), e)
+            | (e, Expr::Lit(device::Value::Bool(false))) => e,
+            _ => e,
+        },
 
         Expr::If(a, b, c) => {
             let condition = optimize(*a.clone());
