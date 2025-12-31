@@ -17,15 +17,20 @@
 //! ```
 
 use crate::driver::{
-    rw_device::ReadWriteDevice, DriverConfig, Registrator, RequestChan, Result,
+    ro_device::ReadOnlyDevice, shared_rw_device::SharedReadWriteDevice,
+    DriverConfig, Registrator, RequestChan, Result,
 };
 use std::future::Future;
+use tokio::time::Duration;
 
 /// Defines the common API used by Switches.
 pub struct Switch {
+    /// This device returns `true` when the driver has a problem
+    /// communicating with the hardware.
+    pub error: ReadOnlyDevice<bool>,
     /// Indicates the state of the switch. Writing `true` or `false`
     /// turns the switch on and off, respectively.
-    pub state: ReadWriteDevice<bool>,
+    pub state: SharedReadWriteDevice<bool>,
 }
 
 impl Registrator for Switch {
@@ -34,14 +39,24 @@ impl Registrator for Switch {
         _cfg: &DriverConfig,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
+        let nm_error = "error".parse();
         let nm_state = "state".parse();
 
         async move {
+            let nm_error = nm_error?;
             let nm_state = nm_state?;
 
             Ok(Switch {
+                error: drc
+                    .add_ro_device::<bool>(nm_error, None, max_history)
+                    .await?,
                 state: drc
-                    .add_rw_device::<bool>(nm_state, None, max_history)
+                    .add_shared_rw_device::<bool>(
+                        nm_state,
+                        None,
+                        Some(Duration::from_secs(3600 * 4)),
+                        max_history,
+                    )
                     .await?,
             })
         }
