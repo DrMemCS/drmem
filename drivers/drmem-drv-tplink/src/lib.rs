@@ -351,8 +351,8 @@ impl Instance {
         &mut self,
         s: &'a mut TcpStream,
         v: f64,
-        reply: driver::SettingReply<f64>,
-        report: &'a mut driver::ReadWriteDevice<f64>,
+        reply: Option<driver::SettingReply<f64>>,
+        report: &'a mut driver::SharedReadWriteDevice<f64>,
     ) -> Result<Option<f64>> {
         if !v.is_nan() {
             // Clip incoming settings to the range 0.0..=100.0. Handle
@@ -368,7 +368,9 @@ impl Instance {
 
             // Send an OK reply to the client with the updated value.
 
-            reply(Ok(v));
+            if let Some(reply) = reply {
+                reply(Ok(v));
+            }
 
             // Always log incoming settings. Let the client know there
             // was a successful setting, and include the value that
@@ -385,7 +387,11 @@ impl Instance {
                 }
             }
         } else {
-            reply(Err(Error::InvArgument("device doesn't accept NaN".into())));
+            if let Some(reply) = reply {
+                reply(Err(Error::InvArgument(
+                    "device doesn't accept NaN".into(),
+                )));
+            }
             Ok(None)
         }
     }
@@ -396,10 +402,12 @@ impl Instance {
         &mut self,
         s: &'a mut TcpStream,
         v: bool,
-        reply: driver::SettingReply<bool>,
-        report: &'a mut driver::ReadWriteDevice<bool>,
+        reply: Option<driver::SettingReply<bool>>,
+        report: &'a mut driver::SharedReadWriteDevice<bool>,
     ) -> Result<()> {
-        reply(Ok(v));
+        if let Some(reply) = reply {
+            reply(Ok(v));
+        }
         match self.led_state_rpc(s, v).await {
             Ok(()) => {
                 report.report_update(v).await;
@@ -512,7 +520,9 @@ impl Instance {
 			// the client.
 
 			d_b.report_update(v).await;
-			reply(Ok(v))
+                        if let Some(reply) = reply {
+			    reply(Ok(v));
+                        }
 		    }
                 }
 
@@ -540,7 +550,9 @@ impl Instance {
 			// the client.
 
 			d_l.report_update(v).await;
-			reply(Ok(v))
+                        if let Some(reply) = reply {
+			    reply(Ok(v));
+                        }
 		    }
                 }
             }
