@@ -68,6 +68,7 @@
 
 use super::solar;
 use super::tod;
+use chrono::{Datelike, Timelike};
 use drmem_api::{device, Error, Result};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
@@ -78,6 +79,24 @@ use tracing::error;
 
 lrlex_mod!("logic/logic.l");
 lrpar_mod!("logic/logic.y");
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum Zone {
+    Utc,
+    Local,
+}
+
+impl std::fmt::Display for Zone {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            Zone::Utc => write!(f, "utc"),
+            Zone::Local => write!(f, "local"),
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum TimeField {
@@ -92,6 +111,64 @@ pub enum TimeField {
     Month,
     Year,
     LeapYear,
+}
+
+impl TimeField {
+    fn is_leap_year(year: i32) -> bool {
+        ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0)
+    }
+
+    fn get_last_day(month: u32, year: i32) -> u32 {
+        match month {
+            1 => 31,
+            2 => 28 + (Self::is_leap_year(year) as u32),
+            3 => 31,
+            4 => 30,
+            5 => 31,
+            6 => 30,
+            7 => 31,
+            8 => 31,
+            9 => 30,
+            10 => 31,
+            11 => 30,
+            12 => 31,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn project<Tz: chrono::TimeZone>(
+        &self,
+        time: &chrono::DateTime<Tz>,
+    ) -> device::Value {
+        match self {
+            TimeField::Second => device::Value::Int(time.second() as i32),
+            TimeField::Minute => device::Value::Int(time.minute() as i32),
+            TimeField::Hour => device::Value::Int(time.hour() as i32),
+            TimeField::Day => device::Value::Int(time.day() as i32),
+            TimeField::DoW => {
+                device::Value::Int(time.weekday().num_days_from_monday() as i32)
+            }
+            TimeField::DoY => {
+                let doy = time.ordinal0() as i32;
+                let offset =
+                    (doy > 58 && Self::is_leap_year(time.year())) as i32;
+
+                device::Value::Int(doy - offset)
+            }
+            TimeField::SoM => device::Value::Int(time.day().div_ceil(7) as i32),
+            TimeField::EoM => {
+                let day = time.day();
+                let last_day = Self::get_last_day(time.month(), time.year());
+
+                device::Value::Int(((last_day + 7 - day) / 7) as i32)
+            }
+            TimeField::Month => device::Value::Int(time.month() as i32),
+            TimeField::Year => device::Value::Int(time.year()),
+            TimeField::LeapYear => {
+                device::Value::Bool(Self::is_leap_year(time.year()))
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for TimeField {
@@ -123,6 +200,19 @@ pub enum SolarField {
     Declination,
 }
 
+impl SolarField {
+    pub fn project(&self, solar: &solar::Info) -> device::Value {
+        match self {
+            SolarField::Elevation => device::Value::Flt(solar.elevation),
+            SolarField::Azimuth => device::Value::Flt(solar.azimuth),
+            SolarField::RightAscension => {
+                device::Value::Flt(solar.right_ascension)
+            }
+            SolarField::Declination => device::Value::Flt(solar.declination),
+        }
+    }
+}
+
 impl std::fmt::Display for SolarField {
     fn fmt(
         &self,
@@ -143,8 +233,8 @@ pub enum Expr {
 
     Lit(device::Value),
     Var(usize),
-    TimeVal(&'static str, TimeField, fn(&tod::Info) -> device::Value),
-    SolarVal(SolarField, fn(&solar::Info) -> device::Value),
+    TimeVal(Zone, TimeField),
+    SolarVal(SolarField),
 
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
@@ -190,23 +280,17 @@ impl Expr {
 
     pub fn uses_time(&self) -> Option<tod::TimeField> {
         match self {
-            Expr::TimeVal(_, TimeField::Second, _) => {
-                Some(tod::TimeField::Second)
-            }
-            Expr::TimeVal(_, TimeField::Minute, _) => {
-                Some(tod::TimeField::Minute)
-            }
-            Expr::TimeVal(_, TimeField::Hour, _) => Some(tod::TimeField::Hour),
-            Expr::TimeVal(_, TimeField::Day, _)
-            | Expr::TimeVal(_, TimeField::SoM, _)
-            | Expr::TimeVal(_, TimeField::EoM, _)
-            | Expr::TimeVal(_, TimeField::DoW, _)
-            | Expr::TimeVal(_, TimeField::DoY, _) => Some(tod::TimeField::Day),
-            Expr::TimeVal(_, TimeField::Month, _) => {
-                Some(tod::TimeField::Month)
-            }
-            Expr::TimeVal(_, TimeField::Year, _)
-            | Expr::TimeVal(_, TimeField::LeapYear, _) => {
+            Expr::TimeVal(_, TimeField::Second) => Some(tod::TimeField::Second),
+            Expr::TimeVal(_, TimeField::Minute) => Some(tod::TimeField::Minute),
+            Expr::TimeVal(_, TimeField::Hour) => Some(tod::TimeField::Hour),
+            Expr::TimeVal(_, TimeField::Day)
+            | Expr::TimeVal(_, TimeField::SoM)
+            | Expr::TimeVal(_, TimeField::EoM)
+            | Expr::TimeVal(_, TimeField::DoW)
+            | Expr::TimeVal(_, TimeField::DoY) => Some(tod::TimeField::Day),
+            Expr::TimeVal(_, TimeField::Month) => Some(tod::TimeField::Month),
+            Expr::TimeVal(_, TimeField::Year)
+            | Expr::TimeVal(_, TimeField::LeapYear) => {
                 Some(tod::TimeField::Year)
             }
             Expr::SolarVal(..)
@@ -296,9 +380,9 @@ impl fmt::Display for Expr {
             Expr::Lit(v) => write!(f, "{}", &v),
             Expr::Var(v) => write!(f, "inp[{}]", &v),
 
-            Expr::TimeVal(cat, fld, _) => write!(f, "{{{cat}:{fld}}}"),
+            Expr::TimeVal(cat, fld) => write!(f, "{{{cat}:{fld}}}"),
 
-            Expr::SolarVal(fld, _) => write!(f, "{{solar:{fld}}}"),
+            Expr::SolarVal(fld) => write!(f, "{{solar:{fld}}}"),
 
             Expr::Not(e) => {
                 write!(f, "not ")?;
@@ -438,35 +522,35 @@ pub fn eval(
 
         Expr::Var(n) => eval_as_var(*n, inp),
 
-        Expr::TimeVal(_, _, f) => Some(f(time)),
+        Expr::TimeVal(Zone::Utc, field) => Some(field.project(&time.0)),
 
-        Expr::SolarVal(_, f) => solar.map(f),
+        Expr::TimeVal(Zone::Local, field) => Some(field.project(&time.1)),
 
-        Expr::Not(ref e) => eval_as_not_expr(e, inp, time, solar),
+        Expr::SolarVal(field) => solar.map(|v| field.project(v)),
 
-        Expr::Or(ref a, ref b) => eval_as_or_expr(a, b, inp, time, solar),
+        Expr::Not(e) => eval_as_not_expr(e, inp, time, solar),
 
-        Expr::And(ref a, ref b) => eval_as_and_expr(a, b, inp, time, solar),
+        Expr::Or(a, b) => eval_as_or_expr(a, b, inp, time, solar),
 
-        Expr::Eq(ref a, ref b) => eval_as_eq_expr(a, b, inp, time, solar),
+        Expr::And(a, b) => eval_as_and_expr(a, b, inp, time, solar),
 
-        Expr::Lt(ref a, ref b) => eval_as_lt_expr(a, b, inp, time, solar),
+        Expr::Eq(a, b) => eval_as_eq_expr(a, b, inp, time, solar),
 
-        Expr::LtEq(ref a, ref b) => eval_as_lteq_expr(a, b, inp, time, solar),
+        Expr::Lt(a, b) => eval_as_lt_expr(a, b, inp, time, solar),
 
-        Expr::Add(ref a, ref b) => eval_as_add_expr(a, b, inp, time, solar),
+        Expr::LtEq(a, b) => eval_as_lteq_expr(a, b, inp, time, solar),
 
-        Expr::Sub(ref a, ref b) => eval_as_sub_expr(a, b, inp, time, solar),
+        Expr::Add(a, b) => eval_as_add_expr(a, b, inp, time, solar),
 
-        Expr::Mul(ref a, ref b) => eval_as_mul_expr(a, b, inp, time, solar),
+        Expr::Sub(a, b) => eval_as_sub_expr(a, b, inp, time, solar),
 
-        Expr::Div(ref a, ref b) => eval_as_div_expr(a, b, inp, time, solar),
+        Expr::Mul(a, b) => eval_as_mul_expr(a, b, inp, time, solar),
 
-        Expr::Rem(ref a, ref b) => eval_as_rem_expr(a, b, inp, time, solar),
+        Expr::Div(a, b) => eval_as_div_expr(a, b, inp, time, solar),
 
-        Expr::If(ref a, ref b, ref c) => {
-            eval_as_if_expr(a, b, c, inp, time, solar)
-        }
+        Expr::Rem(a, b) => eval_as_rem_expr(a, b, inp, time, solar),
+
+        Expr::If(a, b, c) => eval_as_if_expr(a, b, c, inp, time, solar),
     }
 }
 
@@ -509,26 +593,33 @@ fn eval_as_or_expr(
 ) -> Option<device::Value> {
     match eval(a, inp, time, solar) {
         v @ Some(device::Value::Bool(true)) => v,
-        Some(device::Value::Bool(false)) => match eval(b, inp, time, solar) {
-            v @ Some(device::Value::Bool(_)) => v,
-            Some(v) => {
-                error!("OR expression contains non-boolean argument: {}", &v);
-                None
+        Some(device::Value::Bool(false)) => {
+            match eval(b, inp, time, solar) {
+                v @ Some(device::Value::Bool(_)) => v,
+                Some(v) => {
+                    error!("OR expression contains non-boolean, second argument: {}", &v);
+                    None
+                }
+                None => None,
             }
-            None => None,
-        },
+        }
         Some(v) => {
-            error!("OR expression contains non-boolean argument: {}", &v);
+            error!(
+                "OR expression contains non-boolean, first argument: {}",
+                &v
+            );
             None
         }
-        None => match eval(b, inp, time, solar) {
-            v @ Some(device::Value::Bool(true)) => v,
-            Some(device::Value::Bool(false)) | None => None,
-            Some(v) => {
-                error!("OR expression contains non-boolean argument: {}", &v);
-                None
+        None => {
+            match eval(b, inp, time, solar) {
+                v @ Some(device::Value::Bool(true)) => v,
+                Some(device::Value::Bool(false)) | None => None,
+                Some(v) => {
+                    error!("OR expression contains non-boolean, second argument: {}", &v);
+                    None
+                }
             }
-        },
+        }
     }
 }
 
@@ -543,26 +634,33 @@ fn eval_as_and_expr(
 ) -> Option<device::Value> {
     match eval(a, inp, time, solar) {
         v @ Some(device::Value::Bool(false)) => v,
-        Some(device::Value::Bool(true)) => match eval(b, inp, time, solar) {
-            v @ Some(device::Value::Bool(_)) => v,
-            Some(v) => {
-                error!("AND expression contains non-boolean argument: {}", &v);
-                None
+        Some(device::Value::Bool(true)) => {
+            match eval(b, inp, time, solar) {
+                v @ Some(device::Value::Bool(_)) => v,
+                Some(v) => {
+                    error!("AND expression contains non-boolean, second argument: {}", &v);
+                    None
+                }
+                None => None,
             }
-            None => None,
-        },
+        }
         Some(v) => {
-            error!("AND expression contains non-boolean argument: {}", &v);
+            error!(
+                "AND expression contains non-boolean, first argument: {}",
+                &v
+            );
             None
         }
-        None => match eval(b, inp, time, solar) {
-            v @ Some(device::Value::Bool(false)) => v,
-            Some(device::Value::Bool(true)) | None => None,
-            Some(v) => {
-                error!("AND expression contains non-boolean argument: {}", &v);
-                None
+        None => {
+            match eval(b, inp, time, solar) {
+                v @ Some(device::Value::Bool(false)) => v,
+                Some(device::Value::Bool(true)) | None => None,
+                Some(v) => {
+                    error!("AND expression contains non-boolean, second argument: {}", &v);
+                    None
+                }
             }
-        },
+        }
     }
 }
 
@@ -885,56 +983,38 @@ fn eval_as_if_expr(
 // This function takes an expression and tries to reduce it.
 
 pub fn optimize(e: Expr) -> Expr {
-    match e {
+    match &e {
         // Look for optimizations with expressions starting with NOT.
-        Expr::Not(ref ne) => match **ne {
+        Expr::Not(ne) => match &**ne {
             // If the sub-expression is also a NOT expression. If so,
             // we throw them both away.
-            Expr::Not(ref e) => optimize(*e.clone()),
+            Expr::Not(e) => optimize(*e.clone()),
 
             // If the subexpression is either `true` or `false`,
             // return the complement.
-            Expr::Lit(ref v) => match v {
-                device::Value::Bool(false) => {
-                    Expr::Lit(device::Value::Bool(true))
-                }
-                device::Value::Bool(true) => {
-                    Expr::Lit(device::Value::Bool(false))
-                }
-                _ => e,
-            },
+            Expr::Lit(device::Value::Bool(val)) => {
+                Expr::Lit(device::Value::Bool(!val))
+            }
             _ => e,
         },
 
-        Expr::And(ref a, ref b) => {
-            match (optimize(*a.clone()), optimize(*b.clone())) {
-                (v @ Expr::Lit(device::Value::Bool(false)), _)
-                | (_, v @ Expr::Lit(device::Value::Bool(false))) => v,
-                (
-                    v @ Expr::Lit(device::Value::Bool(true)),
-                    Expr::Lit(device::Value::Bool(true)),
-                ) => v,
-                (Expr::Lit(device::Value::Bool(true)), e)
-                | (e, Expr::Lit(device::Value::Bool(true))) => e,
-                _ => e,
-            }
-        }
+        Expr::And(a, b) => match (optimize(*a.clone()), optimize(*b.clone())) {
+            (v @ Expr::Lit(device::Value::Bool(false)), _)
+            | (_, v @ Expr::Lit(device::Value::Bool(false))) => v,
+            (Expr::Lit(device::Value::Bool(true)), e)
+            | (e, Expr::Lit(device::Value::Bool(true))) => e,
+            _ => e,
+        },
 
-        Expr::Or(ref a, ref b) => {
-            match (optimize(*a.clone()), optimize(*b.clone())) {
-                (v @ Expr::Lit(device::Value::Bool(true)), _)
-                | (_, v @ Expr::Lit(device::Value::Bool(true))) => v,
-                (
-                    v @ Expr::Lit(device::Value::Bool(false)),
-                    Expr::Lit(device::Value::Bool(false)),
-                ) => v,
-                (Expr::Lit(device::Value::Bool(false)), e)
-                | (e, Expr::Lit(device::Value::Bool(false))) => e,
-                _ => e,
-            }
-        }
+        Expr::Or(a, b) => match (optimize(*a.clone()), optimize(*b.clone())) {
+            (v @ Expr::Lit(device::Value::Bool(true)), _)
+            | (_, v @ Expr::Lit(device::Value::Bool(true))) => v,
+            (Expr::Lit(device::Value::Bool(false)), e)
+            | (e, Expr::Lit(device::Value::Bool(false))) => e,
+            _ => e,
+        },
 
-        Expr::If(ref a, ref b, ref c) => {
+        Expr::If(a, b, c) => {
             let condition = optimize(*a.clone());
 
             match condition {
@@ -3056,6 +3136,44 @@ mod tests {
             ("2 + {utc:second}", Some(tod::TimeField::Second)),
             ("{local:hour} + {utc:minute}", Some(tod::TimeField::Minute)),
             ("{local:minute} + {utc:day}", Some(tod::TimeField::Minute)),
+            // Check the complicated if-statement.
+            ("if 5 > 0 then 7 end", None),
+            (
+                "if {local:minute} > 0 then {local:hour} end",
+                Some(tod::TimeField::Minute),
+            ),
+            (
+                "if {local:hour} > 0 then {local:minute} end",
+                Some(tod::TimeField::Minute),
+            ),
+            (
+                "if {local:hour} > 0 then {local:minute} else {local:day} end",
+                Some(tod::TimeField::Minute),
+            ),
+            (
+                "if {local:minute} > 0 then {local:hour} else {local:day} end",
+                Some(tod::TimeField::Minute),
+            ),
+            (
+                "if {local:day} > 0 then {local:hour} else {local:second} end",
+                Some(tod::TimeField::Second),
+            ),
+            (
+                "if {local:hour} > 0 then true else {local:day} end",
+                Some(tod::TimeField::Hour),
+            ),
+            (
+                "if {local:hour} > 0 then {local:day} else true end",
+                Some(tod::TimeField::Hour),
+            ),
+            (
+                "if {local:day} > 0 then true else {local:hour} end",
+                Some(tod::TimeField::Hour),
+            ),
+            (
+                "if {local:day} > 0 then {local:hour} else true end",
+                Some(tod::TimeField::Hour),
+            ),
         ];
 
         for (expr, result) in DATA {
