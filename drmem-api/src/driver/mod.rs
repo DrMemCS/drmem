@@ -264,7 +264,7 @@ impl RequestChan {
 pub trait Registrator: Sized + Send {
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
-        cfg: &DriverConfig,
+        cfg: &'a DriverConfig,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a;
 }

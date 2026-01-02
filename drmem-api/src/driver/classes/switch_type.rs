@@ -31,6 +31,9 @@ pub struct Switch {
     /// Indicates the state of the switch. Writing `true` or `false`
     /// turns the switch on and off, respectively.
     pub state: SharedReadWriteDevice<bool>,
+    /// A product might include an indicator. If the hardware does,
+    /// this device can turn it on and off.
+    pub indicator: SharedReadWriteDevice<bool>,
 }
 
 impl Registrator for Switch {
@@ -41,10 +44,12 @@ impl Registrator for Switch {
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let nm_error = "error".parse();
         let nm_state = "state".parse();
+        let nm_indicator = "indicator".parse();
 
         async move {
             let nm_error = nm_error?;
             let nm_state = nm_state?;
+            let nm_indicator = nm_indicator?;
 
             Ok(Switch {
                 error: drc
@@ -53,6 +58,14 @@ impl Registrator for Switch {
                 state: drc
                     .add_shared_rw_device::<bool>(
                         nm_state,
+                        None,
+                        Some(Duration::from_secs(3600 * 4)),
+                        max_history,
+                    )
+                    .await?,
+                indicator: drc
+                    .add_shared_rw_device::<bool>(
+                        nm_indicator,
                         None,
                         Some(Duration::from_secs(3600 * 4)),
                         max_history,
