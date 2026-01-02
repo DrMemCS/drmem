@@ -7,8 +7,7 @@ use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
-use tracing::{error, field, info, info_span, warn};
-use tracing_futures::Instrument;
+use tracing::{error, field, info, info_span, warn, Instrument};
 
 mod drv_cycle;
 mod drv_latch;

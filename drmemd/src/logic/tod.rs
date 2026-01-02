@@ -7,8 +7,7 @@ use tokio::{
     time,
 };
 use tokio_stream::{wrappers::BroadcastStream, Stream};
-use tracing::{info, info_span, warn};
-use tracing_futures::Instrument;
+use tracing::{info, info_span, warn, Instrument};
 
 // Information related to time-of-day. We keep both UTC and local time
 // so clients don't have to convert between the time zones. It is

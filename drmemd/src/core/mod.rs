@@ -2,8 +2,7 @@ use crate::backends::{store, Instance, Store};
 use drmem_api::{client, driver, Error, Result};
 use std::convert::Infallible;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::{info, info_span, warn};
-use tracing_futures::Instrument;
+use tracing::{info, info_span, warn, Instrument};
 
 /// Holds the state of the core task in the framework.
 ///

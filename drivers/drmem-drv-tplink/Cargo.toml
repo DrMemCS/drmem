@@ -28,9 +28,6 @@ tokio.features = ["net", "time", "macros", "io-util"]
 tracing.workspace = true
 tracing.default-features = false
 
-tracing-futures.workspace = true
-tracing-futures.default-features = false
-
 tracing-subscriber.workspace = true
 tracing-subscriber.default-features = false
 

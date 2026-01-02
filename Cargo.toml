@@ -13,8 +13,7 @@ futures = { version = "0.3", default-features = false }
 toml = { version = "0.8", default-features = false }
 tokio = { version = "1", default-features = false }
 tokio-stream = { version = "0.1", default-features = false }
-tracing = { version = "0.1", default-features = false }
-tracing-futures = { version = "0.2", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 tracing-subscriber = { version = "0.3", default-features = false }
 serde = { version = "1", default-features = false, features = ["rc"] }
 serde_json = { version = "1", default-features = false }

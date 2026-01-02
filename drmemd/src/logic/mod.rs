@@ -8,8 +8,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::{wrappers::BroadcastStream, StreamExt, StreamMap};
-use tracing::{debug, error, info, info_span, warn};
-use tracing_futures::Instrument;
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use super::config;
 

@@ -10,8 +10,7 @@ use tokio::{
     sync::{broadcast, Barrier},
     time,
 };
-use tracing::{debug, info, info_span, warn};
-use tracing_futures::Instrument;
+use tracing::{debug, info, info_span, warn, Instrument};
 
 pub struct SolarInfo {
     pub elevation: f64,

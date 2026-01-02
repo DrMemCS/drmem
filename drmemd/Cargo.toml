@@ -39,10 +39,6 @@ tracing.workspace = true
 tracing.default-features = false
 tracing.features = ["attributes"]
 
-tracing-futures.workspace = true
-tracing-futures.default-features = false
-tracing-futures.features = ["std-future", "std"]
-
 tracing-subscriber.workspace = true
 tracing-subscriber.default-features = false
 tracing-subscriber.features = ["ansi"]
