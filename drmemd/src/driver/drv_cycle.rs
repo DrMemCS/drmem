@@ -3,8 +3,8 @@ use drmem_api::{
     driver::{self, DriverConfig},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, sync::Arc};
-use tokio::{sync::Mutex, time};
+use std::{convert::Infallible, future::Future};
+use tokio::time;
 use tracing::{self, debug};
 
 // This enum represents the three states in which the device can be.
@@ -251,12 +251,8 @@ impl driver::API for Instance {
         }
     }
 
-    async fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> Infallible {
+    async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
         let mut timer = time::interval(self.millis);
-        let mut devices = devices.lock().await;
 
         if self.enabled_at_boot {
             self.state = CycleState::Cycling;

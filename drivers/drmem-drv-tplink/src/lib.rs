@@ -36,11 +36,9 @@ use drmem_api::{
 use futures::{Future, FutureExt};
 use std::convert::Infallible;
 use std::net::SocketAddrV4;
-use std::sync::Arc;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::{Mutex, MutexGuard},
     time,
 };
 use tracing::{debug, error, warn, Span};
@@ -430,7 +428,7 @@ impl Instance {
     async fn main_loop(
         &mut self,
         s: &mut TcpStream,
-        devices: &mut MutexGuard<'_, <Instance as driver::API>::HardwareType>,
+        devices: &mut <Instance as driver::API>::HardwareType,
     ) {
         // Create a 5-second interval timer which will be used to poll
         // the device to see if its state was changed by some outside
@@ -452,7 +450,7 @@ impl Instance {
                 brightness: ref mut d_b,
                 indicator: ref mut d_l,
                 ..
-            } = **devices;
+            } = *devices;
 
             // Now wait for one of three events to occur.
 
@@ -570,17 +568,7 @@ impl driver::API for Instance {
 
     // Main run loop for the driver.
 
-    async fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> Infallible {
-        // Lock the mutex for the life of the driver. There is no
-        // other task that wants access to these device handles. An
-        // Arc<Mutex<>> is the only way I know of sharing a mutable
-        // value with async tasks.
-
-        let mut devices = devices.lock().await;
-
+    async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
         // Record the devices's address in the "cfg" field of the
         // span.
 
@@ -594,7 +582,7 @@ impl driver::API for Instance {
 
             match Instance::connect(&self.addr).await {
                 Ok(mut s) => {
-                    self.main_loop(&mut s, &mut devices).await;
+                    self.main_loop(&mut s, devices).await;
                 }
                 Err(e) => {
                     warn!("couldn't connect : '{}'", e);

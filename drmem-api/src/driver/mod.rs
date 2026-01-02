@@ -4,7 +4,7 @@
 use crate::types::{device, Error};
 use std::future::Future;
 use std::{convert::Infallible, sync::Arc};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 use toml::value;
 
 use super::Result;
@@ -315,8 +315,8 @@ pub trait API: Send + Sync {
     /// and if a driver panics or returns an error from this method,
     /// it gets reported in the log and then, after a short delay, the
     /// driver is restarted.
-    fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + '_;
+    fn run<'a>(
+        &'a mut self,
+        devices: &'a mut Self::HardwareType,
+    ) -> impl Future<Output = Infallible> + Send + 'a;
 }

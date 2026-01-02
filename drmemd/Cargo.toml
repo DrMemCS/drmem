@@ -21,7 +21,7 @@ lrpar = "0.13"
 [dependencies]
 futures.workspace = true
 futures.default-features = false
-futures.features = ["alloc"]
+futures.features = ["alloc", "std"]
 
 toml.workspace = true
 toml.default-features = false
