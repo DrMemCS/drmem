@@ -1,6 +1,6 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig},
+    driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
 use std::{convert::Infallible, future::Future};
@@ -234,6 +234,8 @@ impl driver::API for Instance {
         }
     }
 }
+
+impl ResettableState for Devices {}
 
 #[cfg(test)]
 mod tests {

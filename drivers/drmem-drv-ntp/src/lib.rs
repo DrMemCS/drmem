@@ -1,6 +1,6 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig},
+    driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
 use std::convert::Infallible;
@@ -532,3 +532,5 @@ mod tests {
             .is_none());
     }
 }
+
+impl ResettableState for Devices {}

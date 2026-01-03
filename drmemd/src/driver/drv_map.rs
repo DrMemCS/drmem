@@ -1,6 +1,6 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig},
+    driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
 use std::{convert::Infallible, future::Future, ops::RangeInclusive};
@@ -269,6 +269,8 @@ impl driver::API for Instance {
         panic!("can no longer receive settings");
     }
 }
+
+impl ResettableState for Devices {}
 
 #[cfg(test)]
 mod tests {

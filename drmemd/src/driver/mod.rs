@@ -1,5 +1,5 @@
 use drmem_api::{
-    driver::{self, Registrator, API},
+    driver::{self, Registrator, ResettableState, API},
     Result,
 };
 use futures::future::Future;
@@ -80,6 +80,8 @@ where
 
         restart_delay = std::cmp::min(restart_delay * 2, MAX_DELAY);
         info!("restarting instance of driver");
+
+        devices.reset_state();
     }
 }
 

@@ -102,6 +102,11 @@ where
     }
 }
 
+impl<T> super::ResettableState for ReadWriteDevice<T> where
+    T: device::ReadWriteCompat
+{
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
