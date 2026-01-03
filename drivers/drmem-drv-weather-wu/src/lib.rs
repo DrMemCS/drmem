@@ -3,8 +3,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::convert::{Infallible, TryFrom};
-use std::{future::Future, sync::Arc, time::SystemTime};
-use tokio::sync::Mutex;
+use std::{future::Future, time::SystemTime};
 use tokio::time::{interval_at, Duration, Instant};
 use tracing::{debug, error, warn, Span};
 use weather_underground as wu;
@@ -409,12 +408,7 @@ impl driver::API for Instance {
         }
     }
 
-    async fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> Infallible {
-        let mut devices = devices.lock().await;
-
+    async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
         Span::current().record("cfg", devices.station.as_str());
 
         devices.error.report_update(false).await;
@@ -455,7 +449,7 @@ impl driver::API for Instance {
                                         warn!("ignoring {} extra weather observations", obs.len() - 1);
                                     }
                                     devices.error.report_update(false).await;
-                                    self.handle(&obs[0], &mut devices).await;
+                                    self.handle(&obs[0], devices).await;
                                     continue;
                                 }
                             }

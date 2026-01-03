@@ -10,8 +10,7 @@ use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::subscriptions::serve_graphql_ws;
 use libmdns::Responder;
 use std::{pin::Pin, result, sync::Arc, time::Duration};
-use tracing::{debug, error, info, info_span};
-use tracing_futures::Instrument;
+use tracing::{debug, error, info, info_span, Instrument};
 use warp::{http::StatusCode, reject, reply, Filter, Rejection, Reply};
 
 pub mod config;

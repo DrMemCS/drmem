@@ -1,17 +1,15 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig},
+    driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
 use std::convert::Infallible;
 use std::future::Future;
-use std::sync::Arc;
 use std::{
     net::{SocketAddr, SocketAddrV4},
     str,
 };
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
 use tokio::time::{self, Duration};
 use tracing::{debug, error, trace, warn, Span};
 
@@ -428,9 +426,9 @@ impl driver::API for Instance {
         }
     }
 
-    async fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
+    async fn run<'a>(
+        &'a mut self,
+        devices: &'a mut Self::HardwareType,
     ) -> Infallible {
         // Record the peer's address in the "cfg" field of the span.
 
@@ -450,8 +448,6 @@ impl driver::API for Instance {
 
         let mut info = Some(server::Info::bad_value());
         let mut interval = time::interval(Duration::from_millis(20_000));
-
-        let mut devices = devices.lock().await;
 
         loop {
             interval.tick().await;
@@ -536,3 +532,5 @@ mod tests {
             .is_none());
     }
 }
+
+impl ResettableState for Devices {}

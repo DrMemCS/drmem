@@ -5,10 +5,10 @@
 extern crate lazy_static;
 
 use drmem_api::{driver::RequestChan, Error, Result};
-use futures::{future, FutureExt};
+use futures::future;
 use std::{convert::Infallible, sync::Arc};
 use tokio::{sync::Barrier, task::JoinHandle};
-use tracing::{error, info, warn};
+use tracing::{error, info, info_span, warn, Instrument};
 
 mod config;
 mod core;
@@ -117,24 +117,21 @@ async fn run() -> Result<()> {
                 // then the devices couldn't be registered or some
                 // other serious error occurred.
 
-                if let Ok(instance) = (driver_info.2)(
-                    driver_name,
-                    driver.prefix.clone(),
+                let instance = (driver_info.2)(
                     driver.cfg.unwrap_or_default().clone(),
                     chan,
                     driver.max_history,
-                )
-                .await
-                {
-                    // Push the driver instance at the end of the vector.
+                );
 
-                    tasks.push(wrap_task(tokio::spawn(instance.map(Ok))))
-                } else {
-                    error!(
-                        "couldn't prep driver {} with {} prefix",
-                        &driver.name, driver.prefix
-                    );
-                }
+                // Push the driver instance at the end of the vector.
+
+                tasks.push(wrap_task(tokio::spawn(instance.instrument(
+                    info_span!(
+                        "driver",
+                        name = driver_name.as_ref(),
+                        prefix = driver.prefix.to_string()
+                    ),
+                ))))
             } else {
                 error!("no driver named {}", driver.name);
                 return Err(Error::NotFound);
@@ -196,6 +193,8 @@ async fn run() -> Result<()> {
 
         #[cfg(feature = "graphql")]
         {
+            use futures::FutureExt;
+
             info!("starting GraphQL interface");
 
             // This server should never exit. If it does, report an

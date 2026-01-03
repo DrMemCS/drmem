@@ -5,8 +5,10 @@ use drmem_api::{
     driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
     Error, Result,
 };
-use futures::task::{Context, Poll};
-use futures::Future;
+use futures::{
+    task::{Context, Poll},
+    Future,
+};
 use redis::{
     aio,
     streams::{StreamId, StreamInfoStreamReply},
@@ -17,8 +19,7 @@ use std::pin::Pin;
 use std::time;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{self, Stream, StreamExt};
-use tracing::{debug, error, info, info_span, warn};
-use tracing_futures::Instrument;
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 type AioMplexConnection = aio::MultiplexedConnection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;

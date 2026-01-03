@@ -1,10 +1,10 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig},
+    driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, sync::Arc};
-use tokio::{sync::Mutex, time};
+use std::{convert::Infallible, future::Future};
+use tokio::time;
 use tracing::{debug, info};
 
 // This enum represents the four states in which the timer can
@@ -239,12 +239,8 @@ impl driver::API for Instance {
         )))
     }
 
-    async fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> Infallible {
+    async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
         let mut timeout = time::Instant::now();
-        let mut devices = devices.lock().await;
 
         // Initialize the reported state of the timer.
 
@@ -302,6 +298,8 @@ impl driver::API for Instance {
         }
     }
 }
+
+impl ResettableState for Devices {}
 
 #[cfg(test)]
 mod tests {

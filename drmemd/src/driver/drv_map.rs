@@ -1,12 +1,9 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig},
+    driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
-use std::{
-    convert::Infallible, future::Future, ops::RangeInclusive, sync::Arc,
-};
-use tokio::sync::Mutex;
+use std::{convert::Infallible, future::Future, ops::RangeInclusive};
 
 #[derive(Debug, PartialEq)]
 struct Entry(RangeInclusive<i32>, device::Value);
@@ -244,12 +241,7 @@ impl driver::API for Instance {
         async move { Ok(Box::new(Instance::new(init_index?, def_value?, values?))) }
     }
 
-    async fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> Infallible {
-        let mut devices = devices.lock().await;
-
+    async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
         // If we have an initial value, use it.
 
         if let Some(idx) = self.init_index {
@@ -277,6 +269,8 @@ impl driver::API for Instance {
         panic!("can no longer receive settings");
     }
 }
+
+impl ResettableState for Devices {}
 
 #[cfg(test)]
 mod tests {

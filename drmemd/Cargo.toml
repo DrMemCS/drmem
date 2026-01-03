@@ -21,7 +21,7 @@ lrpar = "0.13"
 [dependencies]
 futures.workspace = true
 futures.default-features = false
-futures.features = ["alloc"]
+futures.features = ["alloc", "std"]
 
 toml.workspace = true
 toml.default-features = false
@@ -38,10 +38,6 @@ tokio-stream.features = ["net", "sync"]
 tracing.workspace = true
 tracing.default-features = false
 tracing.features = ["attributes"]
-
-tracing-futures.workspace = true
-tracing-futures.default-features = false
-tracing-futures.features = ["std-future", "std"]
 
 tracing-subscriber.workspace = true
 tracing-subscriber.default-features = false

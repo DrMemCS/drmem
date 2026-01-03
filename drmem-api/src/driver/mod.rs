@@ -4,7 +4,7 @@
 use crate::types::{device, Error};
 use std::future::Future;
 use std::{convert::Infallible, sync::Arc};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot};
 use toml::value;
 
 use super::Result;
@@ -254,6 +254,10 @@ impl RequestChan {
     }
 }
 
+pub trait ResettableState {
+    fn reset_state(&mut self) {}
+}
+
 /// A trait which manages details about driver registration.
 ///
 /// All drivers will implement a type, or use one of the predefined
@@ -261,7 +265,7 @@ impl RequestChan {
 ///
 /// The only function in this trait is one to register the device(s)
 /// with core and return the set of handles.
-pub trait Registrator: Sized + Send {
+pub trait Registrator: ResettableState + Sized + Send {
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         cfg: &DriverConfig,
@@ -315,8 +319,8 @@ pub trait API: Send + Sync {
     /// and if a driver panics or returns an error from this method,
     /// it gets reported in the log and then, after a short delay, the
     /// driver is restarted.
-    fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> impl Future<Output = Infallible> + Send + '_;
+    fn run<'a>(
+        &'a mut self,
+        devices: &'a mut Self::HardwareType,
+    ) -> impl Future<Output = Infallible> + Send + 'a;
 }

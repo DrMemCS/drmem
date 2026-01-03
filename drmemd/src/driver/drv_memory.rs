@@ -1,10 +1,9 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig},
+    driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, sync::Arc};
-use tokio::sync::Mutex;
+use std::{convert::Infallible, future::Future};
 
 // Defines the signature if a function that validates a
 // `device::Value`'s type.
@@ -227,12 +226,7 @@ impl driver::API for Instance {
         Ok(Box::new(Instance::new()))
     }
 
-    async fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> Infallible {
-        let mut devices = devices.lock().await;
-
+    async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
         loop {
             let (idx, val) = devices.get_next().await;
 
@@ -240,6 +234,8 @@ impl driver::API for Instance {
         }
     }
 }
+
+impl ResettableState for Devices {}
 
 #[cfg(test)]
 mod tests {

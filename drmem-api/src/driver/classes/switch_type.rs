@@ -47,3 +47,5 @@ impl Registrator for Switch {
         }
     }
 }
+
+impl crate::driver::ResettableState for Switch {}

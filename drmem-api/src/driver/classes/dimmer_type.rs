@@ -68,3 +68,5 @@ impl Registrator for Dimmer {
         }
     }
 }
+
+impl crate::driver::ResettableState for Dimmer {}

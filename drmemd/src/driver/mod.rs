@@ -1,14 +1,11 @@
 use drmem_api::{
-    device,
-    driver::{self, Registrator, API},
+    driver::{self, Registrator, ResettableState, API},
     Result,
 };
 use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
-use tokio::sync::Mutex;
-use tracing::{error, field, info, info_span, warn};
-use tracing_futures::Instrument;
+use tracing::{error, field, info, info_span, warn, Instrument};
 
 mod drv_cycle;
 mod drv_latch;
@@ -17,142 +14,102 @@ mod drv_memory;
 mod drv_timer;
 
 pub type Fut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
-pub type MgrTask = Fut<Infallible>;
-pub type MgrFuncRet = Fut<Result<MgrTask>>;
+pub type MgrTask = Fut<Result<Infallible>>;
 
-pub type Launcher = fn(
-    driver::Name,
-    device::Path,
-    driver::DriverConfig,
-    driver::RequestChan,
-    Option<usize>,
-) -> MgrFuncRet;
+pub type Launcher =
+    fn(driver::DriverConfig, driver::RequestChan, Option<usize>) -> MgrTask;
 
 type DriverInfo = (&'static str, &'static str, Launcher);
 
 // This is the main loop of the driver manager. It only returns if the
 // driver panics.
 
-fn mgr_body<T>(
-    name: driver::Name,
-    devices: T::HardwareType,
+async fn mgr_body<T>(
+    mut devices: T::HardwareType,
     cfg: driver::DriverConfig,
-) -> MgrTask
+) -> Infallible
 where
     T: API + Send + 'static,
 {
-    Box::pin(
-        async move {
-            const START_DELAY: u64 = 5;
-            const MAX_DELAY: u64 = 600;
+    const START_DELAY: u64 = 5;
+    const MAX_DELAY: u64 = 600;
 
-            let mut restart_delay = START_DELAY;
-            let devices = Arc::new(Mutex::new(devices));
+    let mut restart_delay = START_DELAY;
 
-            info!("starting instance of driver");
+    loop {
+        // Create a Future that creates an instance of the driver
+        // using the provided configuration parameters.
 
-            loop {
-                // Create a Future that creates an instance of the driver
-                // using the provided configuration parameters.
+        let result = T::create_instance(&cfg)
+            .instrument(info_span!("prepping", cfg = field::Empty));
 
-                let result = T::create_instance(&cfg)
-                    .instrument(info_span!("init", cfg = field::Empty));
+        match result.await {
+            Ok(mut instance) => {
+                use futures::FutureExt;
+                use std::panic::AssertUnwindSafe;
 
-                match result.await {
-                    Ok(mut instance) => {
-                        let devices = devices.clone();
+                restart_delay = START_DELAY;
 
-                        restart_delay = START_DELAY;
+                // Drivers are never supposed to exit so
+                // catch_unwind() will only catch panics which means
+                // we need to only look for `Err(_)` values.
 
-                        // Start the driver instance as a background task
-                        // and monitor the return value.
-
-                        let task =
-                            tokio::spawn(
-                                async move { instance.run(devices).await },
-                            );
-
-                        // Drivers are never supposed to exit so the
-                        // JoinHandle will never return an `Ok()`
-                        // value. We can't stop drivers from panicking,
-                        // however, so we have to look for an `Err()`
-                        // value.
-                        //
-                        // (When Rust officially supports the `!` type, we
-                        // will be able to convert this from an
-                        // `if-statement` to a simple assignment.)
-
-                        let Err(e) = task.await;
-
-                        error!("driver exited unexpectedly -- {e}")
-                    }
-                    Err(e) => error!("{e}"),
-                }
-
-                // Delay before restarting the driver. This prevents the
-                // system from being compute-bound if the driver panics right
-                // away.
-
-                warn!("delay before restarting driver ...");
-                tokio::time::sleep(tokio::time::Duration::from_secs(
-                    restart_delay,
-                ))
+                let Err(e) = AssertUnwindSafe(
+                    instance
+                        .run(&mut devices)
+                        .instrument(info_span!("running")),
+                )
+                .catch_unwind()
                 .await;
 
-                // Stretch the timeout each time we have to restart. Set the
-                // max timeout to 10 minutes.
-
-                restart_delay = std::cmp::min(restart_delay * 2, MAX_DELAY);
-                info!("restarting instance of driver");
+                error!("exited unexpectedly -- {e:?}")
             }
+            Err(e) => error!("couldn't create instance -- {e}"),
         }
-        .instrument(info_span!(
-            "driver",
-            name = name.as_ref(),
-            cfg = field::Empty
-        )),
-    )
+
+        // Delay before restarting the driver. This prevents the
+        // system from being compute-bound if the driver panics right
+        // away.
+
+        warn!("delay before restarting driver ...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(restart_delay))
+            .await;
+
+        // Stretch the timeout each time we have to restart. Set the
+        // max timeout to 10 minutes.
+
+        restart_delay = std::cmp::min(restart_delay * 2, MAX_DELAY);
+        info!("restarting instance of driver");
+
+        devices.reset_state();
+    }
 }
 
 // This generic function manages an instance of a specific driver. We
 // use generics because each driver has a different set of devices
-// (T::DeviceSet), so one function wouldn't be able to handle every
+// (T::HardwareType), so one function wouldn't be able to handle every
 // type.
 
 fn manage_instance<T>(
-    name: driver::Name,
-    prefix: device::Path,
     cfg: driver::DriverConfig,
     mut req_chan: driver::RequestChan,
     max_history: Option<usize>,
-) -> MgrFuncRet
+) -> MgrTask
 where
     T: API + Send + 'static,
 {
-    // Return a future that returns an error if the devices couldn't
-    // be registered, or returns a future that manages the running
-    // instance.
-
     Box::pin(async move {
         // Let the driver API register the necessary devices.
 
         let devices =
             T::HardwareType::register_devices(&mut req_chan, &cfg, max_history)
-                .instrument(info_span!("one-time-init", name = name.as_ref()))
+                .instrument(info_span!("register", cfg = field::Empty))
                 .await?;
 
         // Create a future that manages the instance.
 
-        let drv_name = name.clone();
-
-        Ok(
-            Box::pin(mgr_body::<T>(name, devices, cfg).instrument(info_span!(
-                "mngr",
-                drvr = drv_name.as_ref(),
-                path = ?prefix
-            ))) as MgrTask,
-        )
-    }) as MgrFuncRet
+        Ok(mgr_body::<T>(devices, cfg).await)
+    })
 }
 
 #[derive(Clone)]

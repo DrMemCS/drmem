@@ -1,10 +1,9 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig},
+    driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, sync::Arc};
-use tokio::sync::Mutex;
+use std::{convert::Infallible, future::Future};
 
 // This enum represents the two states in which the latch can be.
 
@@ -149,11 +148,7 @@ impl driver::API for Instance {
         }
     }
 
-    async fn run(
-        &mut self,
-        devices: Arc<Mutex<Self::HardwareType>>,
-    ) -> Infallible {
-        let mut devices = devices.lock().await;
+    async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
         let mut reset = false;
         let mut trigger = false;
 
@@ -201,6 +196,8 @@ impl driver::API for Instance {
         }
     }
 }
+
+impl ResettableState for Devices {}
 
 #[cfg(test)]
 mod tests {

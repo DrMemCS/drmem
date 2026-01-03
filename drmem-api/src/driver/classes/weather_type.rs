@@ -205,3 +205,5 @@ impl Registrator for Weather {
         }
     }
 }
+
+impl crate::driver::ResettableState for Weather {}

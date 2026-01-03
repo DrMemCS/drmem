@@ -453,6 +453,15 @@ where
     }
 }
 
+impl<T> super::ResettableState for SharedReadWriteDevice<T>
+where
+    T: device::ReadWriteCompat,
+{
+    fn reset_state(&mut self) {
+        self.state = State::Unknown
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
