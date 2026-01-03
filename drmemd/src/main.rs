@@ -8,7 +8,7 @@ use drmem_api::{driver::RequestChan, Error, Result};
 use futures::future;
 use std::{convert::Infallible, sync::Arc};
 use tokio::{sync::Barrier, task::JoinHandle};
-use tracing::{error, info, warn};
+use tracing::{error, info, info_span, warn, Instrument};
 
 mod config;
 mod core;
@@ -125,7 +125,13 @@ async fn run() -> Result<()> {
 
                 // Push the driver instance at the end of the vector.
 
-                tasks.push(wrap_task(tokio::spawn(instance)))
+                tasks.push(wrap_task(tokio::spawn(instance.instrument(
+                    info_span!(
+                        "driver",
+                        name = driver_name.as_ref(),
+                        prefix = driver.prefix.to_string()
+                    ),
+                ))))
             } else {
                 error!("no driver named {}", driver.name);
                 return Err(Error::NotFound);

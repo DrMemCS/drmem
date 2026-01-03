@@ -36,14 +36,12 @@ where
 
     let mut restart_delay = START_DELAY;
 
-    info!("starting instance of driver");
-
     loop {
         // Create a Future that creates an instance of the driver
         // using the provided configuration parameters.
 
         let result = T::create_instance(&cfg)
-            .instrument(info_span!("init", cfg = field::Empty));
+            .instrument(info_span!("prepping", cfg = field::Empty));
 
         match result.await {
             Ok(mut instance) => {
@@ -56,9 +54,13 @@ where
                 // catch_unwind() will only catch panics which means
                 // we need to only look for `Err(_)` values.
 
-                let Err(e) = AssertUnwindSafe(instance.run(&mut devices))
-                    .catch_unwind()
-                    .await;
+                let Err(e) = AssertUnwindSafe(
+                    instance
+                        .run(&mut devices)
+                        .instrument(info_span!("running")),
+                )
+                .catch_unwind()
+                .await;
 
                 error!("exited unexpectedly -- {e:?}")
             }
@@ -99,6 +101,7 @@ where
 
         let devices =
             T::HardwareType::register_devices(&mut req_chan, &cfg, max_history)
+                .instrument(info_span!("register", cfg = field::Empty))
                 .await?;
 
         // Create a future that manages the instance.
