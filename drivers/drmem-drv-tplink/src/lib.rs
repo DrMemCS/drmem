@@ -30,7 +30,7 @@
 //   Received:  {"system":{"set_bright":{"err_code":-2,"err_msg":"member not support"}}}
 
 use drmem_api::{
-    driver::{self, classes, DriverConfig},
+    driver::{self, classes, DriverConfig, Registrator, RequestChan, ResettableState},
     Error, Result,
 };
 use futures::{Future, FutureExt};
@@ -43,14 +43,82 @@ use tokio::{
 };
 use tracing::{debug, error, warn, Span};
 
-mod tplink_api;
+mod tplink;
 
 const BUF_TOTAL: usize = 4_096;
+
+struct DeviceState {
+    indicator: Option<bool>,
+    brightness: Option<f64>,
+    relay: Option<bool>,
+}
+
+pub enum DevType {
+    Switch(classes::Switch),
+    Dimmer(classes::Dimmer),
+}
+
+impl ResettableState for DevType {
+    fn reset_state(&mut self) {
+        match self {
+            DevType::Switch(dev) => {
+                dev.state.reset_state();
+                dev.indicator.reset_state();
+            }
+            DevType::Dimmer(dev) => {
+                dev.brightness.reset_state();
+                dev.indicator.reset_state();
+            }
+        }
+    }
+}
+
+impl Registrator for DevType {
+    fn register_devices<'a>(
+        drc: &'a mut RequestChan,
+        cfg: &'a DriverConfig,
+        max_history: Option<usize>,
+    ) -> impl Future<Output = Result<Self>> + Send + 'a {
+        async move {
+            match cfg.get("type") {
+                Some(toml::value::Value::String(dtype)) => match dtype.as_str()
+                {
+                    "outlet" | "switch" => Ok(DevType::Switch(
+                        classes::Switch::register_devices(
+                            drc,
+                            cfg,
+                            max_history,
+                        )
+                        .await?,
+                    )),
+                    "dimmer" => Ok(DevType::Dimmer(
+                        classes::Dimmer::register_devices(
+                            drc,
+                            cfg,
+                            max_history,
+                        )
+                        .await?,
+                    )),
+                    _ => Err(Error::ConfigError(String::from(
+                        "'type' must be \"dimmer\", \"outlet\", or \"switch\"",
+                    ))),
+                },
+                Some(_) => Err(Error::ConfigError(String::from(
+                    "'type' config parameter should be a string",
+                ))),
+                None => Err(Error::ConfigError(String::from(
+                    "missing 'type' parameter in config",
+                ))),
+            }
+        }
+    }
+}
 
 pub struct Instance {
     addr: SocketAddrV4,
     reported_error: Option<bool>,
     buf: [u8; BUF_TOTAL],
+    poll_timeout: tokio::time::Duration,
 }
 
 impl Instance {
@@ -83,11 +151,11 @@ impl Instance {
         }
     }
 
-    // Attempts to read a `tplink_api::Reply` type from the socket.
+    // Attempts to read a `tplink::Reply` type from the socket.
     // All replies have a 4-byte length header so we know how much
     // data to read.
 
-    async fn read_reply<R>(&mut self, s: &mut R) -> Result<tplink_api::Reply>
+    async fn read_reply<R>(&mut self, s: &mut R) -> Result<tplink::Reply>
     where
         R: AsyncReadExt + std::marker::Unpin,
     {
@@ -100,7 +168,7 @@ impl Instance {
                 if let Err(e) = s.read_exact(filled).await {
                     Err(Error::MissingPeer(e.to_string()))
                 } else {
-                    tplink_api::Reply::decode(filled).ok_or_else(|| {
+                    tplink::Reply::decode(filled).ok_or_else(|| {
                         Error::ParseError(format!(
                             "bad reply : {}",
                             String::from_utf8_lossy(filled)
@@ -119,7 +187,7 @@ impl Instance {
 
     // Attempts to send a command to the socket.
 
-    async fn send_cmd<S>(s: &mut S, cmd: tplink_api::Cmd) -> Result<()>
+    async fn send_cmd<S>(s: &mut S, cmd: tplink::Cmd) -> Result<()>
     where
         S: AsyncWriteExt + std::marker::Unpin,
     {
@@ -147,8 +215,8 @@ impl Instance {
         &mut self,
         rx: &mut R,
         tx: &mut S,
-        cmd: tplink_api::Cmd,
-    ) -> Result<tplink_api::Reply>
+        cmd: tplink::Cmd,
+    ) -> Result<tplink::Reply>
     where
         R: AsyncReadExt + std::marker::Unpin,
         S: AsyncWriteExt + std::marker::Unpin,
@@ -177,11 +245,14 @@ impl Instance {
         s: &mut TcpStream,
         v: bool,
     ) -> Result<()> {
-        use tplink_api::{active_cmd, ErrorStatus, Reply};
+        use tplink::{Cmd, ErrorStatus, Reply};
 
         let (mut rx, mut tx) = s.split();
 
-        match self.rpc(&mut rx, &mut tx, active_cmd(v as u8)).await? {
+        match self
+            .rpc(&mut rx, &mut tx, Cmd::mk_active_cmd(v as u8))
+            .await?
+        {
             Reply::System {
                 set_relay_state: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -209,14 +280,14 @@ impl Instance {
         s: &mut TcpStream,
         v: bool,
     ) -> Result<()> {
-        use tplink_api::{led_cmd, ErrorStatus, Reply};
+        use tplink::{Cmd, ErrorStatus, Reply};
 
         let (mut rx, mut tx) = s.split();
 
         // Send the request and receive the reply. Use pattern
         // matching to determine the return value of the function.
 
-        match self.rpc(&mut rx, &mut tx, led_cmd(v)).await? {
+        match self.rpc(&mut rx, &mut tx, Cmd::mk_led_cmd(v)).await? {
             Reply::System {
                 set_led_off: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -239,26 +310,42 @@ impl Instance {
 
     // Retrieves info.
 
-    async fn info_rpc(&mut self, s: &mut TcpStream) -> Result<(bool, u8)> {
-        use tplink_api::{info_cmd, Reply};
+    async fn info_rpc(&mut self, s: &mut TcpStream) -> Result<DeviceState> {
+        use tplink::{Cmd, Reply};
 
         let (mut rx, mut tx) = s.split();
 
         // Send the request and receive the reply. Use pattern
         // matching to determine the return value of the function.
 
-        match self.rpc(&mut rx, &mut tx, info_cmd()).await? {
+        match self.rpc(&mut rx, &mut tx, Cmd::mk_info_cmd()).await? {
             Reply::System {
                 get_sysinfo: Some(info),
                 ..
             } => {
-                let led = info.led_off.unwrap_or(1) == 0;
+                let indicator = info.led_off.unwrap_or(1) == 0;
 
                 match (info.relay_state.map(|v| v != 0), info.brightness) {
-                    (None, None) => Ok((led, 0)),
-                    (None, Some(br)) => Ok((led, br)),
-                    (Some(false), _) => Ok((led, 0)),
-                    (Some(true), br) => Ok((led, br.unwrap_or(100))),
+                    (None, None) => Ok(DeviceState {
+                        indicator: Some(indicator),
+                        relay: None,
+                        brightness: Some(0.0),
+                    }),
+                    (None, Some(_)) => Ok(DeviceState {
+                        indicator: Some(indicator),
+                        relay: None,
+                        brightness: Some(0.0),
+                    }),
+                    (rs @ Some(false), _) => Ok(DeviceState {
+                        indicator: Some(indicator),
+                        relay: rs,
+                        brightness: Some(0.0),
+                    }),
+                    (rs @ Some(true), br) => Ok(DeviceState {
+                        indicator: Some(indicator),
+                        relay: rs,
+                        brightness: Some(br.unwrap_or(100).into()),
+                    }),
                 }
             }
 
@@ -273,11 +360,14 @@ impl Instance {
     // argument.
 
     async fn brightness_rpc(&mut self, s: &mut TcpStream, v: u8) -> Result<()> {
-        use tplink_api::{brightness_cmd, ErrorStatus, Reply};
+        use tplink::{Cmd, ErrorStatus, Reply};
 
         let (mut rx, mut tx) = s.split();
 
-        match self.rpc(&mut rx, &mut tx, brightness_cmd(v)).await? {
+        match self
+            .rpc(&mut rx, &mut tx, Cmd::mk_brightness_cmd(v))
+            .await?
+        {
             Reply::Dimmer {
                 set_brightness: Some(ErrorStatus { err_code: 0, .. }),
                 ..
@@ -349,9 +439,8 @@ impl Instance {
         &mut self,
         s: &'a mut TcpStream,
         v: f64,
-        reply: driver::SettingReply<f64>,
-        report: &'a mut driver::ReadWriteDevice<f64>,
-    ) -> Result<Option<f64>> {
+        reply: Option<driver::SettingReply<f64>>,
+    ) -> Result<()> {
         if !v.is_nan() {
             // Clip incoming settings to the range 0.0..=100.0. Handle
             // infinities, too.
@@ -366,25 +455,22 @@ impl Instance {
 
             // Send an OK reply to the client with the updated value.
 
-            reply(Ok(v));
+            if let Some(reply) = reply {
+                reply(Ok(v));
+            }
 
             // Always log incoming settings. Let the client know there
             // was a successful setting, and include the value that
             // was used.
 
-            match self.set_brightness(s, v).await {
-                Ok(()) => {
-                    report.report_update(v).await;
-                    Ok(Some(v))
-                }
-                Err(e) => {
-                    error!("setting brightness : {}", &e);
-                    Err(e)
-                }
-            }
+            self.set_brightness(s, v).await
         } else {
-            reply(Err(Error::InvArgument("device doesn't accept NaN".into())));
-            Ok(None)
+            if let Some(reply) = reply {
+                reply(Err(Error::InvArgument(
+                    "device doesn't accept NaN".into(),
+                )));
+            }
+            Ok(())
         }
     }
 
@@ -394,35 +480,175 @@ impl Instance {
         &mut self,
         s: &'a mut TcpStream,
         v: bool,
-        reply: driver::SettingReply<bool>,
-        report: &'a mut driver::ReadWriteDevice<bool>,
+        reply: Option<driver::SettingReply<bool>>,
     ) -> Result<()> {
-        reply(Ok(v));
-        match self.led_state_rpc(s, v).await {
-            Ok(()) => {
-                report.report_update(v).await;
-                Ok(())
-            }
-            Err(e) => {
-                error!("setting LED : {}", &e);
-                Err(e)
-            }
+        if let Some(reply) = reply {
+            reply(Ok(v));
         }
+        self.led_state_rpc(s, v).await
     }
 
     // Checks to see if the current error state ('value') matches the
     // previosuly reported error state. If not, it saves the current
     // state and sends the updated value to the backend.
 
-    async fn sync_error_state(
-        &mut self,
-        report: &mut driver::ReadOnlyDevice<bool>,
-        value: bool,
-    ) {
+    async fn sync_error_state(&mut self, dev: &mut DevType, value: bool) {
         if self.reported_error != Some(value) {
             self.reported_error = Some(value);
-            report.report_update(value).await;
+            match dev {
+                DevType::Switch(classes::Switch { error, .. }) => {
+                    error.report_update(value).await
+                }
+                DevType::Dimmer(classes::Dimmer { error, .. }) => {
+                    error.report_update(value).await
+                }
+            }
         }
+    }
+
+    async fn manage_switch<'a>(
+        &mut self,
+        s: &'a mut TcpStream,
+        dev: &mut classes::Switch,
+    ) -> bool {
+        // Get mutable references to the setting channels.
+
+        let classes::Switch {
+            state: ref mut d_r,
+            indicator: ref mut d_i,
+            ..
+        } = dev;
+
+        // Now wait for one of three events to occur.
+
+        #[rustfmt::skip]
+        tokio::select! {
+            // If our poll timeout expires, we need to request the
+            // current state of the hardware (because it could be
+            // changed by external apps or a person using the manual
+            // switch.)
+
+            _ = tokio::time::sleep(self.poll_timeout) => {
+
+                // Reset the next timeout to be 5 seconds.
+
+                self.poll_timeout = tokio::time::Duration::from_secs(5);
+
+                // Request the hardware state.
+
+                match self.info_rpc(s).await {
+                    Ok(info) => {
+                        if let Some(indicator) = info.indicator {
+                            d_i.report_update(indicator).await
+                        }
+
+                        if let Some(relay) = info.relay {
+                            d_r.report_update(relay).await
+                        }
+                    }
+                    Err(e) => {
+                        error!("error getting state -- {e}");
+                        return false
+                    }
+                }
+            }
+
+	    // Handle settings to the brightness device.
+
+            Some((v, reply)) = d_r.next_setting() => {
+                if let Some(reply) = reply {
+                    reply(Ok(v));
+                }
+                if let Err(e) = self.relay_state_rpc(s, v).await {
+                    error!("couldn't set relay state -- {e}");
+		    return false
+		};
+                self.poll_timeout = tokio::time::Duration::from_secs(0);
+            }
+
+	    // Handle settings to the LED indicator device.
+
+            Some((v, reply)) = d_i.next_setting() => {
+		debug!("led setting -> {}", &v);
+                if let Err(e) = self.handle_led_setting(s, v, reply).await {
+                    error!("couldn't set indicator -- {e}");
+		    return false
+		}
+                self.poll_timeout = tokio::time::Duration::from_secs(0);
+            }
+        }
+        return true;
+    }
+
+    async fn manage_dimmer<'a>(
+        &mut self,
+        s: &'a mut TcpStream,
+        dev: &mut classes::Dimmer,
+    ) -> bool {
+        // Get mutable references to the setting channels.
+
+        let classes::Dimmer {
+            brightness: ref mut d_b,
+            indicator: ref mut d_i,
+            ..
+        } = dev;
+
+        // Now wait for one of three events to occur.
+
+        #[rustfmt::skip]
+        tokio::select! {
+            // If our poll timeout expires, we need to request the
+            // current state of the hardware (because it could be
+            // changed by external apps or a person using the manual
+            // switch.)
+
+            _ = tokio::time::sleep(self.poll_timeout) => {
+
+                // Reset the next timeout to be 5 seconds.
+
+                self.poll_timeout = tokio::time::Duration::from_secs(5);
+
+                // Request the hardware state.
+
+                match self.info_rpc(s).await {
+                    Ok(info) => {
+                        if let Some(indicator) = info.indicator {
+                            d_i.report_update(indicator).await
+                        }
+
+                        if let Some(brightness) = info.brightness {
+                            d_b.report_update(brightness).await
+                        }
+                    }
+                    Err(e) => {
+                        error!("error getting state -- {e}");
+                        return false
+                    }
+                }
+            }
+
+	    // Handle settings to the brightness device.
+
+            Some((v, reply)) = d_b.next_setting() => {
+                if let Err(e) = self.handle_brightness_setting(s, v, reply).await {
+                    error!("couldn't set brightness -- {e}");
+		    return false
+		};
+                self.poll_timeout = tokio::time::Duration::from_secs(0);
+            }
+
+	    // Handle settings to the LED indicator device.
+
+            Some((v, reply)) = d_i.next_setting() => {
+		debug!("led setting -> {}", &v);
+                if let Err(e) = self.handle_led_setting(s, v, reply).await {
+                    error!("couldn't set indicator -- {e}");
+		    return false
+		}
+                self.poll_timeout = tokio::time::Duration::from_secs(0);
+            }
+        }
+        return true;
     }
 
     async fn main_loop(
@@ -430,124 +656,21 @@ impl Instance {
         s: &mut TcpStream,
         devices: &mut <Instance as driver::API>::HardwareType,
     ) {
-        // Create a 5-second interval timer which will be used to poll
-        // the device to see if its state was changed by some outside
-        // mechanism.
-
-        let mut timer =
-            tokio::time::interval(tokio::time::Duration::from_secs(5));
-        let mut current_led = false;
-        let mut current_brightness = -1.0f64;
-
-        // Main loop of the driver. This loop never ends.
-
-        'main: loop {
-            self.sync_error_state(&mut devices.error, false).await;
-
-            // Get mutable references to the setting channels.
-
-            let classes::Dimmer {
-                brightness: ref mut d_b,
-                indicator: ref mut d_l,
-                ..
-            } = *devices;
-
-            // Now wait for one of three events to occur.
-
-            #[rustfmt::skip]
-            tokio::select! {
-                // If the timer tick expires, it's time to get the
-                // latest state of the device. Since external apps can
-                // modify the device outside of DrMem's control, we
-                // have to periodically poll it to stay in sync.
-
-                _ = timer.tick() => {
-		    if let Ok((led, br)) = self.info_rpc(s).await {
-			let br = br as f64;
-
-			// If the LED state has changed outside of the
-			// driver, update the local state.
-
-			if current_led != led {
-			    debug!("external LED update: {}", led);
-			    current_led = led;
-			    d_l.report_update(led).await;
-			}
-
-			// If the brightness state has changed outside
-			// of the driver, update the local state.
-
-			if current_brightness != br {
-			    debug!("external brightness update: {}", br);
-			    current_brightness = br;
-			    devices.brightness.report_update(br).await;
-			}
-		    } else {
-			break 'main
-		    }
-                }
-
-		// Handle settings to the brightness device.
-
-                Some((v, reply)) = d_b.next_setting() => {
-
-		    // If the settings matches the current state, then
-		    // don't actually control the hardware.
-
-		    if current_brightness != v {
-			match self.handle_brightness_setting(
-			    s, v, reply, d_b
-			).await {
-			    Ok(Some(v)) => current_brightness = v,
-			    Ok(None) => (),
-			    Err(_) => break 'main
-			}
-		    } else {
-			debug!("don't need to apply brightness setting");
-
-			// Hardware wasn't updated, but we still need
-			// to log the setting and return a reply to
-			// the client.
-
-			d_b.report_update(v).await;
-			reply(Ok(v))
-		    }
-                }
-
-		// Handle settings to the LED indicator device.
-
-                Some((v, reply)) = d_l.next_setting() => {
-		    debug!("led setting -> {}", &v);
-
-		    // If the settings matches the current state, then
-		    // don't actually control the hardware.
-
-		    if current_led != v {
-			if self.handle_led_setting(
-			    s, v, reply, &mut devices.indicator
-			).await == Ok(()) {
-			    current_led = v;
-			} else {
-			    break 'main
-			}
-		    } else {
-			debug!("don't need to apply led setting");
-
-			// Hardware wasn't updated, but we still need
-			// to log the setting and return a reply to
-			// the client.
-
-			d_l.report_update(v).await;
-			reply(Ok(v))
-		    }
-                }
+        self.sync_error_state(&mut *devices, false).await;
+        loop {
+            if !match &mut *devices {
+                DevType::Switch(dev) => self.manage_switch(s, dev).await,
+                DevType::Dimmer(dev) => self.manage_dimmer(s, dev).await,
+            } {
+                break;
             }
         }
+        self.sync_error_state(&mut *devices, true).await;
     }
 }
 
 impl driver::API for Instance {
-    type HardwareType = classes::Dimmer;
+    type HardwareType = DevType;
 
     // This driver doesn't store any data in its instance; it's all
     // stored in local variables in the `.run()` method.
@@ -562,6 +685,7 @@ impl driver::API for Instance {
                 addr: cfg_addr?,
                 reported_error: None,
                 buf: [0; BUF_TOTAL],
+                poll_timeout: tokio::time::Duration::from_secs(0),
             }))
         }
     }
@@ -589,7 +713,7 @@ impl driver::API for Instance {
                 }
             }
 
-            self.sync_error_state(&mut devices.error, true).await;
+            self.sync_error_state(devices, true).await;
 
             // Log the error and then sleep for 10 seconds. Hopefully
             // the device will be available then.
@@ -601,12 +725,9 @@ impl driver::API for Instance {
 
 #[cfg(test)]
 mod test {
-    use super::{tplink_api, Instance};
+    use super::{tplink, Instance};
     use crate::BUF_TOTAL;
-    use std::{
-        io::Write,
-        net::{Ipv4Addr, SocketAddrV4},
-    };
+    use std::net::{Ipv4Addr, SocketAddrV4};
 
     #[tokio::test]
     async fn test_read_reply() {
@@ -618,6 +739,7 @@ mod test {
                 addr: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
                 reported_error: None,
                 buf: [0u8; BUF_TOTAL],
+                poll_timeout: tokio::time::Duration::from_secs(5),
             };
 
             assert!(inst.read_reply(&mut &buf[0..=0]).await.is_err());
@@ -632,11 +754,8 @@ mod test {
 
             let mut buf = vec![0, 0, 0, REPLY.len() as u8];
 
-            {
-                let mut wr = tplink_api::CmdWriter::create(&mut buf);
-
-                assert_eq!(wr.write(REPLY).unwrap(), REPLY.len());
-            }
+            buf.extend_from_slice(&REPLY[..]);
+            tplink::crypt::encode(&mut buf[4..]);
 
             assert!(buf.len() == 45);
             assert!(buf.as_slice().len() == 45);
@@ -645,6 +764,7 @@ mod test {
                 addr: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
                 reported_error: None,
                 buf: [0u8; BUF_TOTAL],
+                poll_timeout: tokio::time::Duration::from_secs(5),
             };
 
             assert!(inst.read_reply(&mut &buf[0..4]).await.is_err());

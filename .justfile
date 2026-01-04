@@ -1,7 +1,7 @@
 # This section has all the testing commands. The first rule is the
 # default and it tests every subcrate.
 
-test-all: test-api _test-drivers test-drmemd
+test-all: format test-api _test-drivers test-drmemd
 	@echo "All tests passed successfuly!"
 
 test-api:
@@ -69,6 +69,11 @@ check: _check-simple _check-simple-graphql _check-redis-graphql
 
 publish: test-all
 	@echo "DrMem Project published successfully!"
+
+# Formats the project.
+
+format:
+	nice cargo fmt --all
 
 # Local variables:
 # mode: makefile

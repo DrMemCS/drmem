@@ -268,7 +268,7 @@ pub trait ResettableState {
 pub trait Registrator: ResettableState + Sized + Send {
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
-        cfg: &DriverConfig,
+        cfg: &'a DriverConfig,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a;
 }
