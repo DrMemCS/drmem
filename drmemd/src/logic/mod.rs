@@ -399,7 +399,7 @@ impl Node {
         let mut time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
         let mut solar = None;
 
-        info!("starting");
+        info!("running");
 
         loop {
             // Create a future that yields the time-of-day using the
@@ -509,14 +509,12 @@ impl Node {
 
         tokio::spawn(
             async move {
-                let name = cfg.name.clone();
-
                 // Create a new instance and let it initialize itself.
                 // Hold onto the result -- success or failure -- and
                 // handle it after the barrier.
 
                 let node = Node::init(c_req, rx_tod, rx_solar, cfg)
-                    .instrument(info_span!("init", name = &name))
+                    .instrument(info_span!("init"))
                     .await;
 
                 // This barrier syncs this tasks with the start-up

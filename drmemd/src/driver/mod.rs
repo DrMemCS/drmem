@@ -37,30 +37,26 @@ where
     let mut restart_delay = START_DELAY;
 
     loop {
+        info!("initializing");
+
         // Create a Future that creates an instance of the driver
         // using the provided configuration parameters.
 
-        let result = T::create_instance(&cfg)
-            .instrument(info_span!("prepping", cfg = field::Empty));
-
-        match result.await {
+        match T::create_instance(&cfg).await {
             Ok(mut instance) => {
                 use futures::FutureExt;
                 use std::panic::AssertUnwindSafe;
 
                 restart_delay = START_DELAY;
+                info!("running");
 
                 // Drivers are never supposed to exit so
                 // catch_unwind() will only catch panics which means
                 // we need to only look for `Err(_)` values.
 
-                let Err(e) = AssertUnwindSafe(
-                    instance
-                        .run(&mut devices)
-                        .instrument(info_span!("running")),
-                )
-                .catch_unwind()
-                .await;
+                let Err(e) = AssertUnwindSafe(instance.run(&mut devices))
+                    .catch_unwind()
+                    .await;
 
                 error!("exited unexpectedly -- {e:?}")
             }

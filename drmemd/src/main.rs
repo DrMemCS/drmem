@@ -94,7 +94,7 @@ async fn run() -> Result<()> {
         // Iterate through the list of drivers specified in the
         // configuration file.
 
-        info!("starting driver instances");
+        info!("starting drivers");
 
         for driver in cfg.driver {
             let driver_name: drmem_api::driver::Name =
@@ -160,9 +160,9 @@ async fn run() -> Result<()> {
                 barrier.clone(),
             );
 
-            info!("starting logic instances");
 
             let init_barrier = Arc::new(Barrier::new(2));
+            info!("starting logic blocks");
 
             // Iterate through the [[logic]] sections of the config.
 
@@ -195,7 +195,7 @@ async fn run() -> Result<()> {
         {
             use futures::FutureExt;
 
-            info!("starting GraphQL interface");
+            info!("starting GraphQL");
 
             // This server should never exit. If it does, report an
             // `OperationError`,
@@ -206,6 +206,7 @@ async fn run() -> Result<()> {
                 drv_tbl.clone(),
                 tx_clnt_req.clone(),
             )
+            .instrument(info_span!("gql"))
             .then(|_| async {
                 Err(Error::OperationError("graphql server exited".to_owned()))
             });

@@ -10,7 +10,7 @@ use juniper_graphql_ws::ConnectionConfig;
 use juniper_warp::subscriptions::serve_graphql_ws;
 use libmdns::Responder;
 use std::{pin::Pin, result, sync::Arc, time::Duration};
-use tracing::{debug, error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 use warp::{http::StatusCode, reject, reply, Filter, Rejection, Reply};
 
 pub mod config;
@@ -1062,6 +1062,7 @@ fn build_site(
     db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
 {
+    warn!("building insecure GraphQL interface");
     build_base_site(db, cchan, db_logic).recover(handle_rejection)
 }
 
@@ -1072,6 +1073,8 @@ fn build_secure_site(
     db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
 {
+    info!("building secure GraphQL interface");
+
     // Clone the table of clients that are allowed in to the system.
 
     let clients: Arc<[String]> = Arc::clone(&cfg.clients);
