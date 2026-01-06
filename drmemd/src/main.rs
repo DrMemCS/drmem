@@ -110,6 +110,7 @@ async fn run() -> Result<()> {
                     &driver.prefix,
                     &tx_drv_req,
                 );
+                let barrier = Arc::new(Barrier::new(2));
 
                 // Call the function that manages instances of this
                 // driver. If it returns `Ok()`, the value is a Future
@@ -121,6 +122,7 @@ async fn run() -> Result<()> {
                     driver.cfg.unwrap_or_default().clone(),
                     chan,
                     driver.max_history,
+                    barrier.clone(),
                 );
 
                 // Push the driver instance at the end of the vector.
@@ -131,7 +133,9 @@ async fn run() -> Result<()> {
                         name = driver_name.as_ref(),
                         prefix = driver.prefix.to_string()
                     ),
-                ))))
+                ))));
+
+                let _ = barrier.wait().await;
             } else {
                 error!("no driver named {}", driver.name);
                 return Err(Error::NotFound);
@@ -142,7 +146,7 @@ async fn run() -> Result<()> {
         // freed up.
 
         {
-            let barrier = Arc::new(Barrier::new(3));
+            let barrier = Arc::new(Barrier::new(3 + cfg.logic.len()));
 
             // Start the time-of-day task. This needs to be done
             // *before* any logic blocks are started because logic
@@ -160,8 +164,6 @@ async fn run() -> Result<()> {
                 barrier.clone(),
             );
 
-
-            let init_barrier = Arc::new(Barrier::new(2));
             info!("starting logic blocks");
 
             // Iterate through the [[logic]] sections of the config.
@@ -172,12 +174,11 @@ async fn run() -> Result<()> {
                     tx_tod.subscribe(),
                     tx_solar.subscribe(),
                     logic.clone(),
-                    init_barrier.clone(),
+                    barrier.clone(),
                 )
                 .await;
 
                 tasks.push(wrap_task(node_task));
-                init_barrier.wait().await;
             }
 
             // Now that all the logic blocks have initialized, we

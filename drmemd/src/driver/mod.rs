@@ -5,6 +5,7 @@ use drmem_api::{
 use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
+use tokio::sync::Barrier;
 use tracing::{error, field, info, info_span, warn, Instrument};
 
 mod drv_cycle;
@@ -16,8 +17,12 @@ mod drv_timer;
 pub type Fut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type MgrTask = Fut<Result<Infallible>>;
 
-pub type Launcher =
-    fn(driver::DriverConfig, driver::RequestChan, Option<usize>) -> MgrTask;
+pub type Launcher = fn(
+    driver::DriverConfig,
+    driver::RequestChan,
+    Option<usize>,
+    barrier: Arc<Barrier>,
+) -> MgrTask;
 
 type DriverInfo = (&'static str, &'static str, Launcher);
 
@@ -90,6 +95,7 @@ fn manage_instance<T>(
     cfg: driver::DriverConfig,
     mut req_chan: driver::RequestChan,
     max_history: Option<usize>,
+    barrier: Arc<Barrier>,
 ) -> MgrTask
 where
     T: API + Send + 'static,
@@ -100,11 +106,17 @@ where
         let devices =
             T::HardwareType::register_devices(&mut req_chan, &cfg, max_history)
                 .instrument(info_span!("register", cfg = field::Empty))
-                .await?;
+                .await;
+
+        // When we reached this location, all devices have been
+        // registered (or not, if an error occurred). Sync to the
+        // barrier so the main loop and move on to the next driver.
+
+        barrier.wait().await;
 
         // Create a future that manages the instance.
 
-        Ok(mgr_body::<T>(devices, cfg).await)
+        Ok(mgr_body::<T>(devices?, cfg).await)
     })
 }
 
