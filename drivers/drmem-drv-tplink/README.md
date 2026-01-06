@@ -25,7 +25,7 @@ The driver needs to know where to access the device.
   number of the TP-Link device (in **"hostname:#"** or
   **"\#.#.#.#:#"** format.) The port is almost always 9999.
 - `type` is a string that indicates what type of device to use. It can
-  be "switch" or "dimmer".
+  be "switch", "outlet", or "dimmer".
 
 ## Devices
 

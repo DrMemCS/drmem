@@ -30,7 +30,9 @@
 //   Received:  {"system":{"set_bright":{"err_code":-2,"err_msg":"member not support"}}}
 
 use drmem_api::{
-    driver::{self, classes, DriverConfig, Registrator, RequestChan, ResettableState},
+    driver::{
+        self, classes, DriverConfig, Registrator, RequestChan, ResettableState,
+    },
     Error, Result,
 };
 use futures::{Future, FutureExt};
