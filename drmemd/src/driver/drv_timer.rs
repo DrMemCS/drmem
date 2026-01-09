@@ -4,7 +4,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::{convert::Infallible, future::Future};
-use tokio::time;
+use tokio::time::{self, Duration};
 use tracing::{debug, info};
 
 // This enum represents the four states in which the timer can
@@ -23,7 +23,7 @@ pub struct Instance {
     state: TimerState,
     active_value: device::Value,
     inactive_value: device::Value,
-    millis: time::Duration,
+    millis: Duration,
 }
 
 impl Instance {
@@ -39,7 +39,7 @@ impl Instance {
     pub fn new(
         active_value: device::Value,
         inactive_value: device::Value,
-        millis: time::Duration,
+        millis: Duration,
     ) -> Instance {
         Instance {
             state: TimerState::Armed,
@@ -69,11 +69,11 @@ impl Instance {
 
     // Validates the time duration from the driver configuration.
 
-    fn get_cfg_millis(cfg: &DriverConfig) -> Result<time::Duration> {
+    fn get_cfg_millis(cfg: &DriverConfig) -> Result<Duration> {
         match cfg.get("millis") {
             Some(toml::value::Value::Integer(millis)) => {
                 if (50..=3_600_000).contains(millis) {
-                    Ok(time::Duration::from_millis(*millis as u64))
+                    Ok(Duration::from_millis(*millis as u64))
                 } else {
                     Err(Error::ConfigError(String::from(
                         "'millis' out of range",
@@ -189,6 +189,7 @@ impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
+        _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();
@@ -304,14 +305,13 @@ impl ResettableState for Devices {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time;
 
     #[test]
     fn test_state_changes() {
         let mut timer = Instance::new(
             device::Value::Bool(true),
             device::Value::Bool(false),
-            time::Duration::from_millis(1000),
+            Duration::from_millis(1000),
         );
 
         assert_eq!(timer.state, TimerState::Armed);

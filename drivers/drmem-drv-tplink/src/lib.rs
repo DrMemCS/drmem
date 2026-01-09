@@ -41,7 +41,7 @@ use std::net::SocketAddrV4;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    time,
+    time::{self, Duration},
 };
 use tracing::{debug, error, warn, Span};
 
@@ -79,6 +79,7 @@ impl Registrator for DevType {
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         cfg: &'a DriverConfig,
+        override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         async move {
@@ -89,6 +90,7 @@ impl Registrator for DevType {
                         classes::Switch::register_devices(
                             drc,
                             cfg,
+                            override_timeout,
                             max_history,
                         )
                         .await?,
@@ -97,6 +99,7 @@ impl Registrator for DevType {
                         classes::Dimmer::register_devices(
                             drc,
                             cfg,
+                            override_timeout,
                             max_history,
                         )
                         .await?,
@@ -120,7 +123,7 @@ pub struct Instance {
     addr: SocketAddrV4,
     reported_error: Option<bool>,
     buf: [u8; BUF_TOTAL],
-    poll_timeout: tokio::time::Duration,
+    poll_timeout: Duration,
 }
 
 impl Instance {
@@ -205,7 +208,7 @@ impl Instance {
 		    Err(e) => Err(ERR_F(e))
 		}
 	    }
-	    _ = time::sleep(time::Duration::from_millis(500)) =>
+	    _ = time::sleep(Duration::from_millis(500)) =>
 		Err(Error::TimeoutError)
 	}
     }
@@ -230,7 +233,7 @@ impl Instance {
                         #[rustfmt::skip]
 			tokio::select! {
 			    result = self.read_reply(rx) => result,
-			    _ = time::sleep(time::Duration::from_millis(500)) =>
+			    _ = time::sleep(Duration::from_millis(500)) =>
 				Err(Error::TimeoutError)
 			}
                     }
@@ -416,7 +419,7 @@ impl Instance {
     async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
         use tokio::net::TcpSocket;
 
-        let fut = time::timeout(time::Duration::from_secs(1), async {
+        let fut = time::timeout(Duration::from_secs(1), async {
             match TcpSocket::new_v4() {
                 Ok(s) => {
                     s.set_recv_buffer_size((BUF_TOTAL * 2) as u32)?;
@@ -534,7 +537,7 @@ impl Instance {
 
                 // Reset the next timeout to be 5 seconds.
 
-                self.poll_timeout = tokio::time::Duration::from_secs(5);
+                self.poll_timeout = Duration::from_secs(5);
 
                 // Request the hardware state.
 
@@ -565,7 +568,7 @@ impl Instance {
                     error!("couldn't set relay state -- {e}");
 		    return false
 		};
-                self.poll_timeout = tokio::time::Duration::from_secs(0);
+                self.poll_timeout = Duration::from_secs(0);
             }
 
 	    // Handle settings to the LED indicator device.
@@ -576,7 +579,7 @@ impl Instance {
                     error!("couldn't set indicator -- {e}");
 		    return false
 		}
-                self.poll_timeout = tokio::time::Duration::from_secs(0);
+                self.poll_timeout = Duration::from_secs(0);
             }
         }
         return true;
@@ -608,7 +611,7 @@ impl Instance {
 
                 // Reset the next timeout to be 5 seconds.
 
-                self.poll_timeout = tokio::time::Duration::from_secs(5);
+                self.poll_timeout = Duration::from_secs(5);
 
                 // Request the hardware state.
 
@@ -636,7 +639,7 @@ impl Instance {
                     error!("couldn't set brightness -- {e}");
 		    return false
 		};
-                self.poll_timeout = tokio::time::Duration::from_secs(0);
+                self.poll_timeout = Duration::from_secs(0);
             }
 
 	    // Handle settings to the LED indicator device.
@@ -647,7 +650,7 @@ impl Instance {
                     error!("couldn't set indicator -- {e}");
 		    return false
 		}
-                self.poll_timeout = tokio::time::Duration::from_secs(0);
+                self.poll_timeout = Duration::from_secs(0);
             }
         }
         return true;
@@ -687,7 +690,7 @@ impl driver::API for Instance {
                 addr: cfg_addr?,
                 reported_error: None,
                 buf: [0; BUF_TOTAL],
-                poll_timeout: tokio::time::Duration::from_secs(0),
+                poll_timeout: Duration::from_secs(0),
             }))
         }
     }
@@ -720,7 +723,7 @@ impl driver::API for Instance {
             // Log the error and then sleep for 10 seconds. Hopefully
             // the device will be available then.
 
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await
+            tokio::time::sleep(Duration::from_secs(10)).await
         }
     }
 }
@@ -730,6 +733,7 @@ mod test {
     use super::{tplink, Instance};
     use crate::BUF_TOTAL;
     use std::net::{Ipv4Addr, SocketAddrV4};
+    use tokio::time::Duration;
 
     #[tokio::test]
     async fn test_read_reply() {
@@ -741,7 +745,7 @@ mod test {
                 addr: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
                 reported_error: None,
                 buf: [0u8; BUF_TOTAL],
-                poll_timeout: tokio::time::Duration::from_secs(5),
+                poll_timeout: Duration::from_secs(5),
             };
 
             assert!(inst.read_reply(&mut &buf[0..=0]).await.is_err());
@@ -766,7 +770,7 @@ mod test {
                 addr: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0),
                 reported_error: None,
                 buf: [0u8; BUF_TOTAL],
-                poll_timeout: tokio::time::Duration::from_secs(5),
+                poll_timeout: Duration::from_secs(5),
             };
 
             assert!(inst.read_reply(&mut &buf[0..4]).await.is_err());

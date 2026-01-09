@@ -4,6 +4,7 @@ use crate::{
     Error,
 };
 use std::future::Future;
+use tokio::time::Duration;
 
 pub enum Units {
     English,
@@ -67,6 +68,7 @@ impl Registrator for Weather {
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         cfg: &DriverConfig,
+        _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();

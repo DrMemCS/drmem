@@ -4,7 +4,10 @@
 use crate::types::{device, Error};
 use std::future::Future;
 use std::{convert::Infallible, sync::Arc};
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::Duration,
+};
 use toml::value;
 
 use super::Result;
@@ -220,7 +223,7 @@ impl RequestChan {
         &self,
         name: device::Base,
         units: Option<&str>,
-        override_duration: Option<tokio::time::Duration>,
+        override_duration: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<SharedReadWriteDevice<T>> {
         let (tx, rx) = oneshot::channel();
@@ -269,6 +272,7 @@ pub trait Registrator: ResettableState + Sized + Send {
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         cfg: &'a DriverConfig,
+        override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a;
 }

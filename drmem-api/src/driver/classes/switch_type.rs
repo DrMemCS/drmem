@@ -40,6 +40,7 @@ impl Registrator for Switch {
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         _cfg: &DriverConfig,
+        override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let nm_error = "error".parse();
@@ -59,7 +60,7 @@ impl Registrator for Switch {
                     .add_shared_rw_device::<bool>(
                         nm_state,
                         None,
-                        Some(Duration::from_secs(3600 * 4)),
+                        override_timeout,
                         max_history,
                     )
                     .await?,
@@ -67,7 +68,7 @@ impl Registrator for Switch {
                     .add_shared_rw_device::<bool>(
                         nm_indicator,
                         None,
-                        Some(Duration::from_secs(3600 * 4)),
+                        override_timeout,
                         max_history,
                     )
                     .await?,

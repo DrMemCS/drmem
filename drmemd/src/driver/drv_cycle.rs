@@ -4,7 +4,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::{convert::Infallible, future::Future};
-use tokio::time;
+use tokio::time::{self, Duration};
 use tracing::{self, debug};
 
 // This enum represents the three states in which the device can be.
@@ -23,7 +23,7 @@ pub struct Instance {
     enabled: Vec<device::Value>,
     state: CycleState,
     index: usize,
-    millis: time::Duration,
+    millis: Duration,
 }
 
 impl Instance {
@@ -37,7 +37,7 @@ impl Instance {
     /// Creates a new, idle `Instance`.
     pub fn new(
         enabled_at_boot: bool,
-        millis: time::Duration,
+        millis: Duration,
         disabled: device::Value,
         enabled: Vec<device::Value>,
     ) -> Instance {
@@ -53,7 +53,7 @@ impl Instance {
 
     // Validates the time duration from the driver configuration.
 
-    fn get_cfg_millis(cfg: &DriverConfig) -> Result<time::Duration> {
+    fn get_cfg_millis(cfg: &DriverConfig) -> Result<Duration> {
         match cfg.get("millis") {
             Some(toml::value::Value::Integer(millis)) => {
                 // DrMem's official sample rate is 20 Hz, so the cycle
@@ -65,7 +65,7 @@ impl Instance {
                 // drmem-api crate indicating the max sample rate?
 
                 if (50..=3_600_000).contains(millis) {
-                    Ok(time::Duration::from_millis(*millis as u64))
+                    Ok(Duration::from_millis(*millis as u64))
                 } else {
                     Err(Error::ConfigError(String::from(
                         "'millis' out of range",
@@ -202,6 +202,7 @@ impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
+        _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();
@@ -321,7 +322,7 @@ impl ResettableState for Devices {}
 mod tests {
     use super::*;
     use drmem_api::driver::API;
-    use std::time::Duration;
+    use tokio::time::Duration;
 
     #[tokio::test]
     async fn test_cfg() {
@@ -451,7 +452,7 @@ mod tests {
     fn test_state_changes() {
         let mut timer = Instance::new(
             false,
-            time::Duration::from_millis(1000),
+            Duration::from_millis(1000),
             device::Value::Bool(false),
             vec![device::Value::Bool(true), device::Value::Bool(false)],
         );
@@ -489,7 +490,7 @@ mod tests {
     fn test_numeric_cycles() {
         let mut timer = Instance::new(
             false,
-            time::Duration::from_millis(1000),
+            Duration::from_millis(1000),
             device::Value::Int(0),
             vec![
                 device::Value::Int(1),
@@ -536,7 +537,7 @@ mod tests {
     fn test_duplicate_skips() {
         let mut timer = Instance::new(
             false,
-            time::Duration::from_millis(1000),
+            Duration::from_millis(1000),
             device::Value::Bool(false),
             vec![
                 device::Value::Bool(true),
@@ -580,7 +581,7 @@ mod tests {
     fn test_transition_skips() {
         let mut timer = Instance::new(
             false,
-            time::Duration::from_millis(1000),
+            Duration::from_millis(1000),
             device::Value::Bool(false),
             vec![
                 device::Value::Bool(false),

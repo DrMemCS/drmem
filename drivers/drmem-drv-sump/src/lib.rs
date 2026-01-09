@@ -12,7 +12,7 @@ use tokio::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
-    time,
+    time::Duration,
 };
 use tracing::{debug, error, info, warn, Span};
 
@@ -225,8 +225,8 @@ impl Instance {
         use socket2::{Domain, Socket, TcpKeepalive, Type};
 
         let keepalive = TcpKeepalive::new()
-            .with_time(time::Duration::from_secs(5))
-            .with_interval(time::Duration::from_secs(5));
+            .with_time(Duration::from_secs(5))
+            .with_interval(Duration::from_secs(5));
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)
             .expect("couldn't create socket");
 
@@ -236,7 +236,7 @@ impl Instance {
 
         match socket.connect_timeout(
             &<SocketAddrV4 as Into<socket2::SockAddr>>::into(*addr),
-            time::Duration::from_millis(100),
+            Duration::from_millis(100),
         ) {
             Ok(()) => {
                 info!("connected");
@@ -284,6 +284,7 @@ impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _: &DriverConfig,
+        _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let service_name = "service".parse::<device::Base>().unwrap();
