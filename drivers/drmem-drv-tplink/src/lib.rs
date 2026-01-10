@@ -41,6 +41,7 @@ use std::net::SocketAddrV4;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    task::JoinHandle,
     time::{self, Duration},
 };
 use tracing::{debug, error, warn, Span};
@@ -416,25 +417,61 @@ impl Instance {
     // Connects to the address. Sets a timeout of 1 second for the
     // connection.
 
-    async fn connect(addr: &SocketAddrV4) -> Result<TcpStream> {
-        use tokio::net::TcpSocket;
+    async fn connect(addr: SocketAddrV4) -> Result<TcpStream> {
+        use tokio::{net::TcpSocket, time};
 
-        let fut = time::timeout(Duration::from_secs(1), async {
+        let mut reported_error = false;
+
+        loop {
             match TcpSocket::new_v4() {
                 Ok(s) => {
-                    s.set_recv_buffer_size((BUF_TOTAL * 2) as u32)?;
-                    s.set_nodelay(true)?;
+                    s.set_recv_buffer_size((BUF_TOTAL * 2) as u32).map_err(
+                        |e| {
+                            Error::OperationError(format!(
+                                "couldn't set socket's buffer size -- {}",
+                                e
+                            ))
+                        },
+                    )?;
+                    s.set_nodelay(true).map_err(|e| {
+                        Error::OperationError(format!(
+                            "couldn't set NO DELAY on socket -- {}",
+                            e
+                        ))
+                    })?;
 
-                    Ok(s.connect((*addr).into()).await?)
+                    match time::timeout(
+                        Duration::from_secs(2),
+                        s.connect(addr.into()),
+                    )
+                    .await
+                    {
+                        Ok(Ok(s)) => break Ok(s),
+                        Ok(Err(e)) => {
+                            if !reported_error {
+                                reported_error = true;
+                                warn!("couldn't connect to {} -- {}", &addr, e)
+                            }
+                        }
+                        Err(e) => {
+                            if !reported_error {
+                                reported_error = true;
+                                warn!(
+                                    "timeout connecting to {} -- {}",
+                                    &addr, e
+                                )
+                            }
+                        }
+                    }
+                    time::sleep(time::Duration::from_secs(15)).await
                 }
-                Err(e) => Err(e),
+                Err(e) => {
+                    break Err(Error::OperationError(format!(
+                        "couldn't create socket -- {}",
+                        e
+                    )))
+                }
             }
-        });
-
-        match fut.await {
-            Ok(Ok(s)) => Ok(s),
-            Ok(Err(e)) => Err(Error::MissingPeer(e.to_string())),
-            Err(_) => Err(Error::MissingPeer("timeout".into())),
         }
     }
 
@@ -506,6 +543,148 @@ impl Instance {
                 }
                 DevType::Dimmer(classes::Dimmer { error, .. }) => {
                     error.report_update(value).await
+                }
+            }
+        }
+    }
+
+    async fn pause_as_dimmer(&mut self, dev: &mut classes::Dimmer) {
+        let classes::Dimmer {
+            brightness: ref mut d_b,
+            indicator: ref mut d_i,
+            ..
+        } = dev;
+
+        let timeout = time::sleep(Duration::from_secs(60));
+        tokio::pin!(timeout);
+
+        loop {
+            #[rustfmt::skip]
+            tokio::select! {
+                _ = &mut timeout => {
+                    break;
+                }
+                Some((v, reply)) = d_b.next_setting() => {
+                    if let Some(reply) = reply {
+                        reply(Ok(v));
+                    }
+                }
+                Some((v, reply)) = d_i.next_setting() => {
+                    if let Some(reply) = reply {
+                        reply(Ok(v));
+                    }
+                }
+            }
+        }
+    }
+
+    async fn pause_as_switch(&mut self, dev: &mut classes::Switch) {
+        let classes::Switch {
+            state: ref mut d_r,
+            indicator: ref mut d_i,
+            ..
+        } = dev;
+
+        let timeout = time::sleep(Duration::from_secs(60));
+        tokio::pin!(timeout);
+
+        loop {
+            #[rustfmt::skip]
+            tokio::select! {
+                _ = &mut timeout => {
+                    break;
+                }
+                Some((v, reply)) = d_r.next_setting() => {
+                    if let Some(reply) = reply {
+                        reply(Ok(v));
+                    }
+                }
+                Some((v, reply)) = d_i.next_setting() => {
+                    if let Some(reply) = reply {
+                        reply(Ok(v));
+                    }
+                }
+            }
+        }
+    }
+
+    async fn manage_connect_as_switch(
+        &mut self,
+        task: JoinHandle<Result<TcpStream>>,
+        dev: &mut classes::Switch,
+    ) -> Result<TcpStream> {
+        let classes::Switch {
+            state: ref mut d_r,
+            indicator: ref mut d_i,
+            ..
+        } = dev;
+
+        tokio::pin!(task);
+
+        loop {
+            #[rustfmt::skip]
+            tokio::select! {
+                task_result = &mut task => {
+                    match task_result {
+                        Ok(result) => break result,
+                        Err(e) => {
+                            break Err(Error::OperationError(format!(
+                                "driver panicked while connecting -- {}",
+                                e
+                            )))
+                        }
+                    }
+                }
+                Some((v, reply)) = d_r.next_setting() => {
+                    if let Some(reply) = reply {
+                        reply(Ok(v));
+                    }
+                }
+                Some((v, reply)) = d_i.next_setting() => {
+                    if let Some(reply) = reply {
+                        reply(Ok(v));
+                    }
+                }
+            }
+        }
+    }
+
+    async fn manage_connect_as_dimmer(
+        &mut self,
+        task: JoinHandle<Result<TcpStream>>,
+        dev: &mut classes::Dimmer,
+    ) -> Result<TcpStream> {
+        let classes::Dimmer {
+            brightness: ref mut d_b,
+            indicator: ref mut d_i,
+            ..
+        } = dev;
+
+        tokio::pin!(task);
+
+        loop {
+            #[rustfmt::skip]
+            tokio::select! {
+                task_result = &mut task => {
+                    match task_result {
+                        Ok(result) => break result,
+                        Err(e) => {
+                            break Err(Error::OperationError(format!(
+                                "driver panicked while connecting -- {}",
+                                e
+                            )))
+                        }
+                    }
+                }
+                Some((v, reply)) = d_b.next_setting() => {
+                    if let Some(reply) = reply {
+                        reply(Ok(v));
+                    }
+                }
+                Some((v, reply)) = d_i.next_setting() => {
+                    if let Some(reply) = reply {
+                        reply(Ok(v));
+                    }
                 }
             }
         }
@@ -658,14 +837,14 @@ impl Instance {
 
     async fn main_loop(
         &mut self,
-        s: &mut TcpStream,
+        mut s: TcpStream,
         devices: &mut <Instance as driver::API>::HardwareType,
     ) {
         self.sync_error_state(&mut *devices, false).await;
         loop {
             if !match &mut *devices {
-                DevType::Switch(dev) => self.manage_switch(s, dev).await,
-                DevType::Dimmer(dev) => self.manage_dimmer(s, dev).await,
+                DevType::Switch(dev) => self.manage_switch(&mut s, dev).await,
+                DevType::Dimmer(dev) => self.manage_dimmer(&mut s, dev).await,
             } {
                 break;
             }
@@ -704,26 +883,28 @@ impl driver::API for Instance {
         Span::current().record("cfg", self.addr.to_string());
 
         loop {
-            // First, connect to the device. We'll leave the TCP
-            // connection open so we're ready for the next
-            // transaction. Tests have shown that the HS220 handles
-            // multiple client connections.
+            let conn_task = tokio::spawn(Instance::connect(self.addr));
+            let conn_result = match &mut *devices {
+                DevType::Switch(ref mut dev) => {
+                    self.manage_connect_as_switch(conn_task, dev).await
+                }
+                DevType::Dimmer(ref mut dev) => {
+                    self.manage_connect_as_dimmer(conn_task, dev).await
+                }
+            };
 
-            match Instance::connect(&self.addr).await {
-                Ok(mut s) => {
-                    self.main_loop(&mut s, devices).await;
-                }
-                Err(e) => {
-                    warn!("couldn't connect : '{}'", e);
-                }
+            match conn_result {
+                Ok(s) => self.main_loop(s, devices).await,
+                Err(e) => error!("connection failed -- {}", e),
             }
 
-            self.sync_error_state(devices, true).await;
-
-            // Log the error and then sleep for 10 seconds. Hopefully
+            // Log the error and then sleep for 60 seconds. Hopefully
             // the device will be available then.
 
-            tokio::time::sleep(Duration::from_secs(10)).await
+            match &mut *devices {
+                DevType::Switch(ref mut dev) => self.pause_as_switch(dev).await,
+                DevType::Dimmer(ref mut dev) => self.pause_as_dimmer(dev).await,
+            };
         }
     }
 }
