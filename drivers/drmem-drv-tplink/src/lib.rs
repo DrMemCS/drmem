@@ -44,23 +44,31 @@ use tokio::{
     task::JoinHandle,
     time::{self, Duration},
 };
-use tracing::{debug, error, warn, Span};
+use tracing::{debug, error, info, Span};
 
 mod tplink;
 
 const BUF_TOTAL: usize = 4_096;
 
+// Holds the state of the device received by an info request. Switch
+// and outlet devices will always return None for the brightness.
 struct DeviceState {
     indicator: Option<bool>,
     brightness: Option<f64>,
     relay: Option<bool>,
 }
 
+// An instance of a driver can be a switch, dimmer, or outlet device.
+// This type specifies the device channels for the given types. The
+// driver instance will have one of these variants for its device set.
 pub enum DevType {
     Switch(classes::Switch),
     Dimmer(classes::Dimmer),
 }
 
+// A set of devices must be resettable (in case the device gets
+// rebooted.) This implementation simply resets the devices in the set
+// used by the driver instance.
 impl ResettableState for DevType {
     fn reset_state(&mut self) {
         match self {
@@ -77,6 +85,7 @@ impl ResettableState for DevType {
 }
 
 impl Registrator for DevType {
+    // Defines the registration interface for the device set.
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         cfg: &'a DriverConfig,
@@ -420,8 +429,6 @@ impl Instance {
     async fn connect(addr: SocketAddrV4) -> Result<TcpStream> {
         use tokio::{net::TcpSocket, time};
 
-        let mut reported_error = false;
-
         loop {
             match TcpSocket::new_v4() {
                 Ok(s) => {
@@ -440,33 +447,18 @@ impl Instance {
                         ))
                     })?;
 
-                    match time::timeout(
+                    if let Ok(Ok(s)) = time::timeout(
                         Duration::from_secs(2),
                         s.connect(addr.into()),
                     )
                     .await
                     {
-                        Ok(Ok(s)) => break Ok(s),
-                        Ok(Err(e)) => {
-                            if !reported_error {
-                                reported_error = true;
-                                warn!("couldn't connect to {} -- {}", &addr, e)
-                            }
-                        }
-                        Err(e) => {
-                            if !reported_error {
-                                reported_error = true;
-                                warn!(
-                                    "timeout connecting to {} -- {}",
-                                    &addr, e
-                                )
-                            }
-                        }
+                        return Ok(s);
                     }
-                    time::sleep(time::Duration::from_secs(15)).await
+                    time::sleep(time::Duration::from_secs(60)).await
                 }
                 Err(e) => {
-                    break Err(Error::OperationError(format!(
+                    return Err(Error::OperationError(format!(
                         "couldn't create socket -- {}",
                         e
                     )))
@@ -626,9 +618,9 @@ impl Instance {
             tokio::select! {
                 task_result = &mut task => {
                     match task_result {
-                        Ok(result) => break result,
+                        Ok(result) => return result,
                         Err(e) => {
-                            break Err(Error::OperationError(format!(
+                            return Err(Error::OperationError(format!(
                                 "driver panicked while connecting -- {}",
                                 e
                             )))
@@ -667,9 +659,9 @@ impl Instance {
             tokio::select! {
                 task_result = &mut task => {
                     match task_result {
-                        Ok(result) => break result,
+                        Ok(result) => return result,
                         Err(e) => {
-                            break Err(Error::OperationError(format!(
+                            return Err(Error::OperationError(format!(
                                 "driver panicked while connecting -- {}",
                                 e
                             )))
@@ -881,8 +873,10 @@ impl driver::API for Instance {
         // span.
 
         Span::current().record("cfg", self.addr.to_string());
-
+        self.sync_error_state(&mut *devices, true).await;
         loop {
+            info!("connecting to hardware at {}", &self.addr);
+
             let conn_task = tokio::spawn(Instance::connect(self.addr));
             let conn_result = match &mut *devices {
                 DevType::Switch(ref mut dev) => {
