@@ -214,7 +214,7 @@ impl Instance {
 		    Err(e) => error!("couldn't receive data -> {}", e),
 		}
 	    },
-	    _ = tokio::time::sleep(std::time::Duration::from_millis(1_000)) => {
+	    _ = tokio::time::sleep(Duration::from_millis(1_000)) => {
 		warn!("timed-out waiting for reply to \"get synced host\" request")
 	    }
 	}
@@ -346,7 +346,7 @@ impl Instance {
 			}
 		    }
 		},
-		_ = tokio::time::sleep(std::time::Duration::from_millis(1_000)) => {
+		_ = tokio::time::sleep(Duration::from_millis(1_000)) => {
 		    warn!("timed-out waiting for reply to \"get host info\" request")
 		}
 	    }
@@ -366,6 +366,7 @@ impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _: &DriverConfig,
+        _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         // It's safe to use `.unwrap()` for these names because, in a

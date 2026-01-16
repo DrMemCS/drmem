@@ -4,6 +4,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::{convert::Infallible, future::Future, ops::RangeInclusive};
+use tokio::time::Duration;
 
 #[derive(Debug, PartialEq)]
 struct Entry(RangeInclusive<i32>, device::Value);
@@ -200,6 +201,7 @@ impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
+        _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();

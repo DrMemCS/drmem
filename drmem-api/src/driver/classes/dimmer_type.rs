@@ -17,10 +17,11 @@
 //! ```
 
 use crate::driver::{
-    ro_device::ReadOnlyDevice, rw_device::ReadWriteDevice, DriverConfig,
-    Registrator, RequestChan, Result,
+    ro_device::ReadOnlyDevice, shared_rw_device::SharedReadWriteDevice,
+    DriverConfig, Registrator, RequestChan, Result,
 };
 use std::future::Future;
+use tokio::time::Duration;
 
 /// Defines the common API used by Dimmers.
 pub struct Dimmer {
@@ -29,16 +30,17 @@ pub struct Dimmer {
     pub error: ReadOnlyDevice<bool>,
     /// Controls the brightness setting of the dimmer. Off is 0.0 and
     /// full-on is 100.0.
-    pub brightness: ReadWriteDevice<f64>,
+    pub brightness: SharedReadWriteDevice<f64>,
     /// A product might include an indicator. If the hardware does,
     /// this device can turn it on and off.
-    pub indicator: ReadWriteDevice<bool>,
+    pub indicator: SharedReadWriteDevice<bool>,
 }
 
 impl Registrator for Dimmer {
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         _cfg: &DriverConfig,
+        override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let nm_error = "error".parse();
@@ -59,10 +61,20 @@ impl Registrator for Dimmer {
                     .add_ro_device::<bool>(nm_error, None, max_history)
                     .await?,
                 brightness: drc
-                    .add_rw_device::<f64>(nm_brightness, Some("%"), max_history)
+                    .add_shared_rw_device::<f64>(
+                        nm_brightness,
+                        Some("%"),
+                        override_timeout,
+                        max_history,
+                    )
                     .await?,
                 indicator: drc
-                    .add_rw_device::<bool>(nm_indicator, None, max_history)
+                    .add_shared_rw_device::<bool>(
+                        nm_indicator,
+                        None,
+                        override_timeout,
+                        max_history,
+                    )
                     .await?,
             })
         }

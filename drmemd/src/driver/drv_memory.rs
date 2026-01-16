@@ -4,6 +4,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::{convert::Infallible, future::Future};
+use tokio::time::Duration;
 
 // Defines the signature if a function that validates a
 // `device::Value`'s type.
@@ -176,6 +177,7 @@ impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         cfg: &DriverConfig,
+        _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let vars = Self::get_cfg_vars(cfg);

@@ -1,10 +1,11 @@
 use drmem_api::{
     driver::{self, Registrator, ResettableState, API},
-    Result,
+    Error, Result,
 };
 use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
+use tokio::{sync::Barrier, time::Duration};
 use tracing::{error, field, info, info_span, warn, Instrument};
 
 mod drv_cycle;
@@ -16,8 +17,12 @@ mod drv_timer;
 pub type Fut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type MgrTask = Fut<Result<Infallible>>;
 
-pub type Launcher =
-    fn(driver::DriverConfig, driver::RequestChan, Option<usize>) -> MgrTask;
+pub type Launcher = fn(
+    driver::DriverConfig,
+    driver::RequestChan,
+    Option<usize>,
+    barrier: Arc<Barrier>,
+) -> MgrTask;
 
 type DriverInfo = (&'static str, &'static str, Launcher);
 
@@ -37,30 +42,26 @@ where
     let mut restart_delay = START_DELAY;
 
     loop {
+        info!("initializing");
+
         // Create a Future that creates an instance of the driver
         // using the provided configuration parameters.
 
-        let result = T::create_instance(&cfg)
-            .instrument(info_span!("prepping", cfg = field::Empty));
-
-        match result.await {
+        match T::create_instance(&cfg).await {
             Ok(mut instance) => {
                 use futures::FutureExt;
                 use std::panic::AssertUnwindSafe;
 
                 restart_delay = START_DELAY;
+                info!("running");
 
                 // Drivers are never supposed to exit so
                 // catch_unwind() will only catch panics which means
                 // we need to only look for `Err(_)` values.
 
-                let Err(e) = AssertUnwindSafe(
-                    instance
-                        .run(&mut devices)
-                        .instrument(info_span!("running")),
-                )
-                .catch_unwind()
-                .await;
+                let Err(e) = AssertUnwindSafe(instance.run(&mut devices))
+                    .catch_unwind()
+                    .await;
 
                 error!("exited unexpectedly -- {e:?}")
             }
@@ -85,6 +86,24 @@ where
     }
 }
 
+fn get_cfg_override(cfg: &driver::DriverConfig) -> Result<Option<Duration>> {
+    match cfg.get("override_timeout") {
+        Some(toml::value::Value::Integer(secs)) => {
+            if (1..=(60 * 60 * 24 * 365)).contains(secs) {
+                Ok(Some(Duration::from_secs(*secs as u64)))
+            } else {
+                Err(Error::ConfigError(String::from(
+                    "'override_timeout' out of range",
+                )))
+            }
+        }
+        Some(_) => Err(Error::ConfigError(String::from(
+            "'override_timeout' config parameter should be an integer",
+        ))),
+        None => Ok(None),
+    }
+}
+
 // This generic function manages an instance of a specific driver. We
 // use generics because each driver has a different set of devices
 // (T::HardwareType), so one function wouldn't be able to handle every
@@ -94,6 +113,7 @@ fn manage_instance<T>(
     cfg: driver::DriverConfig,
     mut req_chan: driver::RequestChan,
     max_history: Option<usize>,
+    barrier: Arc<Barrier>,
 ) -> MgrTask
 where
     T: API + Send + 'static,
@@ -101,14 +121,32 @@ where
     Box::pin(async move {
         // Let the driver API register the necessary devices.
 
-        let devices =
-            T::HardwareType::register_devices(&mut req_chan, &cfg, max_history)
-                .instrument(info_span!("register", cfg = field::Empty))
-                .await?;
+        let devices = async {
+            match get_cfg_override(&cfg) {
+                Ok(tmo) => {
+                    T::HardwareType::register_devices(
+                        &mut req_chan,
+                        &cfg,
+                        tmo,
+                        max_history,
+                    )
+                    .instrument(info_span!("register", cfg = field::Empty))
+                    .await
+                }
+                Err(e) => Err(e),
+            }
+        }
+        .await;
+
+        // When we reached this location, all devices have been
+        // registered (or not, if an error occurred). Sync to the
+        // barrier so the main loop and move on to the next driver.
+
+        barrier.wait().await;
 
         // Create a future that manages the instance.
 
-        Ok(mgr_body::<T>(devices, cfg).await)
+        Ok(mgr_body::<T>(devices?, cfg).await)
     })
 }
 

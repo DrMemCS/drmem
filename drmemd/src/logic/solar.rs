@@ -144,7 +144,7 @@ pub fn create_task(
             info!("waiting for clients to register");
             barrier.wait().await;
 
-            info!("running task");
+            info!("running");
             run(tx_copy, lat, long).await
         }
         .instrument(info_span!("solar")),

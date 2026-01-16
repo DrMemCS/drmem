@@ -4,6 +4,7 @@ use drmem_api::{
     Error, Result,
 };
 use std::{convert::Infallible, future::Future};
+use tokio::time::Duration;
 
 // This enum represents the two states in which the latch can be.
 
@@ -98,6 +99,7 @@ impl driver::Registrator for Devices {
     fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
+        _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send + 'a {
         let output_name = "output".parse::<device::Base>().unwrap();

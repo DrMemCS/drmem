@@ -1,6 +1,6 @@
 [package]
 name = "drmemd"
-version = "0.6.1"
+version = "0.6.2"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 description = "Main process of the DrMem control system"
