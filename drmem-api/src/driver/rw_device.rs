@@ -1,5 +1,5 @@
 use crate::{device, driver::ReportReading, Error, Result};
-use std::{future::Future, pin::Pin};
+use std::{future::Future, marker::PhantomData, pin::Pin};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 
@@ -14,12 +14,35 @@ pub type TxDeviceSetting = mpsc::Sender<SettingRequest>;
 /// Used by a driver to receive settings from a client.
 pub type RxDeviceSetting = mpsc::Receiver<SettingRequest>;
 
-/// A closure type that defines how a driver replies to a setting
-/// request. It can return `Ok()` to show what value was actually used
-/// or `Err()` to indicate the setting failed.
-pub type SettingReply<T> = Box<dyn FnOnce(Result<T>) + Send>;
+/// Used by a driver to reply to a setting. The driver can indicate it
+/// accepted the setting or return an error, if the setting was
+/// invalid.
+pub struct SettingResponder<T: device::ReadWriteCompat> {
+    tx: oneshot::Sender<Result<device::Value>>,
+    _marker: PhantomData<T>,
+}
 
-pub type SettingTransaction<T> = (T, SettingReply<T>);
+impl<T> SettingResponder<T>
+where
+    T: device::ReadWriteCompat,
+{
+    pub fn new(tx: oneshot::Sender<Result<device::Value>>) -> Self {
+        SettingResponder {
+            tx,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn ok(self, value: T) {
+        let _ = self.tx.send(Ok(value.into()));
+    }
+
+    pub fn err(self, err: Error) {
+        let _ = self.tx.send(Err(err));
+    }
+}
+
+pub type SettingTransaction<T> = (T, SettingResponder<T>);
 
 /// The driver is given a stream that yields setting requests. If the
 /// driver uses a type that can be converted to and from a
@@ -40,13 +63,7 @@ where
 {
     Box::pin(ReceiverStream::new(rx).filter_map(
         |(v, tx_rpy)| match T::try_from(v) {
-            Ok(v) => {
-                let f: SettingReply<T> = Box::new(|v: Result<T>| {
-                    let _ = tx_rpy.send(v.map(T::into));
-                });
-
-                Some((v, f))
-            }
+            Ok(v) => Some((v, SettingResponder::new(tx_rpy))),
             Err(_) => {
                 let _ = tx_rpy.send(Err(Error::TypeError));
 
@@ -128,14 +145,14 @@ mod tests {
         // Assert there's an item in the stream and that it's been
         // converted to a `bool` type.
 
-        let (v, f) = s.next().await.unwrap();
+        let (v, resp) = s.next().await.unwrap();
 
         assert_eq!(v, true);
 
         // Send back the reply -- changing it to `false`. Verify the
         // received reply is also `false`.
 
-        f(Ok(false));
+        resp.ok(false);
 
         assert_eq!(os_rx.await.unwrap().unwrap(), false.into());
 

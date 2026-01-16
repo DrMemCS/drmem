@@ -473,7 +473,7 @@ impl Instance {
         &mut self,
         s: &'a mut TcpStream,
         v: f64,
-        reply: Option<driver::SettingReply<f64>>,
+        reply: Option<driver::SettingResponder<f64>>,
     ) -> Result<()> {
         if !v.is_nan() {
             // Clip incoming settings to the range 0.0..=100.0. Handle
@@ -490,7 +490,7 @@ impl Instance {
             // Send an OK reply to the client with the updated value.
 
             if let Some(reply) = reply {
-                reply(Ok(v));
+                reply.ok(v);
             }
 
             // Always log incoming settings. Let the client know there
@@ -500,9 +500,9 @@ impl Instance {
             self.set_brightness(s, v).await
         } else {
             if let Some(reply) = reply {
-                reply(Err(Error::InvArgument(
+                reply.err(Error::InvArgument(
                     "device doesn't accept NaN".into(),
-                )));
+                ));
             }
             Ok(())
         }
@@ -514,10 +514,10 @@ impl Instance {
         &mut self,
         s: &'a mut TcpStream,
         v: bool,
-        reply: Option<driver::SettingReply<bool>>,
+        reply: Option<driver::SettingResponder<bool>>,
     ) -> Result<()> {
         if let Some(reply) = reply {
-            reply(Ok(v));
+            reply.ok(v);
         }
         self.led_state_rpc(s, v).await
     }
@@ -558,12 +558,12 @@ impl Instance {
                 }
                 Some((v, reply)) = d_b.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
             }
@@ -588,12 +588,12 @@ impl Instance {
                 }
                 Some((v, reply)) = d_r.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
             }
@@ -629,12 +629,12 @@ impl Instance {
                 }
                 Some((v, reply)) = d_r.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
             }
@@ -670,12 +670,12 @@ impl Instance {
                 }
                 Some((v, reply)) = d_b.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
             }
@@ -733,7 +733,7 @@ impl Instance {
 
             Some((v, reply)) = d_r.next_setting() => {
                 if let Some(reply) = reply {
-                    reply(Ok(v));
+                    reply.ok(v);
                 }
                 if let Err(e) = self.relay_state_rpc(s, v).await {
                     error!("couldn't set relay state -- {e}");

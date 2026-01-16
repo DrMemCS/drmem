@@ -281,7 +281,7 @@ impl driver::API for Instance {
                 Some((b, reply)) = devices.d_enable.next_setting() => {
                     let (out, tmo) = self.update_state(b);
 
-                    reply(Ok(b));
+                    reply.ok(b);
 
                     debug!("state {:?} : new input -> {}", &self.state, b);
 

@@ -173,7 +173,7 @@ impl driver::API for Instance {
                 Some((b, reply)) = d_trigger.next_setting() => {
                     let result = self.update_state(reset, !trigger && b);
 
-                    reply(Ok(b));
+                    reply.ok(b);
                     devices.d_trigger.report_update(b).await;
                     trigger = b;
                     result
@@ -182,7 +182,7 @@ impl driver::API for Instance {
                 Some((b, reply)) = d_reset.next_setting() => {
                     let result = self.update_state(reset, false);
 
-                    reply(Ok(b));
+                    reply.ok(b);
                     devices.d_reset.report_update(b).await;
                     reset = b;
                     result

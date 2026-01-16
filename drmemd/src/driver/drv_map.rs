@@ -261,7 +261,7 @@ impl driver::API for Instance {
         while let Some((v, reply)) = devices.d_index.next_setting().await {
             // Send the reply to the setter.
 
-            reply(Ok(v));
+            reply.ok(v);
 
             // Send the updated values to the backend.
 

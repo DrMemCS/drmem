@@ -29,7 +29,7 @@ mod shared_rw_device;
 
 pub use ro_device::{ReadOnlyDevice, ReportReading};
 pub use rw_device::{
-    ReadWriteDevice, RxDeviceSetting, SettingReply, SettingRequest,
+    ReadWriteDevice, RxDeviceSetting, SettingRequest, SettingResponder,
     TxDeviceSetting,
 };
 pub use shared_rw_device::SharedReadWriteDevice;

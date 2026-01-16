@@ -73,10 +73,10 @@ impl Devices {
                             // processed by the caller.
 
                             if is_good(&val) {
-                                reply(Ok(val.clone()));
+                                reply.ok(val.clone());
                                 return Poll::Ready((idx, val));
                             } else {
-                                reply(Err(Error::TypeError))
+                                reply.err(Error::TypeError)
                             }
                         }
 

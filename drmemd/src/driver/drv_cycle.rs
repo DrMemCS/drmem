@@ -300,7 +300,7 @@ impl driver::API for Instance {
 			timer.reset()
                     }
 
-                    reply(Ok(b));
+                    reply.ok(b);
 
                     debug!("state {:?} : new input -> {}",
 			   &self.state, b);
