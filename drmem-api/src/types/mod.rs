@@ -1,7 +1,11 @@
 //! Defines fundamental types used throughout the DrMem codebase.
 
 use std::fmt;
+
+use std::convert::Infallible;
 use tokio::sync::{mpsc, oneshot};
+
+pub mod device;
 
 /// Enumerates all the errors that can be reported in DrMem. Authors
 /// for new drivers or storage backends should try to map their errors
@@ -108,4 +112,8 @@ impl From<oneshot::error::RecvError> for Error {
     }
 }
 
-pub mod device;
+impl From<Infallible> for Error {
+    fn from(_: Infallible) -> Self {
+        unreachable!()
+    }
+}

@@ -205,25 +205,20 @@ impl driver::Registrator for Devices {
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let output_name = "output".parse::<device::Base>().unwrap();
-        let enable_name = "enable".parse::<device::Base>().unwrap();
-
         // Define the devices managed by this driver.
         //
         // This first device is the output signal. It toggles between
         // `false` and `true` at a rate determined by the `interval`
         // config option.
 
-        let d_output =
-            core.add_ro_device(output_name, None, max_history).await?;
+        let d_output = core.add_ro_device("output", None, max_history).await?;
 
         // This device is settable. Any time it transitions from
         // `false` to `true`, the output device begins a cycling.
         // When this device is set to `false`, the device stops
         // cycling.
 
-        let d_enable =
-            core.add_rw_device(enable_name, None, max_history).await?;
+        let d_enable = core.add_rw_device("enable", None, max_history).await?;
 
         Ok(Devices { d_output, d_enable })
     }

@@ -252,8 +252,8 @@ impl Store for SimpleStore {
     ) -> Result<Vec<client::DevInfoReply>> {
         let pred: Box<dyn FnMut(&(&device::Name, &DeviceInfo)) -> bool> =
             if let Some(pattern) = pattern {
-                if let Ok(pattern) = pattern.parse::<device::Name>() {
-                    Box::new(move |(k, _)| pattern == **k)
+                if let Ok(pattern) = pattern.try_into() {
+                    Box::new(move |(k, _)| **k == pattern)
                 } else {
                     Box::new(move |(k, _)| {
                         glob::Pattern::create(pattern).matches(&k.to_string())

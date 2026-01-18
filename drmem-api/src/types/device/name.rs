@@ -12,7 +12,6 @@
 use crate::{types::Error, Result};
 use serde_derive::Deserialize;
 use std::fmt;
-use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Hash, Eq)]
 struct Segment(String);
@@ -45,16 +44,6 @@ impl Segment {
                 "contains zero-length segment",
             )))
         }
-    }
-}
-
-// This trait allows one to use `.parse::<Segment>()`.
-
-impl FromStr for Segment {
-    type Err = Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Segment::create(s)
     }
 }
 
@@ -96,13 +85,11 @@ impl TryFrom<String> for Path {
     }
 }
 
-// This trait allows one to use `.parse::<Path>()`.
+impl TryFrom<&str> for Path {
+    type Error = Error;
 
-impl FromStr for Path {
-    type Err = Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Path::create(s)
+    fn try_from(s: &str) -> Result<Self> {
+        Path::create(&s)
     }
 }
 
@@ -140,13 +127,19 @@ impl TryFrom<String> for Base {
     }
 }
 
-// This trait allows one to use `.parse::<Base>()`.
+impl TryFrom<&String> for Base {
+    type Error = Error;
 
-impl FromStr for Base {
-    type Err = Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn try_from(s: &String) -> Result<Self> {
         Base::create(s)
+    }
+}
+
+impl TryFrom<&str> for Base {
+    type Error = Error;
+
+    fn try_from(s: &str) -> Result<Self> {
+        Base::create(&s)
     }
 }
 
@@ -234,12 +227,10 @@ impl TryFrom<String> for Name {
     }
 }
 
-// This trait allows one to use `.parse::<Name>()`.
+impl TryFrom<&str> for Name {
+    type Error = Error;
 
-impl FromStr for Name {
-    type Err = Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn try_from(s: &str) -> Result<Self> {
         Name::create(s)
     }
 }

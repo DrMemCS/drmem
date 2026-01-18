@@ -102,21 +102,16 @@ impl driver::Registrator for Devices {
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let output_name = "output".parse::<device::Base>().unwrap();
-        let trigger_name = "trigger".parse::<device::Base>().unwrap();
-        let reset_name = "reset".parse::<device::Base>().unwrap();
-
         // Define the devices managed by this driver.
         //
         // This first device is the output of the timer.
 
-        let d_output =
-            core.add_ro_device(output_name, None, max_history).await?;
+        let d_output = core.add_ro_device("output", None, max_history).await?;
 
         let d_trigger =
-            core.add_rw_device(trigger_name, None, max_history).await?;
+            core.add_rw_device("trigger", None, max_history).await?;
 
-        let d_reset = core.add_rw_device(reset_name, None, max_history).await?;
+        let d_reset = core.add_rw_device("reset", None, max_history).await?;
 
         Ok(Devices {
             d_output,

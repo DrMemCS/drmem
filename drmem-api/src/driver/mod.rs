@@ -1,7 +1,10 @@
 //! Defines types and interfaces that drivers use to interact with the
 //! core of DrMem.
 
-use crate::types::{device, Error};
+use crate::types::{
+    device::{self, Base},
+    Error,
+};
 use std::{convert::Infallible, future::Future, sync::Arc};
 use tokio::{
     sync::{mpsc, oneshot},
@@ -107,12 +110,22 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device<T: device::ReadCompat>(
+    pub async fn add_ro_device<T, N>(
         &self,
-        name: device::Base,
+        name: N,
         units: Option<&str>,
         max_history: Option<usize>,
-    ) -> super::Result<ReadOnlyDevice<T>> {
+    ) -> Result<ReadOnlyDevice<T>>
+    where
+        T: device::ReadCompat,
+        N: TryInto<Base>,
+        Error: From<<N as TryInto<Base>>::Error>,
+    {
+        let name = match name.try_into() {
+            Ok(name) => name,
+            Err(e) => return Err(e.into()),
+        };
+
         // Create a location for the reply.
 
         let (tx, rx) = oneshot::channel();
@@ -161,18 +174,26 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_rw_device<T: device::ReadWriteCompat>(
+    pub async fn add_rw_device<T, N>(
         &self,
-        name: device::Base,
+        name: N,
         units: Option<&str>,
         max_history: Option<usize>,
-    ) -> Result<ReadWriteDevice<T>> {
+    ) -> Result<ReadWriteDevice<T>>
+    where
+        T: device::ReadWriteCompat,
+        N: TryInto<Base>,
+        Error: From<<N as TryInto<Base>>::Error>,
+    {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
             .send(Request::AddReadWriteDevice {
                 driver_name: self.driver_name.clone(),
-                dev_name: device::Name::build(self.prefix.clone(), name),
+                dev_name: device::Name::build(
+                    self.prefix.clone(),
+                    name.try_into()?,
+                ),
                 dev_units: units.map(String::from),
                 max_history,
                 rpy_chan: tx,
@@ -218,19 +239,27 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_shared_rw_device<T: device::ReadWriteCompat>(
+    pub async fn add_shared_rw_device<T, N>(
         &self,
-        name: device::Base,
+        name: N,
         units: Option<&str>,
         override_duration: Option<Duration>,
         max_history: Option<usize>,
-    ) -> Result<SharedReadWriteDevice<T>> {
+    ) -> Result<SharedReadWriteDevice<T>>
+    where
+        T: device::ReadWriteCompat,
+        N: TryInto<Base>,
+        Error: From<<N as TryInto<Base>>::Error>,
+    {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
             .send(Request::AddReadWriteDevice {
                 driver_name: self.driver_name.clone(),
-                dev_name: device::Name::build(self.prefix.clone(), name),
+                dev_name: device::Name::build(
+                    self.prefix.clone(),
+                    name.try_into()?,
+                ),
                 dev_units: units.map(String::from),
                 max_history,
                 rpy_chan: tx,

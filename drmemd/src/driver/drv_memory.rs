@@ -98,7 +98,7 @@ impl Devices {
     fn read_name(m: &toml::Table) -> Result<device::Base> {
         match m.get("name") {
             Some(toml::value::Value::String(name)) => {
-                if let v @ Ok(_) = name.parse::<device::Base>() {
+                if let v @ Ok(_) = name.try_into() {
                     v
                 } else {
                     Err(Error::ConfigError(format!(
@@ -180,10 +180,10 @@ impl driver::Registrator for Devices {
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let vars = Self::get_cfg_vars(cfg);
+        let mut vars = Self::get_cfg_vars(cfg)?;
         let mut devs = vec![];
 
-        for (name, init_val) in vars?.drain(..) {
+        for (name, init_val) in vars.drain(..) {
             // This device is settable. Any setting is forwarded to
             // the backend.
 

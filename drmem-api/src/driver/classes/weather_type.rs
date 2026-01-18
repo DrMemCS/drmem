@@ -1,5 +1,4 @@
 use crate::{
-    device,
     driver::{self, DriverConfig, Registrator, RequestChan, Result},
     Error,
 };
@@ -70,23 +69,6 @@ impl Registrator for Weather {
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let dewpoint_name = "dewpoint".parse::<device::Base>().unwrap();
-        let heat_index_name = "heat-index".parse::<device::Base>().unwrap();
-        let humidity_name = "humidity".parse::<device::Base>().unwrap();
-        let precip_rate_name = "precip-rate".parse::<device::Base>().unwrap();
-        let precip_total_name = "precip-total".parse::<device::Base>().unwrap();
-        let precip_last_total_name =
-            "precip-last-total".parse::<device::Base>().unwrap();
-        let pressure_name = "pressure".parse::<device::Base>().unwrap();
-        let solar_rad_name = "solar-rad".parse::<device::Base>().unwrap();
-        let temperature_name = "temperature".parse::<device::Base>().unwrap();
-        let uv_name = "uv".parse::<device::Base>().unwrap();
-        let wind_chill_name = "wind-chill".parse::<device::Base>().unwrap();
-        let wind_dir_name = "wind-dir".parse::<device::Base>().unwrap();
-        let wind_gust_name = "wind-gust".parse::<device::Base>().unwrap();
-        let wind_speed_name = "wind-speed".parse::<device::Base>().unwrap();
-        let error_name = "error".parse::<device::Base>().unwrap();
-
         let station = Self::get_cfg_station(cfg)?;
         let units = Self::get_cfg_units(cfg)?;
 
@@ -102,17 +84,17 @@ impl Registrator for Weather {
         });
 
         let dewpt = drc
-            .add_ro_device(dewpoint_name, temp_unit, max_history)
+            .add_ro_device("dewpoint", temp_unit, max_history)
             .await?;
         let htidx = drc
-            .add_ro_device(heat_index_name, temp_unit, max_history)
+            .add_ro_device("heat-index", temp_unit, max_history)
             .await?;
         let humidity = drc
-            .add_ro_device(humidity_name, Some("%"), max_history)
+            .add_ro_device("humidity", Some("%"), max_history)
             .await?;
         let prec_rate = drc
             .add_ro_device(
-                precip_rate_name,
+                "precip-rate",
                 Some(if let Units::English = units {
                     "in/hr"
                 } else {
@@ -124,7 +106,7 @@ impl Registrator for Weather {
 
         let prec_total = drc
             .add_ro_device(
-                precip_total_name,
+                "precip-total",
                 Some(if let Units::English = units {
                     "in"
                 } else {
@@ -136,7 +118,7 @@ impl Registrator for Weather {
 
         let prec_last_total = drc
             .add_ro_device(
-                precip_last_total_name,
+                "precip-last-total",
                 Some(if let Units::English = units {
                     "in"
                 } else {
@@ -148,7 +130,7 @@ impl Registrator for Weather {
 
         let pressure = drc
             .add_ro_device(
-                pressure_name,
+                "pressure",
                 Some(if let Units::English = units {
                     "inHg"
                 } else {
@@ -159,24 +141,24 @@ impl Registrator for Weather {
             .await?;
 
         let solrad = drc
-            .add_ro_device(solar_rad_name, Some("W/m²"), max_history)
+            .add_ro_device("solar-rad", Some("W/m²"), max_history)
             .await?;
-        let error = drc.add_ro_device(error_name, None, max_history).await?;
+        let error = drc.add_ro_device("error", None, max_history).await?;
         let temp = drc
-            .add_ro_device(temperature_name, temp_unit, max_history)
+            .add_ro_device("temperature", temp_unit, max_history)
             .await?;
-        let uv = drc.add_ro_device(uv_name, None, max_history).await?;
+        let uv = drc.add_ro_device("uv", None, max_history).await?;
         let wndchl = drc
-            .add_ro_device(wind_chill_name, temp_unit, max_history)
+            .add_ro_device("wind-chill", temp_unit, max_history)
             .await?;
         let wnddir = drc
-            .add_ro_device(wind_dir_name, Some("°"), max_history)
+            .add_ro_device("wind-dir", Some("°"), max_history)
             .await?;
         let wndgst = drc
-            .add_ro_device(wind_gust_name, speed_unit, max_history)
+            .add_ro_device("wind-gust", speed_unit, max_history)
             .await?;
         let wndspd = drc
-            .add_ro_device(wind_speed_name, speed_unit, max_history)
+            .add_ro_device("wind-speed", speed_unit, max_history)
             .await?;
 
         Ok(Weather {

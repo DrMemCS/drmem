@@ -1,5 +1,4 @@
 use drmem_api::{
-    device,
     driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
@@ -286,25 +285,17 @@ impl driver::Registrator for Devices {
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let service_name = "service".parse::<device::Base>().unwrap();
-        let state_name = "state".parse::<device::Base>().unwrap();
-        let duty_name = "duty".parse::<device::Base>().unwrap();
-        let in_flow_name = "in-flow".parse::<device::Base>().unwrap();
-        let dur_name = "duration".parse::<device::Base>().unwrap();
-
         // Define the devices managed by this driver.
 
         let d_service =
-            core.add_ro_device(service_name, None, max_history).await?;
-        let d_state = core.add_ro_device(state_name, None, max_history).await?;
-        let d_duty = core
-            .add_ro_device(duty_name, Some("%"), max_history)
-            .await?;
+            core.add_ro_device("service", None, max_history).await?;
+        let d_state = core.add_ro_device("state", None, max_history).await?;
+        let d_duty = core.add_ro_device("duty", Some("%"), max_history).await?;
         let d_inflow = core
-            .add_ro_device(in_flow_name, Some("gpm"), max_history)
+            .add_ro_device("in-flow", Some("gpm"), max_history)
             .await?;
         let d_duration = core
-            .add_ro_device(dur_name, Some("min"), max_history)
+            .add_ro_device("duration", Some("min"), max_history)
             .await?;
 
         Ok(Devices {

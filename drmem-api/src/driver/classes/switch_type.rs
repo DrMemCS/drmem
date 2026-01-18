@@ -42,25 +42,19 @@ impl Registrator for Switch {
         override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let nm_error = "error".parse()?;
-        let nm_state = "state".parse()?;
-        let nm_indicator = "indicator".parse()?;
-
         Ok(Switch {
-            error: drc
-                .add_ro_device::<bool>(nm_error, None, max_history)
-                .await?,
+            error: drc.add_ro_device("error", None, max_history).await?,
             state: drc
-                .add_shared_rw_device::<bool>(
-                    nm_state,
+                .add_shared_rw_device(
+                    "state",
                     None,
                     override_timeout,
                     max_history,
                 )
                 .await?,
             indicator: drc
-                .add_shared_rw_device::<bool>(
-                    nm_indicator,
+                .add_shared_rw_device(
+                    "indicator",
                     None,
                     override_timeout,
                     max_history,

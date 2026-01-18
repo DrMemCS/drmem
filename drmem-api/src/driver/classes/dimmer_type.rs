@@ -42,27 +42,19 @@ impl Registrator for Dimmer {
         override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let nm_error = "error".parse()?;
-        let nm_brightness = "brightness".parse()?;
-        let nm_indicator = "indicator".parse()?;
-
-        // Build the set of channels.
-
         Ok(Dimmer {
-            error: drc
-                .add_ro_device::<bool>(nm_error, None, max_history)
-                .await?,
+            error: drc.add_ro_device("error", None, max_history).await?,
             brightness: drc
-                .add_shared_rw_device::<f64>(
-                    nm_brightness,
+                .add_shared_rw_device(
+                    "brightness",
                     Some("%"),
                     override_timeout,
                     max_history,
                 )
                 .await?,
             indicator: drc
-                .add_shared_rw_device::<bool>(
-                    nm_indicator,
+                .add_shared_rw_device(
+                    "indicator",
                     None,
                     override_timeout,
                     max_history,

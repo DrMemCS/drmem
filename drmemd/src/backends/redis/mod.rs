@@ -1004,9 +1004,7 @@ impl Store for RedisStore {
         for key in result {
             // Only process keys that are valid device names.
 
-            if let Ok(name) =
-                key.trim_end_matches("#info").parse::<device::Name>()
-            {
+            if let Ok(name) = key.trim_end_matches("#info").try_into() {
                 let dev_info = self.lookup_device(name).await?;
 
                 devices.push(dev_info)
