@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future};
+use std::convert::Infallible;
 use tokio::time::Duration;
 
 // This enum represents the two states in which the latch can be.
@@ -96,35 +96,32 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
+    ) -> Result<Self> {
         let output_name = "output".parse::<device::Base>().unwrap();
         let trigger_name = "trigger".parse::<device::Base>().unwrap();
         let reset_name = "reset".parse::<device::Base>().unwrap();
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
-            //
-            // This first device is the output of the timer.
+        // Define the devices managed by this driver.
+        //
+        // This first device is the output of the timer.
 
-            let d_output =
-                core.add_ro_device(output_name, None, max_history).await?;
+        let d_output =
+            core.add_ro_device(output_name, None, max_history).await?;
 
-            let d_trigger =
-                core.add_rw_device(trigger_name, None, max_history).await?;
+        let d_trigger =
+            core.add_rw_device(trigger_name, None, max_history).await?;
 
-            let d_reset =
-                core.add_rw_device(reset_name, None, max_history).await?;
+        let d_reset = core.add_rw_device(reset_name, None, max_history).await?;
 
-            Ok(Devices {
-                d_output,
-                d_trigger,
-                d_reset,
-            })
+        Ok(Devices {
+            d_output,
+            d_trigger,
+            d_reset,
         })
     }
 }
@@ -132,22 +129,13 @@ impl driver::Registrator for Devices {
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        let active_value = Instance::get_active_value(cfg);
-        let inactive_value = Instance::get_inactive_value(cfg);
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
+        let active_value = Instance::get_active_value(cfg)?;
+        let inactive_value = Instance::get_inactive_value(cfg)?;
 
-        async move {
-            // Validate the configuration.
+        // Build and return the future.
 
-            let active_value = active_value?;
-            let inactive_value = inactive_value?;
-
-            // Build and return the future.
-
-            Ok(Box::new(Instance::new(active_value, inactive_value)))
-        }
+        Ok(Box::new(Instance::new(active_value, inactive_value)))
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {

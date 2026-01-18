@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future};
+use std::convert::Infallible;
 use tokio::time::{self, Duration};
 use tracing::{self, debug};
 
@@ -199,57 +199,51 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
+    ) -> Result<Self> {
         let output_name = "output".parse::<device::Base>().unwrap();
         let enable_name = "enable".parse::<device::Base>().unwrap();
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
-            //
-            // This first device is the output signal. It toggles
-            // between `false` and `true` at a rate determined by
-            // the `interval` config option.
+        // Define the devices managed by this driver.
+        //
+        // This first device is the output signal. It toggles between
+        // `false` and `true` at a rate determined by the `interval`
+        // config option.
 
-            let d_output =
-                core.add_ro_device(output_name, None, max_history).await?;
+        let d_output =
+            core.add_ro_device(output_name, None, max_history).await?;
 
-            // This device is settable. Any time it transitions
-            // from `false` to `true`, the output device begins a
-            // cycling.  When this device is set to `false`, the
-            // device stops cycling.
+        // This device is settable. Any time it transitions from
+        // `false` to `true`, the output device begins a cycling.
+        // When this device is set to `false`, the device stops
+        // cycling.
 
-            let d_enable =
-                core.add_rw_device(enable_name, None, max_history).await?;
+        let d_enable =
+            core.add_rw_device(enable_name, None, max_history).await?;
 
-            Ok(Devices { d_output, d_enable })
-        })
+        Ok(Devices { d_output, d_enable })
     }
 }
 
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        let millis = Instance::get_cfg_millis(cfg);
-        let enabled_at_boot = Instance::get_cfg_enabled(cfg);
-        let disabled = Instance::get_inactive_value(cfg);
-        let enabled = Instance::get_active_values(cfg);
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
+        let millis = Instance::get_cfg_millis(cfg)?;
+        let enabled_at_boot = Instance::get_cfg_enabled(cfg)?;
+        let disabled = Instance::get_inactive_value(cfg)?;
+        let enabled = Instance::get_active_values(cfg)?;
 
-        async move {
-            Ok(Box::new(Instance::new(
-                enabled_at_boot?,
-                millis?,
-                disabled?,
-                enabled?,
-            )))
-        }
+        Ok(Box::new(Instance::new(
+            enabled_at_boot,
+            millis,
+            disabled,
+            enabled,
+        )))
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {

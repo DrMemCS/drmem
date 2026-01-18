@@ -3,7 +3,7 @@ use drmem_api::{
     driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
-use std::{convert::Infallible, future::Future, ops::RangeInclusive};
+use std::{convert::Infallible, ops::RangeInclusive};
 use tokio::time::Duration;
 
 #[derive(Debug, PartialEq)]
@@ -198,40 +198,35 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
+    ) -> Result<Self> {
         let output_name = "output".parse::<device::Base>().unwrap();
         let index_name = "index".parse::<device::Base>().unwrap();
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
-            //
-            // This first device is the output of the map.
+        // Define the devices managed by this driver.
+        //
+        // This first device is the output of the map.
 
-            let d_output =
-                core.add_ro_device(output_name, None, max_history).await?;
+        let d_output =
+            core.add_ro_device(output_name, None, max_history).await?;
 
-            // This device is settable. Any setting is forwarded to
-            // the backend.
+        // This device is settable. Any setting is forwarded to
+        // the backend.
 
-            let d_index =
-                core.add_rw_device(index_name, None, max_history).await?;
+        let d_index = core.add_rw_device(index_name, None, max_history).await?;
 
-            Ok(Devices { d_output, d_index })
-        })
+        Ok(Devices { d_output, d_index })
     }
 }
 
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
         let init_index = Instance::get_cfg_init_val(cfg);
         let def_value = Instance::get_cfg_def_val(cfg);
         let values = if let Ok(ref def_value) = def_value {
@@ -240,7 +235,7 @@ impl driver::API for Instance {
             Ok(vec![])
         };
 
-        async move { Ok(Box::new(Instance::new(init_index?, def_value?, values?))) }
+        Ok(Box::new(Instance::new(init_index?, def_value?, values?)))
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {

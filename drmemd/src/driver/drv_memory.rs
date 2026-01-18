@@ -174,50 +174,47 @@ impl Instance {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
+    ) -> Result<Self> {
         let vars = Self::get_cfg_vars(cfg);
+        let mut devs = vec![];
 
-        Box::pin(async move {
-            let mut devs = vec![];
+        for (name, init_val) in vars?.drain(..) {
+            // This device is settable. Any setting is forwarded to
+            // the backend.
 
-            for (name, init_val) in vars?.drain(..) {
-                // This device is settable. Any setting is forwarded
-                // to the backend.
+            let mut entry: (
+                driver::ReadWriteDevice<device::Value>,
+                TypeChecker,
+            ) = (
+                core.add_rw_device(name, None, max_history).await?,
+                get_validator(&init_val),
+            );
 
-                let mut entry: (
-                    driver::ReadWriteDevice<device::Value>,
-                    TypeChecker,
-                ) = (
-                    core.add_rw_device(name, None, max_history).await?,
-                    get_validator(&init_val),
-                );
+            // If the user configured an initial value and there was
+            // no previous value or the previous value was of a
+            // different type, immediately set it with the initial
+            // value.
 
-                // If the user configured an initial value and there
-                // was no previous value or the previous value was of
-                // a different type, immediately set it with the
-                // initial value.
-
-                if entry
-                    .0
-                    .get_last()
-                    .map(|v| !v.is_same_type(&init_val))
-                    .unwrap_or(true)
-                {
-                    entry.0.report_update(init_val).await
-                }
-
-                // Add the entry to the driver's set of devices.
-
-                devs.push(entry)
+            if entry
+                .0
+                .get_last()
+                .map(|v| !v.is_same_type(&init_val))
+                .unwrap_or(true)
+            {
+                entry.0.report_update(init_val).await
             }
 
-            Ok(Devices { set: devs })
-        })
+            // Add the entry to the driver's set of devices.
+
+            devs.push(entry)
+        }
+
+        Ok(Devices { set: devs })
     }
 }
 

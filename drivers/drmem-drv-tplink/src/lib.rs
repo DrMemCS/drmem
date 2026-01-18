@@ -35,7 +35,7 @@ use drmem_api::{
     },
     Error, Result,
 };
-use futures::{Future, FutureExt};
+use futures::FutureExt;
 use std::convert::Infallible;
 use std::net::SocketAddrV4;
 use tokio::{
@@ -86,45 +86,42 @@ impl ResettableState for DevType {
 
 impl Registrator for DevType {
     // Defines the registration interface for the device set.
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         drc: &'a mut RequestChan,
         cfg: &'a DriverConfig,
         override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        async move {
-            match cfg.get("type") {
-                Some(toml::value::Value::String(dtype)) => match dtype.as_str()
-                {
-                    "outlet" | "switch" => Ok(DevType::Switch(
-                        classes::Switch::register_devices(
-                            drc,
-                            cfg,
-                            override_timeout,
-                            max_history,
-                        )
-                        .await?,
-                    )),
-                    "dimmer" => Ok(DevType::Dimmer(
-                        classes::Dimmer::register_devices(
-                            drc,
-                            cfg,
-                            override_timeout,
-                            max_history,
-                        )
-                        .await?,
-                    )),
-                    _ => Err(Error::ConfigError(String::from(
-                        "'type' must be \"dimmer\", \"outlet\", or \"switch\"",
-                    ))),
-                },
-                Some(_) => Err(Error::ConfigError(String::from(
-                    "'type' config parameter should be a string",
+    ) -> Result<Self> {
+        match cfg.get("type") {
+            Some(toml::value::Value::String(dtype)) => match dtype.as_str() {
+                "outlet" | "switch" => Ok(DevType::Switch(
+                    classes::Switch::register_devices(
+                        drc,
+                        cfg,
+                        override_timeout,
+                        max_history,
+                    )
+                    .await?,
+                )),
+                "dimmer" => Ok(DevType::Dimmer(
+                    classes::Dimmer::register_devices(
+                        drc,
+                        cfg,
+                        override_timeout,
+                        max_history,
+                    )
+                    .await?,
+                )),
+                _ => Err(Error::ConfigError(String::from(
+                    "'type' must be \"dimmer\", \"outlet\", or \"switch\"",
                 ))),
-                None => Err(Error::ConfigError(String::from(
-                    "missing 'type' parameter in config",
-                ))),
-            }
+            },
+            Some(_) => Err(Error::ConfigError(String::from(
+                "'type' config parameter should be a string",
+            ))),
+            None => Err(Error::ConfigError(String::from(
+                "missing 'type' parameter in config",
+            ))),
         }
     }
 }
@@ -851,19 +848,15 @@ impl driver::API for Instance {
     // This driver doesn't store any data in its instance; it's all
     // stored in local variables in the `.run()` method.
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
         let cfg_addr = Instance::get_cfg_address(cfg);
 
-        async {
-            Ok(Box::new(Instance {
-                addr: cfg_addr?,
-                reported_error: None,
-                buf: [0; BUF_TOTAL],
-                poll_timeout: Duration::from_secs(0),
-            }))
-        }
+        Ok(Box::new(Instance {
+            addr: cfg_addr?,
+            reported_error: None,
+            buf: [0; BUF_TOTAL],
+            poll_timeout: Duration::from_secs(0),
+        }))
     }
 
     // Main run loop for the driver.

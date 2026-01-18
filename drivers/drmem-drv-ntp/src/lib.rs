@@ -4,7 +4,6 @@ use drmem_api::{
     Error, Result,
 };
 use std::convert::Infallible;
-use std::future::Future;
 use std::{
     net::{SocketAddr, SocketAddrV4},
     str,
@@ -363,12 +362,12 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
+    ) -> Result<Self> {
         // It's safe to use `.unwrap()` for these names because, in a
         // fully-tested, released version of this driver, we would
         // have seen and fixed any panics.
@@ -378,26 +377,23 @@ impl driver::Registrator for Devices {
         let offset_name = "offset".parse::<device::Base>().unwrap();
         let delay_name = "delay".parse::<device::Base>().unwrap();
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
+        // Define the devices managed by this driver.
 
-            let d_state =
-                core.add_ro_device(state_name, None, max_history).await?;
-            let d_source =
-                core.add_ro_device(source_name, None, max_history).await?;
-            let d_offset = core
-                .add_ro_device(offset_name, Some("ms"), max_history)
-                .await?;
-            let d_delay = core
-                .add_ro_device(delay_name, Some("ms"), max_history)
-                .await?;
+        let d_state = core.add_ro_device(state_name, None, max_history).await?;
+        let d_source =
+            core.add_ro_device(source_name, None, max_history).await?;
+        let d_offset = core
+            .add_ro_device(offset_name, Some("ms"), max_history)
+            .await?;
+        let d_delay = core
+            .add_ro_device(delay_name, Some("ms"), max_history)
+            .await?;
 
-            Ok(Devices {
-                d_state,
-                d_source,
-                d_offset,
-                d_delay,
-            })
+        Ok(Devices {
+            d_state,
+            d_source,
+            d_offset,
+            d_delay,
         })
     }
 }
@@ -405,26 +401,18 @@ impl driver::Registrator for Devices {
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        let addr = Instance::get_cfg_address(cfg);
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
+        let addr = Instance::get_cfg_address(cfg)?;
+        let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();
 
-        async move {
-            // Validate the configuration.
+        Span::current().record("cfg", addr.to_string());
 
-            let addr = addr?;
-            let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();
-
-            Span::current().record("cfg", addr.to_string());
-
-            if let Ok(sock) = UdpSocket::bind(loc_if).await {
-                if sock.connect(addr).await.is_ok() {
-                    return Ok(Box::new(Instance { sock, seq: 1 }));
-                }
+        if let Ok(sock) = UdpSocket::bind(loc_if).await {
+            if sock.connect(addr).await.is_ok() {
+                return Ok(Box::new(Instance { sock, seq: 1 }));
             }
-            Err(Error::OperationError("couldn't create socket".to_owned()))
         }
+        Err(Error::OperationError("couldn't create socket".to_owned()))
     }
 
     async fn run<'a>(

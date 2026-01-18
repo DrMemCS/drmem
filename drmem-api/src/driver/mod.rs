@@ -2,8 +2,7 @@
 //! core of DrMem.
 
 use crate::types::{device, Error};
-use std::future::Future;
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 use tokio::{
     sync::{mpsc, oneshot},
     time::Duration,
@@ -274,7 +273,7 @@ pub trait Registrator: ResettableState + Sized + Send {
         cfg: &'a DriverConfig,
         override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a;
+    ) -> impl Future<Output = Result<Self>> + Send;
 }
 
 /// All drivers implement the `driver::API` trait.
@@ -313,7 +312,7 @@ pub trait API: Send + Sync {
     /// bound.
     fn create_instance(
         cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send + '_;
+    ) -> impl Future<Output = Result<Box<Self>>> + Send;
 
     /// Runs the instance of the driver.
     ///
@@ -326,5 +325,5 @@ pub trait API: Send + Sync {
     fn run<'a>(
         &'a mut self,
         devices: &'a mut Self::HardwareType,
-    ) -> impl Future<Output = Infallible> + Send + 'a;
+    ) -> impl Future<Output = Infallible> + Send;
 }

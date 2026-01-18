@@ -20,7 +20,6 @@ use crate::driver::{
     ro_device::ReadOnlyDevice, shared_rw_device::SharedReadWriteDevice,
     DriverConfig, Registrator, RequestChan, Result,
 };
-use std::future::Future;
 use tokio::time::Duration;
 
 /// Defines the common API used by Dimmers.
@@ -37,47 +36,39 @@ pub struct Dimmer {
 }
 
 impl Registrator for Dimmer {
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         drc: &'a mut RequestChan,
         _cfg: &DriverConfig,
         override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        let nm_error = "error".parse();
-        let nm_brightness = "brightness".parse();
-        let nm_indicator = "indicator".parse();
+    ) -> Result<Self> {
+        let nm_error = "error".parse()?;
+        let nm_brightness = "brightness".parse()?;
+        let nm_indicator = "indicator".parse()?;
 
-        async move {
-            // Report any errors before creating any device channels.
+        // Build the set of channels.
 
-            let nm_error = nm_error?;
-            let nm_brightness = nm_brightness?;
-            let nm_indicator = nm_indicator?;
-
-            // Build the set of channels.
-
-            Ok(Dimmer {
-                error: drc
-                    .add_ro_device::<bool>(nm_error, None, max_history)
-                    .await?,
-                brightness: drc
-                    .add_shared_rw_device::<f64>(
-                        nm_brightness,
-                        Some("%"),
-                        override_timeout,
-                        max_history,
-                    )
-                    .await?,
-                indicator: drc
-                    .add_shared_rw_device::<bool>(
-                        nm_indicator,
-                        None,
-                        override_timeout,
-                        max_history,
-                    )
-                    .await?,
-            })
-        }
+        Ok(Dimmer {
+            error: drc
+                .add_ro_device::<bool>(nm_error, None, max_history)
+                .await?,
+            brightness: drc
+                .add_shared_rw_device::<f64>(
+                    nm_brightness,
+                    Some("%"),
+                    override_timeout,
+                    max_history,
+                )
+                .await?,
+            indicator: drc
+                .add_shared_rw_device::<bool>(
+                    nm_indicator,
+                    None,
+                    override_timeout,
+                    max_history,
+                )
+                .await?,
+        })
     }
 }
 

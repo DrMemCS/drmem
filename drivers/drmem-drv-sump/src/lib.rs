@@ -4,7 +4,6 @@ use drmem_api::{
     Error, Result,
 };
 use std::convert::Infallible;
-use std::future::Future;
 use std::net::SocketAddrV4;
 use tokio::{
     io::{self, AsyncReadExt},
@@ -281,42 +280,39 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         core: &'a mut driver::RequestChan,
         _: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
+    ) -> Result<Self> {
         let service_name = "service".parse::<device::Base>().unwrap();
         let state_name = "state".parse::<device::Base>().unwrap();
         let duty_name = "duty".parse::<device::Base>().unwrap();
         let in_flow_name = "in-flow".parse::<device::Base>().unwrap();
         let dur_name = "duration".parse::<device::Base>().unwrap();
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
+        // Define the devices managed by this driver.
 
-            let d_service =
-                core.add_ro_device(service_name, None, max_history).await?;
-            let d_state =
-                core.add_ro_device(state_name, None, max_history).await?;
-            let d_duty = core
-                .add_ro_device(duty_name, Some("%"), max_history)
-                .await?;
-            let d_inflow = core
-                .add_ro_device(in_flow_name, Some("gpm"), max_history)
-                .await?;
-            let d_duration = core
-                .add_ro_device(dur_name, Some("min"), max_history)
-                .await?;
+        let d_service =
+            core.add_ro_device(service_name, None, max_history).await?;
+        let d_state = core.add_ro_device(state_name, None, max_history).await?;
+        let d_duty = core
+            .add_ro_device(duty_name, Some("%"), max_history)
+            .await?;
+        let d_inflow = core
+            .add_ro_device(in_flow_name, Some("gpm"), max_history)
+            .await?;
+        let d_duration = core
+            .add_ro_device(dur_name, Some("min"), max_history)
+            .await?;
 
-            Ok(Devices {
-                d_service,
-                d_state,
-                d_duty,
-                d_inflow,
-                d_duration,
-            })
+        Ok(Devices {
+            d_service,
+            d_state,
+            d_duty,
+            d_inflow,
+            d_duration,
         })
     }
 }
@@ -324,32 +320,23 @@ impl driver::Registrator for Devices {
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        let addr = Instance::get_cfg_address(cfg);
-        let gpm = Instance::get_cfg_gpm(cfg);
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
+        let addr = Instance::get_cfg_address(cfg)?;
+        let gpm = Instance::get_cfg_gpm(cfg)?;
 
-        async move {
-            // Validate the configuration.
+        Span::current().record("cfg", addr.to_string());
 
-            let addr = addr?;
-            let gpm = gpm?;
+        // Connect with the remote process that is connected to the
+        // sump pump.
 
-            Span::current().record("cfg", addr.to_string());
+        let (rx, _tx) = Instance::connect(&addr)?.into_split();
 
-            // Connect with the remote process that is connected to
-            // the sump pump.
-
-            let (rx, _tx) = Instance::connect(&addr)?.into_split();
-
-            Ok(Box::new(Instance {
-                state: State::Unknown,
-                gpm,
-                rx,
-                _tx,
-            }))
-        }
+        Ok(Box::new(Instance {
+            state: State::Unknown,
+            gpm,
+            rx,
+            _tx,
+        }))
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {

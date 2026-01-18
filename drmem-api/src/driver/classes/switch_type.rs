@@ -20,7 +20,6 @@ use crate::driver::{
     ro_device::ReadOnlyDevice, shared_rw_device::SharedReadWriteDevice,
     DriverConfig, Registrator, RequestChan, Result,
 };
-use std::future::Future;
 use tokio::time::Duration;
 
 /// Defines the common API used by Switches.
@@ -37,43 +36,37 @@ pub struct Switch {
 }
 
 impl Registrator for Switch {
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         drc: &'a mut RequestChan,
         _cfg: &DriverConfig,
         override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        let nm_error = "error".parse();
-        let nm_state = "state".parse();
-        let nm_indicator = "indicator".parse();
+    ) -> Result<Self> {
+        let nm_error = "error".parse()?;
+        let nm_state = "state".parse()?;
+        let nm_indicator = "indicator".parse()?;
 
-        async move {
-            let nm_error = nm_error?;
-            let nm_state = nm_state?;
-            let nm_indicator = nm_indicator?;
-
-            Ok(Switch {
-                error: drc
-                    .add_ro_device::<bool>(nm_error, None, max_history)
-                    .await?,
-                state: drc
-                    .add_shared_rw_device::<bool>(
-                        nm_state,
-                        None,
-                        override_timeout,
-                        max_history,
-                    )
-                    .await?,
-                indicator: drc
-                    .add_shared_rw_device::<bool>(
-                        nm_indicator,
-                        None,
-                        override_timeout,
-                        max_history,
-                    )
-                    .await?,
-            })
-        }
+        Ok(Switch {
+            error: drc
+                .add_ro_device::<bool>(nm_error, None, max_history)
+                .await?,
+            state: drc
+                .add_shared_rw_device::<bool>(
+                    nm_state,
+                    None,
+                    override_timeout,
+                    max_history,
+                )
+                .await?,
+            indicator: drc
+                .add_shared_rw_device::<bool>(
+                    nm_indicator,
+                    None,
+                    override_timeout,
+                    max_history,
+                )
+                .await?,
+        })
     }
 }
 
