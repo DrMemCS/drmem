@@ -36,8 +36,8 @@ pub struct Dimmer {
 }
 
 impl Registrator for Dimmer {
-    async fn register_devices<'a>(
-        drc: &'a mut RequestChan,
+    async fn register_devices(
+        drc: &mut RequestChan,
         _cfg: &DriverConfig,
         override_timeout: Option<Duration>,
         max_history: Option<usize>,

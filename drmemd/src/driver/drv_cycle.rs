@@ -199,8 +199,8 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    async fn register_devices<'a>(
-        core: &'a mut driver::RequestChan,
+    async fn register_devices(
+        core: &mut driver::RequestChan,
         _cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,

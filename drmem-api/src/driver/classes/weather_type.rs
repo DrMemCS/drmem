@@ -64,8 +64,8 @@ impl Weather {
 }
 
 impl Registrator for Weather {
-    async fn register_devices<'a>(
-        drc: &'a mut RequestChan,
+    async fn register_devices(
+        drc: &mut RequestChan,
         cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,

@@ -466,9 +466,9 @@ impl Instance {
 
     // Handles incoming settings for brightness.
 
-    async fn handle_brightness_setting<'a>(
+    async fn handle_brightness_setting(
         &mut self,
-        s: &'a mut TcpStream,
+        s: &mut TcpStream,
         v: f64,
         reply: Option<driver::SettingResponder<f64>>,
     ) -> Result<()> {
@@ -507,9 +507,9 @@ impl Instance {
 
     // Handles incoming settings for controlling the LED indicator.
 
-    async fn handle_led_setting<'a>(
+    async fn handle_led_setting(
         &mut self,
-        s: &'a mut TcpStream,
+        s: &mut TcpStream,
         v: bool,
         reply: Option<driver::SettingResponder<bool>>,
     ) -> Result<()> {
@@ -679,9 +679,9 @@ impl Instance {
         }
     }
 
-    async fn manage_switch<'a>(
+    async fn manage_switch(
         &mut self,
-        s: &'a mut TcpStream,
+        s: &mut TcpStream,
         dev: &mut classes::Switch,
     ) -> bool {
         // Get mutable references to the setting channels.
@@ -750,12 +750,12 @@ impl Instance {
                 self.poll_timeout = Duration::from_secs(0);
             }
         }
-        return true;
+        true
     }
 
-    async fn manage_dimmer<'a>(
+    async fn manage_dimmer(
         &mut self,
-        s: &'a mut TcpStream,
+        s: &mut TcpStream,
         dev: &mut classes::Dimmer,
     ) -> bool {
         // Get mutable references to the setting channels.
@@ -821,7 +821,7 @@ impl Instance {
                 self.poll_timeout = Duration::from_secs(0);
             }
         }
-        return true;
+        true
     }
 
     async fn main_loop(
