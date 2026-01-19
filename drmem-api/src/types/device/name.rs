@@ -10,7 +10,7 @@
 //! is specified for the driver instance and the driver provides the
 //! base names for its set of devices.
 use crate::{types::Error, Result};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Hash, Eq)]

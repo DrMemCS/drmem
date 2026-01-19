@@ -1,6 +1,6 @@
 use crate::backends::store;
 use drmem_api::{Error, Result};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use std::{collections::HashMap, env, sync::Arc};
 use toml::{self, value};
 use tracing::Level;

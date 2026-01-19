@@ -1,4 +1,4 @@
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 #[derive(Deserialize, Clone)]

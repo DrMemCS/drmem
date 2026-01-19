@@ -370,7 +370,6 @@ dependencies = [
  "noop-waker",
  "palette",
  "serde",
- "serde_derive",
  "tokio",
  "tokio-stream",
  "toml",
@@ -382,6 +381,7 @@ name = "drmem-drv-ntp"
 version = "0.6.0"
 dependencies = [
  "drmem-api",
+ "serde",
  "tokio",
  "toml",
  "tracing",
@@ -393,6 +393,7 @@ name = "drmem-drv-sump"
 version = "0.6.0"
 dependencies = [
  "drmem-api",
+ "serde",
  "socket2 0.5.10",
  "tokio",
  "toml",
@@ -407,7 +408,6 @@ dependencies = [
  "drmem-api",
  "futures",
  "serde",
- "serde_derive",
  "serde_json",
  "tokio",
  "toml",
@@ -421,6 +421,7 @@ version = "0.6.0"
 dependencies = [
  "drmem-api",
  "reqwest",
+ "serde",
  "tokio",
  "toml",
  "tracing",
@@ -455,7 +456,6 @@ dependencies = [
  "rustls-pemfile 1.0.4",
  "rustls-pki-types",
  "serde",
- "serde_derive",
  "tokio",
  "tokio-stream",
  "toml",

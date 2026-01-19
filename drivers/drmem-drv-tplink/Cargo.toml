@@ -14,7 +14,6 @@ keywords = ["control-system", "automation"]
 doctest = false
 
 [dependencies]
-
 toml.workspace = true
 toml.default-features = false
 
@@ -34,9 +33,6 @@ tracing-subscriber.default-features = false
 serde.workspace = true
 serde.default-features = false
 serde.features = ["derive"]
-
-serde_derive.workspace = true
-serde_derive.default-features = false
 
 serde_json.workspace = true
 serde_json.default-features = false

@@ -17,7 +17,6 @@ tracing = { version = "0.1", default-features = false, features = ["attributes"]
 tracing-subscriber = { version = "0.3", default-features = false }
 serde = { version = "1", default-features = false, features = ["rc"] }
 serde_json = { version = "1", default-features = false }
-serde_derive = { version = "1", default-features = false }
 palette = { version = "0.7", default-features = false }
 
 # Profiles used by all binaries and packages.
