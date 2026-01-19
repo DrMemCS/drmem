@@ -473,7 +473,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_live_stream() {
         let mut db = SimpleStore(HashMap::new());
-        let name = "test:device".parse::<device::Name>().unwrap();
+        let name: device::Name = "test:device".try_into().unwrap();
 
         if let Ok(f) = db
             .register_read_only_device("test", &name, None, None)
@@ -557,7 +557,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_start_stream() {
         let mut db = SimpleStore(HashMap::new());
-        let name = "test:device".parse::<device::Name>().unwrap();
+        let name: device::Name = "test:device".try_into().unwrap();
 
         if let Ok(f) = db
             .register_read_only_device("test", &name, None, None)
@@ -644,7 +644,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_end_stream() {
         let mut db = SimpleStore(HashMap::new());
-        let name = "test:device".parse::<device::Name>().unwrap();
+        let name: device::Name = "test:device".try_into().unwrap();
 
         if let Ok(f) = db
             .register_read_only_device("test", &name, None, None)
@@ -688,7 +688,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_start_end_stream() {
         let mut db = SimpleStore(HashMap::new());
-        let name = "test:device".parse::<device::Name>().unwrap();
+        let name: device::Name = "test:device".try_into().unwrap();
 
         if let Ok(f) = db
             .register_read_only_device("test", &name, None, None)
@@ -874,7 +874,7 @@ mod tests {
     #[tokio::test]
     async fn test_ro_registration() {
         let mut db = SimpleStore(HashMap::new());
-        let name = "misc:junk".parse::<device::Name>().unwrap();
+        let name: device::Name = "misc:junk".try_into().unwrap();
 
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
@@ -935,7 +935,7 @@ mod tests {
     #[tokio::test]
     async fn test_rw_registration() {
         let mut db = SimpleStore(HashMap::new());
-        let name = "misc:junk".parse::<device::Name>().unwrap();
+        let name: device::Name = "misc:junk".try_into().unwrap();
 
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
@@ -1026,7 +1026,7 @@ mod tests {
     #[tokio::test]
     async fn test_closure() {
         let di = DeviceInfo::create(String::from("test"), None, None);
-        let name = "misc:junk".parse::<device::Name>().unwrap();
+        let name: device::Name = "misc:junk".try_into().unwrap();
         let f = mk_report_func(&di, &name);
 
         assert_eq!(di.reading.lock().unwrap().1, None);

@@ -10,25 +10,19 @@ use tokio::{
     sync::{mpsc, oneshot},
     time::Duration,
 };
-use toml::value;
 
 use super::Result;
 
 /// Represents the type used to specify the name of a driver.
 pub type Name = Arc<str>;
 
-/// Represents how configuration information is given to a driver.
-/// Since each driver can have vastly different requirements, the
-/// config structure needs to be as general as possible. A
-/// `DriverConfig` type is a map with `String` keys and `toml::Value`
-/// values.
-pub type DriverConfig = value::Table;
-
 pub mod classes;
+mod config;
 mod ro_device;
 mod rw_device;
 mod shared_rw_device;
 
+pub use config::DriverConfig;
 pub use ro_device::{ReadOnlyDevice, ReportReading};
 pub use rw_device::{
     ReadWriteDevice, RxDeviceSetting, SettingRequest, SettingResponder,

@@ -1,12 +1,16 @@
-use crate::{
-    driver::{self, DriverConfig, Registrator, RequestChan, Result},
-    Error,
-};
+use crate::driver::{self, DriverConfig, Registrator, RequestChan, Result};
 use tokio::time::Duration;
 
+#[derive(serde::Deserialize)]
 pub enum Units {
     English,
     Metric,
+}
+
+#[derive(serde::Deserialize)]
+struct WeatherCfg {
+    station: String,
+    units: Units,
 }
 
 pub struct Weather {
@@ -30,38 +34,6 @@ pub struct Weather {
     pub wndspd: driver::ReadOnlyDevice<f64>,
 }
 
-impl Weather {
-    fn get_cfg_units(cfg: &DriverConfig) -> Result<Units> {
-        match cfg.get("units") {
-            Some(toml::value::Value::String(val)) => match val.as_str() {
-                "metric" => Ok(Units::Metric),
-                "imperial" => Ok(Units::English),
-                _ => Err(Error::ConfigError(String::from(
-                    "'units' parameter should be \"imperial\" or \"metric\"",
-                ))),
-            },
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'units' parameter should be a string",
-            ))),
-            None => Ok(Units::Metric),
-        }
-    }
-
-    fn get_cfg_station(cfg: &DriverConfig) -> Result<String> {
-        match cfg.get("station") {
-            Some(toml::value::Value::String(station)) => {
-                Ok(station.to_string())
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'station' config parameter should be a string",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'station' parameter in config",
-            ))),
-        }
-    }
-}
-
 impl Registrator for Weather {
     async fn register_devices(
         drc: &mut RequestChan,
@@ -69,15 +41,14 @@ impl Registrator for Weather {
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let station = Self::get_cfg_station(cfg)?;
-        let units = Self::get_cfg_units(cfg)?;
+        let cfg: WeatherCfg = cfg.parse_into()?;
 
-        let temp_unit = Some(if let Units::English = units {
+        let temp_unit = Some(if let Units::English = cfg.units {
             "°F"
         } else {
             "°C"
         });
-        let speed_unit = Some(if let Units::English = units {
+        let speed_unit = Some(if let Units::English = cfg.units {
             "mph"
         } else {
             "km/h"
@@ -95,7 +66,7 @@ impl Registrator for Weather {
         let prec_rate = drc
             .add_ro_device(
                 "precip-rate",
-                Some(if let Units::English = units {
+                Some(if let Units::English = cfg.units {
                     "in/hr"
                 } else {
                     "mm/hr"
@@ -107,7 +78,7 @@ impl Registrator for Weather {
         let prec_total = drc
             .add_ro_device(
                 "precip-total",
-                Some(if let Units::English = units {
+                Some(if let Units::English = cfg.units {
                     "in"
                 } else {
                     "mm"
@@ -119,7 +90,7 @@ impl Registrator for Weather {
         let prec_last_total = drc
             .add_ro_device(
                 "precip-last-total",
-                Some(if let Units::English = units {
+                Some(if let Units::English = cfg.units {
                     "in"
                 } else {
                     "mm"
@@ -131,7 +102,7 @@ impl Registrator for Weather {
         let pressure = drc
             .add_ro_device(
                 "pressure",
-                Some(if let Units::English = units {
+                Some(if let Units::English = cfg.units {
                     "inHg"
                 } else {
                     "hPa"
@@ -162,8 +133,8 @@ impl Registrator for Weather {
             .await?;
 
         Ok(Weather {
-            station,
-            units,
+            station: cfg.station,
+            units: cfg.units,
             dewpt,
             htidx,
             humidity,

@@ -1,7 +1,7 @@
 use drmem_api::{
     device,
     driver::{self, DriverConfig, ResettableState},
-    Error, Result,
+    Result,
 };
 use std::convert::Infallible;
 use tokio::time::Duration;
@@ -12,6 +12,12 @@ use tokio::time::Duration;
 enum LatchState {
     Idle,
     Tripped,
+}
+
+#[derive(serde::Deserialize)]
+struct InstanceConfig {
+    disabled: device::Value,
+    enabled: device::Value,
 }
 
 pub struct Instance {
@@ -36,28 +42,6 @@ impl<'a> Instance {
             state: LatchState::Idle,
             active_value,
             inactive_value,
-        }
-    }
-
-    // Validates the active value parameter.
-
-    fn get_active_value(cfg: &DriverConfig) -> Result<device::Value> {
-        match cfg.get("enabled") {
-            Some(value) => value.try_into(),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'enabled' parameter in config",
-            ))),
-        }
-    }
-
-    // Validates the inactive value parameter.
-
-    fn get_inactive_value(cfg: &DriverConfig) -> Result<device::Value> {
-        match cfg.get("disabled") {
-            Some(value) => value.try_into(),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'disabled' parameter in config",
-            ))),
         }
     }
 
@@ -125,12 +109,11 @@ impl driver::API for Instance {
     type HardwareType = Devices;
 
     async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
-        let active_value = Instance::get_active_value(cfg)?;
-        let inactive_value = Instance::get_inactive_value(cfg)?;
+        let cfg: InstanceConfig = cfg.parse_into()?;
 
         // Build and return the future.
 
-        Ok(Box::new(Instance::new(active_value, inactive_value)))
+        Ok(Box::new(Instance::new(cfg.enabled, cfg.disabled)))
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {

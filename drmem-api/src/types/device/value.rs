@@ -1,4 +1,8 @@
 use crate::types::Error;
+use serde::{
+    de::{self, Visitor},
+    Deserialize, Deserializer,
+};
 use std::{convert::TryFrom, fmt, sync::Arc};
 
 /// Defines fundamental types that can be associated with a device.
@@ -319,10 +323,110 @@ impl TryFrom<&toml::value::Value> for Value {
     }
 }
 
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ValueVisitor;
+
+        impl<'de> Visitor<'de> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a boolean, integer, float, string, or color")
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(Value::Bool(v))
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                i32::try_from(v).map(Value::Int).map_err(|_| {
+                    E::custom("integer out of range for Value::Int")
+                })
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if v <= i32::MAX as u64 {
+                    Ok(Value::Int(v as i32))
+                } else {
+                    Err(E::custom("integer out of range for Value::Int"))
+                }
+            }
+
+            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(Value::Flt(v))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let bytes = v.as_bytes();
+
+                if (bytes.len() == 7 || bytes.len() == 9) && bytes[0] == b'#' {
+                    if let Some(col) = parse_color(&bytes[1..]) {
+                        return Ok(col);
+                    }
+                }
+                Ok(Value::Str(Arc::from(v)))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(&v)
+            }
+        }
+
+        deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::convert::TryFrom;
+
+    #[derive(serde::Deserialize)]
+    struct AllTypes {
+        bool_val: Value,
+        int_val: Value,
+        flt_val: Value,
+        str_val: Value,
+        col_val: Value,
+    }
+
+    #[test]
+    fn test_de_device_values() {
+        let cfg: AllTypes = toml::from_str(
+            "
+bool_val = true
+int_val = 123
+flt_val = 1234.5
+str_val = \"hello\"
+col_val = \"#ff00ff\"
+",
+        )
+        .unwrap();
+
+        assert_eq!(cfg.bool_val, Value::Bool(true));
+        assert_eq!(cfg.int_val, Value::Int(123));
+        assert_eq!(cfg.flt_val, Value::Flt(1234.5));
+        assert_eq!(cfg.str_val, Value::Str("hello".into()));
+        assert_eq!(
+            cfg.col_val,
+            Value::Color(palette::LinSrgba::new(255, 0, 255, 255))
+        );
+    }
 
     #[test]
     fn test_device_values_to() {

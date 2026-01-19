@@ -5,7 +5,7 @@ use std::{collections::HashMap, env, sync::Arc};
 use toml::{self, value};
 use tracing::Level;
 
-use drmem_api::{device, driver::DriverConfig};
+use drmem_api::device;
 
 fn def_log_level() -> String {
     String::from("warn")
@@ -72,7 +72,7 @@ pub struct Driver {
     pub name: String,
     pub prefix: device::Path,
     pub max_history: Option<usize>,
-    pub cfg: Option<DriverConfig>,
+    pub cfg: Option<value::Table>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -566,7 +566,7 @@ prefix = "null"
                 assert_eq!(cfg.driver[0].name, "none");
                 assert_eq!(
                     cfg.driver[0].prefix,
-                    "null".parse::<device::Path>().unwrap()
+                    TryInto::<device::Path>::try_into("null").unwrap()
                 );
                 assert_eq!(cfg.driver[0].max_history, None);
             }
@@ -590,7 +590,7 @@ max_history = 10000
                 assert_eq!(cfg.driver[0].name, "none");
                 assert_eq!(
                     cfg.driver[0].prefix,
-                    "null".parse::<device::Path>().unwrap()
+                    TryInto::<device::Path>::try_into("null").unwrap()
                 );
                 assert_eq!(cfg.driver[0].max_history, Some(10000));
             }
@@ -774,7 +774,10 @@ outputs = { bulb = "room:bulb:enable" }
                 assert!(cfg.logic[0].inputs.is_empty());
                 assert_eq!(
                     cfg.logic[0].outputs.get("bulb"),
-                    Some(&"room:bulb:enable".parse::<device::Name>().unwrap())
+                    Some(
+                        &TryInto::<device::Name>::try_into("room:bulb:enable")
+                            .unwrap()
+                    )
                 );
             }
             Err(e) => panic!("TOML parse error: {}", e),
@@ -800,7 +803,10 @@ outputs = {}
                 assert!(cfg.logic[0].outputs.is_empty());
                 assert_eq!(
                     cfg.logic[0].inputs.get("bulb"),
-                    Some(&"room:bulb:enable".parse::<device::Name>().unwrap())
+                    Some(
+                        &TryInto::<device::Name>::try_into("room:bulb:enable")
+                            .unwrap()
+                    )
                 );
             }
             Err(e) => panic!("TOML parse error: {}", e),

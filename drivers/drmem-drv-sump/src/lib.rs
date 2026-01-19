@@ -139,6 +139,12 @@ impl State {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct InstanceConfig {
+    addr: SocketAddrV4,
+    gpm: f64,
+}
+
 pub struct Instance {
     state: State,
     gpm: f64,
@@ -177,45 +183,6 @@ impl Instance {
             dur => {
                 format!("{dur}s")
             }
-        }
-    }
-
-    // Attempts to pull the hostname/port for the remote process.
-
-    fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
-        match cfg.get("addr") {
-            Some(toml::value::Value::String(addr)) => {
-                if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                    Ok(addr)
-                } else {
-                    Err(Error::ConfigError(String::from(
-                        "'addr' not in hostname:port format",
-                    )))
-                }
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'addr' config parameter should be a string",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'addr' parameter in config",
-            ))),
-        }
-    }
-
-    // Attempts to pull the gal-per-min parameter from the driver's
-    // configuration. The value can be specified as an integer or
-    // floating point. It gets returned only as an `f64`.
-
-    fn get_cfg_gpm(cfg: &DriverConfig) -> Result<f64> {
-        match cfg.get("gpm") {
-            Some(toml::value::Value::Integer(gpm)) => Ok(*gpm as f64),
-            Some(toml::value::Value::Float(gpm)) => Ok(*gpm),
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'gpm' config parameter should be a number",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'gpm' parameter in config",
-            ))),
         }
     }
 
@@ -312,19 +279,18 @@ impl driver::API for Instance {
     type HardwareType = Devices;
 
     async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
-        let addr = Instance::get_cfg_address(cfg)?;
-        let gpm = Instance::get_cfg_gpm(cfg)?;
+        let cfg: InstanceConfig = cfg.parse_into()?;
 
-        Span::current().record("cfg", addr.to_string());
+        Span::current().record("cfg", cfg.addr.to_string());
 
         // Connect with the remote process that is connected to the
         // sump pump.
 
-        let (rx, _tx) = Instance::connect(&addr)?.into_split();
+        let (rx, _tx) = Instance::connect(&cfg.addr)?.into_split();
 
         Ok(Box::new(Instance {
             state: State::Unknown,
-            gpm,
+            gpm: cfg.gpm,
             rx,
             _tx,
         }))

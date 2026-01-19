@@ -1,7 +1,7 @@
 use drmem_api::{
     device,
     driver::{self, DriverConfig, ResettableState},
-    Error, Result,
+    Result,
 };
 use std::convert::Infallible;
 use tokio::time::{self, Duration};
@@ -13,6 +13,19 @@ use tracing::{self, debug};
 enum CycleState {
     Idle,
     Cycling,
+}
+
+#[derive(serde::Deserialize)]
+struct InstanceConfig {
+    millis: u64,
+    #[serde(default = "cfg_eab_default")]
+    enabled_at_boot: bool,
+    disabled: device::Value,
+    enabled: Vec<device::Value>,
+}
+
+fn cfg_eab_default() -> bool {
+    false
 }
 
 // The state of a driver instance.
@@ -48,79 +61,6 @@ impl Instance {
             enabled,
             index: 0,
             millis,
-        }
-    }
-
-    // Validates the time duration from the driver configuration.
-
-    fn get_cfg_millis(cfg: &DriverConfig) -> Result<Duration> {
-        match cfg.get("millis") {
-            Some(toml::value::Value::Integer(millis)) => {
-                // DrMem's official sample rate is 20 Hz, so the cycle
-                // shouldn't change faster than that. Limit the
-                // `cycle` driver's output to 20 hz so we can see the
-                // output change 20 times a second.
-                //
-                // XXX: Should there be a global constant in the
-                // drmem-api crate indicating the max sample rate?
-
-                if (50..=3_600_000).contains(millis) {
-                    Ok(Duration::from_millis(*millis as u64))
-                } else {
-                    Err(Error::ConfigError(String::from(
-                        "'millis' out of range",
-                    )))
-                }
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'millis' config parameter should be an integer",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'millis' parameter in config",
-            ))),
-        }
-    }
-
-    // Validates the enable-at-boot parameter.
-
-    fn get_cfg_enabled(cfg: &DriverConfig) -> Result<bool> {
-        match cfg.get("enabled_at_boot") {
-            Some(toml::value::Value::Boolean(level)) => Ok(*level),
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'enabled_at_boot' config parameter should be a boolean",
-            ))),
-            None => Ok(false),
-        }
-    }
-
-    // Validates the inactive value parameter.
-
-    fn get_inactive_value(cfg: &DriverConfig) -> Result<device::Value> {
-        match cfg.get("disabled") {
-            Some(value) => value.try_into(),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'disabled' parameter in config",
-            ))),
-        }
-    }
-
-    fn get_active_values(cfg: &DriverConfig) -> Result<Vec<device::Value>> {
-        match cfg.get("enabled") {
-            Some(toml::value::Value::Array(value)) => {
-                if value.len() > 1 {
-                    value.iter().map(|v| v.try_into()).collect()
-                } else {
-                    Err(Error::ConfigError(String::from(
-                        "'enabled' array should have at least 2 values",
-                    )))
-                }
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'enabled' parameter should be an array of values",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'enabled' parameter in config",
-            ))),
         }
     }
 
@@ -228,16 +168,13 @@ impl driver::API for Instance {
     type HardwareType = Devices;
 
     async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
-        let millis = Instance::get_cfg_millis(cfg)?;
-        let enabled_at_boot = Instance::get_cfg_enabled(cfg)?;
-        let disabled = Instance::get_inactive_value(cfg)?;
-        let enabled = Instance::get_active_values(cfg)?;
+        let cfg: InstanceConfig = cfg.parse_into()?;
 
         Ok(Box::new(Instance::new(
-            enabled_at_boot,
-            millis,
-            disabled,
-            enabled,
+            cfg.enabled_at_boot,
+            Duration::from_millis(cfg.millis),
+            cfg.disabled,
+            cfg.enabled,
         )))
     }
 
@@ -310,130 +247,91 @@ impl ResettableState for Devices {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use drmem_api::driver::API;
     use tokio::time::Duration;
 
     #[tokio::test]
     async fn test_cfg() {
         {
-            let mut cfg = DriverConfig::new();
+            let cfg = toml::from_str::<InstanceConfig>(
+                "millis = 500
+enabled_at_boot = true
+disabled = false
+enabled = [true, false]",
+            )
+            .unwrap();
 
-            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
-            cfg.insert(
-                "enabled_at_boot".to_owned(),
-                toml::value::Value::Boolean(true),
-            );
-            cfg.insert(
-                "disabled".to_owned(),
-                toml::value::Value::Boolean(false),
-            );
-            cfg.insert(
-                "enabled".to_owned(),
-                toml::value::Value::Array(vec![
-                    toml::value::Value::Boolean(true),
-                    toml::value::Value::Boolean(false),
-                ]),
-            );
-
-            let inst = Instance::create_instance(&cfg).await.unwrap();
-
-            assert_eq!(inst.enabled_at_boot, true);
-            assert_eq!(inst.millis, Duration::from_millis(500));
-            assert_eq!(inst.disabled, device::Value::Bool(false));
+            assert_eq!(cfg.enabled_at_boot, true);
+            assert_eq!(cfg.millis, 500);
+            assert_eq!(cfg.disabled, device::Value::Bool(false));
             assert_eq!(
-                inst.enabled,
+                cfg.enabled,
                 vec![device::Value::Bool(true), device::Value::Bool(false)]
             );
         }
 
         {
-            let mut cfg = DriverConfig::new();
+            let cfg = toml::from_str::<InstanceConfig>(
+                "millis = 500
+disabled = false
+enabled = [true, false]
+",
+            )
+            .unwrap();
 
-            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
-            cfg.insert(
-                "disabled".to_owned(),
-                toml::value::Value::Boolean(false),
-            );
-            cfg.insert(
-                "enabled".to_owned(),
-                toml::value::Value::Array(vec![
-                    toml::value::Value::Boolean(true),
-                    toml::value::Value::Boolean(false),
-                ]),
-            );
-
-            let inst = Instance::create_instance(&cfg).await.unwrap();
-
-            assert_eq!(inst.enabled_at_boot, false);
-            assert_eq!(inst.millis, Duration::from_millis(500));
-            assert_eq!(inst.disabled, device::Value::Bool(false));
+            assert_eq!(cfg.enabled_at_boot, false);
+            assert_eq!(cfg.millis, 500);
+            assert_eq!(cfg.disabled, device::Value::Bool(false));
             assert_eq!(
-                inst.enabled,
+                cfg.enabled,
                 vec![device::Value::Bool(true), device::Value::Bool(false)]
             );
         }
 
         {
-            let mut cfg = DriverConfig::new();
-
-            cfg.insert(
-                "disabled".to_owned(),
-                toml::value::Value::Boolean(false),
-            );
-            cfg.insert(
-                "enabled".to_owned(),
-                toml::value::Value::Array(vec![
-                    toml::value::Value::Boolean(true),
-                    toml::value::Value::Boolean(false),
-                ]),
+            let cfg = toml::from_str::<InstanceConfig>(
+                "
+disabled = false
+enabled = [true, false]",
             );
 
-            assert!(Instance::create_instance(&cfg).await.is_err());
+            assert!(cfg.is_err());
         }
 
         {
-            let mut cfg = DriverConfig::new();
-
-            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
-            cfg.insert(
-                "enabled".to_owned(),
-                toml::value::Value::Array(vec![
-                    toml::value::Value::Boolean(true),
-                    toml::value::Value::Boolean(false),
-                ]),
+            let cfg = toml::from_str::<InstanceConfig>(
+                "
+millis = 500
+enabled = [true, false]",
             );
 
-            assert!(Instance::create_instance(&cfg).await.is_err());
+            assert!(cfg.is_err());
         }
 
         {
-            let mut cfg = DriverConfig::new();
-
-            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
-            cfg.insert(
-                "disabled".to_owned(),
-                toml::value::Value::Boolean(false),
+            let cfg = toml::from_str::<InstanceConfig>(
+                "
+millis = 500
+disabled = false",
             );
 
-            assert!(Instance::create_instance(&cfg).await.is_err());
+            assert!(cfg.is_err());
         }
 
         {
-            let mut cfg = DriverConfig::new();
+            let cfg = toml::from_str::<InstanceConfig>(
+                "millis = 500
+disabled = false
+enabled = [true, false]",
+            )
+            .unwrap();
 
-            cfg.insert("millis".to_owned(), toml::value::Value::Integer(500));
-            cfg.insert(
-                "disabled".to_owned(),
-                toml::value::Value::Boolean(false),
+            assert_eq!(cfg.enabled_at_boot, false);
+            assert_eq!(cfg.millis, 500);
+            assert_eq!(cfg.disabled, device::Value::Bool(false));
+            assert_eq!(
+                cfg.enabled,
+                vec![device::Value::Bool(true), device::Value::Bool(false)]
             );
-            cfg.insert(
-                "enabled".to_owned(),
-                toml::value::Value::Array(vec![toml::value::Value::Boolean(
-                    true,
-                )]),
-            );
-
-            assert!(Instance::create_instance(&cfg).await.is_err());
         }
     }
 

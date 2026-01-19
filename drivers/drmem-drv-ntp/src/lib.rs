@@ -101,6 +101,11 @@ mod server {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct InstanceConfig {
+    addr: SocketAddrV4,
+}
+
 pub struct Instance {
     sock: UdpSocket,
     seq: u16,
@@ -113,28 +118,6 @@ impl Instance {
         "monitors an NTP server and reports its state";
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
-
-    // Attempts to pull the hostname/port for the remote process.
-
-    fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
-        match cfg.get("addr") {
-            Some(toml::value::Value::String(addr)) => {
-                if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                    Ok(addr)
-                } else {
-                    Err(Error::ConfigError(String::from(
-                        "'addr' not in hostname:port format",
-                    )))
-                }
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'addr' config parameter should be a string",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'addr' parameter in config",
-            ))),
-        }
-    }
 
     // Combines and returns the first two bytes from a buffer as a
     // big-endian, 16-bit value.
@@ -390,13 +373,13 @@ impl driver::API for Instance {
     type HardwareType = Devices;
 
     async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
-        let addr = Instance::get_cfg_address(cfg)?;
+        let cfg: InstanceConfig = cfg.parse_into()?;
         let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();
 
-        Span::current().record("cfg", addr.to_string());
+        Span::current().record("cfg", cfg.addr.to_string());
 
         if let Ok(sock) = UdpSocket::bind(loc_if).await {
-            if sock.connect(addr).await.is_ok() {
+            if sock.connect(cfg.addr).await.is_ok() {
                 return Ok(Box::new(Instance { sock, seq: 1 }));
             }
         }
@@ -480,6 +463,28 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use drmem_api::{driver::DriverConfig, Result};
+
+    // Helper function to build a config from a string view.
+
+    fn mk_cfg(text: &str) -> Result<InstanceConfig> {
+        Into::<DriverConfig>::into(
+            toml::from_str::<toml::value::Table>(text)
+                .map_err(|e| Error::ConfigError(format!("{}", e)))?,
+        )
+        .parse_into()
+    }
+
+    #[test]
+    fn test_config() {
+        assert!(mk_cfg("addr = 5").is_err());
+        assert!(mk_cfg("addr = true").is_err());
+        assert!(mk_cfg("addr = \"hello\"").is_err());
+
+        let cfg = mk_cfg("addr = \"192.168.1.100:50\"").unwrap();
+
+        assert_eq!(cfg.addr, SocketAddrV4::new([192, 168, 1, 100].into(), 50));
+    }
 
     #[test]
     fn test_decoding() {

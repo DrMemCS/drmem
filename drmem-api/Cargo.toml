@@ -22,6 +22,7 @@ chrono.default-features = false
 
 toml.workspace = true
 toml.default-features = false
+toml.features = ["parse"]
 
 tokio.workspace = true
 tokio.default-features = false

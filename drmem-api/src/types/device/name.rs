@@ -47,6 +47,22 @@ impl Segment {
     }
 }
 
+impl TryFrom<String> for Segment {
+    type Error = Error;
+
+    fn try_from(s: String) -> Result<Self> {
+        Segment::create(&s)
+    }
+}
+
+impl TryFrom<&str> for Segment {
+    type Error = Error;
+
+    fn try_from(s: &str) -> Result<Self> {
+        Segment::create(s)
+    }
+}
+
 impl fmt::Display for Segment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", &self.0)
@@ -241,93 +257,107 @@ mod tests {
 
     #[test]
     fn test_segment() {
-        assert!("".parse::<Segment>().is_err());
-        assert!(
+        assert!(TryInto::<Segment>::try_into("").is_err());
+        assert!(TryInto::<Segment>::try_into(
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-                .parse::<Segment>()
-                .is_ok()
+        )
+        .is_ok());
+        assert!(TryInto::<Segment>::try_into("a-b").is_ok());
+        assert!(TryInto::<Segment>::try_into("a:b").is_err());
+        assert!(TryInto::<Segment>::try_into("-a").is_err());
+        assert!(TryInto::<Segment>::try_into("a-").is_err());
+        assert!(TryInto::<Segment>::try_into(" ").is_err());
+        assert_eq!(
+            format!("{}", TryInto::<Segment>::try_into("a-b").unwrap()),
+            "a-b"
         );
-        assert!("a-b".parse::<Segment>().is_ok());
-        assert!("a:b".parse::<Segment>().is_err());
-        assert!("-a".parse::<Segment>().is_err());
-        assert!("a-".parse::<Segment>().is_err());
-        assert!(" ".parse::<Segment>().is_err());
-        assert_eq!(format!("{}", "a-b".parse::<Segment>().unwrap()), "a-b");
 
         // Check non-ASCII entries.
 
-        assert!("٣".parse::<Segment>().is_ok());
-        assert!("温度".parse::<Segment>().is_ok());
-        assert!("🤖".parse::<Segment>().is_err());
+        assert!(TryInto::<Segment>::try_into("٣").is_ok());
+        assert!(TryInto::<Segment>::try_into("温度").is_ok());
+        assert!(TryInto::<Segment>::try_into("🤖").is_err());
     }
 
     #[test]
     fn test_base() {
-        assert_eq!(format!("{}", "a-b".parse::<Base>().unwrap()), "a-b");
-        assert!("a:b".parse::<Base>().is_err());
+        assert_eq!(
+            format!("{}", TryInto::<Base>::try_into("a-b").unwrap()),
+            "a-b"
+        );
+        assert!(TryInto::<Base>::try_into("a:b").is_err());
     }
 
     #[test]
     fn test_path() {
-        assert!("".parse::<Path>().is_err());
-        assert!("basement:🤖".parse::<Path>().is_err());
+        assert!(TryInto::<Path>::try_into("").is_err());
+        assert!(TryInto::<Path>::try_into("basement:🤖").is_err());
 
-        assert_eq!(format!("{}", "a-b".parse::<Path>().unwrap()), "a-b");
-        assert_eq!(format!("{}", "a:b".parse::<Path>().unwrap()), "a:b");
-        assert_eq!(format!("{}", "a:b:c".parse::<Path>().unwrap()), "a:b:c");
         assert_eq!(
-            format!("{}", "家:温度".parse::<Path>().unwrap()),
+            format!("{}", TryInto::<Path>::try_into("a-b").unwrap()),
+            "a-b"
+        );
+        assert_eq!(
+            format!("{}", TryInto::<Path>::try_into("a:b").unwrap()),
+            "a:b"
+        );
+        assert_eq!(
+            format!("{}", TryInto::<Path>::try_into("a:b:c").unwrap()),
+            "a:b:c"
+        );
+        assert_eq!(
+            format!("{}", TryInto::<Path>::try_into("家:温度").unwrap()),
             "家:温度"
         );
     }
 
     #[test]
     fn test_device_name() {
-        assert!("".parse::<Name>().is_err());
-        assert!(":".parse::<Name>().is_err());
-        assert!("a".parse::<Name>().is_err());
-        assert!(":a".parse::<Name>().is_err());
-        assert!("a:".parse::<Name>().is_err());
-        assert!("a::a".parse::<Name>().is_err());
+        assert!(TryInto::<Name>::try_into("").is_err());
+        assert!(TryInto::<Name>::try_into(":").is_err());
+        assert!(TryInto::<Name>::try_into("a").is_err());
+        assert!(TryInto::<Name>::try_into(":a").is_err());
+        assert!(TryInto::<Name>::try_into("a:").is_err());
+        assert!(TryInto::<Name>::try_into("a::a").is_err());
 
-        assert!("p:a.".parse::<Name>().is_err());
-        assert!("p:a.a".parse::<Name>().is_err());
-        assert!("p.a:a".parse::<Name>().is_err());
-        assert!("p:a-".parse::<Name>().is_err());
-        assert!("p:-a".parse::<Name>().is_err());
-        assert!("p-:a".parse::<Name>().is_err());
-        assert!("-p:a".parse::<Name>().is_err());
+        assert!(TryInto::<Name>::try_into("p:a.").is_err());
+        assert!(TryInto::<Name>::try_into("p:a.a").is_err());
+        assert!(TryInto::<Name>::try_into("p.a:a").is_err());
+        assert!(TryInto::<Name>::try_into("p:a-").is_err());
+        assert!(TryInto::<Name>::try_into("p:-a").is_err());
+        assert!(TryInto::<Name>::try_into("p-:a").is_err());
+        assert!(TryInto::<Name>::try_into("-p:a").is_err());
 
         assert_eq!(
-            "p:abc".parse::<Name>().unwrap(),
+            TryInto::<Name>::try_into("p:abc").unwrap(),
             Name {
                 path: Path::create("p").unwrap(),
                 base: Base::create("abc").unwrap(),
             }
         );
         assert_eq!(
-            "p:abc1".parse::<Name>().unwrap(),
+            TryInto::<Name>::try_into("p:abc1").unwrap(),
             Name {
                 path: Path::create("p").unwrap(),
                 base: Base::create("abc1").unwrap(),
             }
         );
         assert_eq!(
-            "p:abc-1".parse::<Name>().unwrap(),
+            TryInto::<Name>::try_into("p:abc-1").unwrap(),
             Name {
                 path: Path::create("p").unwrap(),
                 base: Base::create("abc-1").unwrap(),
             }
         );
         assert_eq!(
-            "p-1:p-2:abc".parse::<Name>().unwrap(),
+            TryInto::<Name>::try_into("p-1:p-2:abc").unwrap(),
             Name {
                 path: Path::create("p-1:p-2").unwrap(),
                 base: Base::create("abc").unwrap(),
             }
         );
 
-        let dn = "p-1:p-2:abc".parse::<Name>().unwrap();
+        let dn = TryInto::<Name>::try_into("p-1:p-2:abc").unwrap();
 
         assert_eq!(dn.get_path(), Path::create("p-1:p-2").unwrap());
         assert_eq!(dn.get_name(), Base::create("abc").unwrap());

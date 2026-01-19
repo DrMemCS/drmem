@@ -1918,16 +1918,12 @@ $4\r\nEXEC\r\n"
 
     #[test]
     fn test_hash_to_info() {
-        let device = "path:junk".parse::<device::Name>().unwrap();
+        let device: device::Name = "path:junk".try_into().unwrap();
         let mut st = HashMap::new();
         let mut fm = HashMap::new();
 
         assert_eq!(
-            RedisStore::hash_to_info(
-                &st,
-                &"path:junk".parse::<device::Name>().unwrap(),
-                &fm
-            ),
+            RedisStore::hash_to_info(&st, &device, &fm),
             Err(Error::NotFound)
         );
 
