@@ -1,4 +1,4 @@
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use std::{
     net::{Ipv4Addr, SocketAddr},
     path::Path,

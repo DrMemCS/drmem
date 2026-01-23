@@ -1,10 +1,8 @@
 use drmem_api::{
-    device,
     driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
 use std::convert::Infallible;
-use std::future::Future;
 use std::net::SocketAddrV4;
 use tokio::{
     io::{self, AsyncReadExt},
@@ -141,6 +139,12 @@ impl State {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct InstanceConfig {
+    addr: SocketAddrV4,
+    gpm: f64,
+}
+
 pub struct Instance {
     state: State,
     gpm: f64,
@@ -179,45 +183,6 @@ impl Instance {
             dur => {
                 format!("{dur}s")
             }
-        }
-    }
-
-    // Attempts to pull the hostname/port for the remote process.
-
-    fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
-        match cfg.get("addr") {
-            Some(toml::value::Value::String(addr)) => {
-                if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                    Ok(addr)
-                } else {
-                    Err(Error::ConfigError(String::from(
-                        "'addr' not in hostname:port format",
-                    )))
-                }
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'addr' config parameter should be a string",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'addr' parameter in config",
-            ))),
-        }
-    }
-
-    // Attempts to pull the gal-per-min parameter from the driver's
-    // configuration. The value can be specified as an integer or
-    // floating point. It gets returned only as an `f64`.
-
-    fn get_cfg_gpm(cfg: &DriverConfig) -> Result<f64> {
-        match cfg.get("gpm") {
-            Some(toml::value::Value::Integer(gpm)) => Ok(*gpm as f64),
-            Some(toml::value::Value::Float(gpm)) => Ok(*gpm),
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'gpm' config parameter should be a number",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'gpm' parameter in config",
-            ))),
         }
     }
 
@@ -281,42 +246,31 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
-        core: &'a mut driver::RequestChan,
+    async fn register_devices(
+        core: &mut driver::RequestChan,
         _: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        let service_name = "service".parse::<device::Base>().unwrap();
-        let state_name = "state".parse::<device::Base>().unwrap();
-        let duty_name = "duty".parse::<device::Base>().unwrap();
-        let in_flow_name = "in-flow".parse::<device::Base>().unwrap();
-        let dur_name = "duration".parse::<device::Base>().unwrap();
+    ) -> Result<Self> {
+        // Define the devices managed by this driver.
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
+        let d_service =
+            core.add_ro_device("service", None, max_history).await?;
+        let d_state = core.add_ro_device("state", None, max_history).await?;
+        let d_duty = core.add_ro_device("duty", Some("%"), max_history).await?;
+        let d_inflow = core
+            .add_ro_device("in-flow", Some("gpm"), max_history)
+            .await?;
+        let d_duration = core
+            .add_ro_device("duration", Some("min"), max_history)
+            .await?;
 
-            let d_service =
-                core.add_ro_device(service_name, None, max_history).await?;
-            let d_state =
-                core.add_ro_device(state_name, None, max_history).await?;
-            let d_duty = core
-                .add_ro_device(duty_name, Some("%"), max_history)
-                .await?;
-            let d_inflow = core
-                .add_ro_device(in_flow_name, Some("gpm"), max_history)
-                .await?;
-            let d_duration = core
-                .add_ro_device(dur_name, Some("min"), max_history)
-                .await?;
-
-            Ok(Devices {
-                d_service,
-                d_state,
-                d_duty,
-                d_inflow,
-                d_duration,
-            })
+        Ok(Devices {
+            d_service,
+            d_state,
+            d_duty,
+            d_inflow,
+            d_duration,
         })
     }
 }
@@ -324,32 +278,22 @@ impl driver::Registrator for Devices {
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        let addr = Instance::get_cfg_address(cfg);
-        let gpm = Instance::get_cfg_gpm(cfg);
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
+        let cfg: InstanceConfig = cfg.parse_into()?;
 
-        async move {
-            // Validate the configuration.
+        Span::current().record("cfg", cfg.addr.to_string());
 
-            let addr = addr?;
-            let gpm = gpm?;
+        // Connect with the remote process that is connected to the
+        // sump pump.
 
-            Span::current().record("cfg", addr.to_string());
+        let (rx, _tx) = Instance::connect(&cfg.addr)?.into_split();
 
-            // Connect with the remote process that is connected to
-            // the sump pump.
-
-            let (rx, _tx) = Instance::connect(&addr)?.into_split();
-
-            Ok(Box::new(Instance {
-                state: State::Unknown,
-                gpm,
-                rx,
-                _tx,
-            }))
-        }
+        Ok(Box::new(Instance {
+            state: State::Unknown,
+            gpm: cfg.gpm,
+            rx,
+            _tx,
+        }))
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {

@@ -20,12 +20,12 @@
 /// how to handle incoming incoming settings.
 use crate::{
     device,
-    driver::{rw_device, ReportReading, RxDeviceSetting, SettingReply},
+    driver::{rw_device, ReportReading, RxDeviceSetting, SettingResponder},
 };
 use tokio_stream::StreamExt;
 use tracing::info;
 
-pub type SettingTransaction<T> = (T, Option<SettingReply<T>>);
+pub type SettingTransaction<T> = (T, Option<SettingResponder<T>>);
 
 // Describes the states that the device goes through as it receives
 // settings and polled readings.
@@ -35,7 +35,7 @@ enum State<T: device::ReadWriteCompat> {
     Unknown,
     UnknownTrans {
         value: T,
-        report: SettingReply<T>,
+        report: SettingResponder<T>,
     },
     Synced {
         value: T,
@@ -50,7 +50,7 @@ enum State<T: device::ReadWriteCompat> {
         value: T,
     },
     SettingTrans {
-        value: (T, Option<SettingReply<T>>),
+        value: (T, Option<SettingResponder<T>>),
     },
     ReassertSetting {
         value: T,
@@ -183,7 +183,7 @@ where
             }
 
             State::SettingTrans {
-                value: (value, f_ref),
+                value: (value, resp_ref),
             } => {
                 // If the polled value happens to equal the incoming
                 // setting that's still being processed, we should go
@@ -195,8 +195,8 @@ where
                     // If there was a function to reply to the client,
                     // we need to perform the reply.
 
-                    if let Some(f) = f_ref.take() {
-                        f(Ok(value.clone()));
+                    if let Some(resp) = resp_ref.take() {
+                        resp.ok(value.clone());
                     }
 
                     // Go to the `SyncedTrans` state, which will
@@ -324,7 +324,7 @@ where
                                     value: (reply.0, Some(reply.1)),
                                 };
                             } else {
-                                (reply.1)(Ok(reply.0.clone()));
+                                reply.1.ok(reply.0.clone());
                                 self.state =
                                     State::UnreportedSetting { value: reply.0 };
                             }
@@ -340,7 +340,7 @@ where
                                 value: (reply.0, Some(reply.1)),
                             }
                         } else {
-                            (reply.1)(Ok(reply.0.clone()));
+                            reply.1.ok(reply.0.clone());
                             State::SyncedTrans { value: reply.0 }
                         };
                     }
@@ -411,7 +411,7 @@ where
                                         // simply dropped.
 
                                         *setting = r.0.clone();
-                                        (r.1)(Ok(r.0));
+                                        r.1.ok(r.0);
                                     }
                                     None => return None
                                 }
@@ -442,7 +442,7 @@ where
                         match self.set_stream.next().await {
                             Some(reply) => {
                                 *setting = reply.0.clone();
-                                (reply.1)(Ok(reply.0));
+                                reply.1.ok(reply.0);
                             }
                             None => return None,
                         }

@@ -119,7 +119,7 @@ async fn run() -> Result<()> {
                 // other serious error occurred.
 
                 let instance = (driver_info.2)(
-                    driver.cfg.unwrap_or_default().clone(),
+                    driver.cfg.unwrap_or_default().clone().into(),
                     chan,
                     driver.max_history,
                     barrier.clone(),

@@ -2,46 +2,46 @@
 # default and it tests every subcrate.
 
 test-all: format test-api _test-drivers test-drmemd
-	@echo "All tests passed successfuly!"
+	@echo "🎉 All tests passed successfuly!"
 
 test-api:
-	@echo "Running units tests for drmem-api"; \
+	@echo "✅ Running units tests for drmem-api"; \
 	nice cargo test -p drmem-api
 
 _test-drivers: test-drv-ntp test-drv-sump test-drv-wu test-drv-tplink
 
 test-drv-ntp: test-api
-	@echo "Running units tests for drmem-driver-ntp"; \
+	@echo "✅ Running units tests for drmem-driver-ntp"; \
 	nice cargo test -p drmem-drv-ntp
 
 test-drv-sump: test-api
-	@echo "Running units tests for drmem-driver-sump"; \
+	@echo "✅ Running units tests for drmem-driver-sump"; \
 	nice cargo test -p drmem-drv-sump
 
 test-drv-tplink: test-api
-	@echo "Running units tests for drmem-driver-tplink"; \
+	@echo "✅ Running units tests for drmem-driver-tplink"; \
 	nice cargo test -p drmem-drv-tplink
 
 test-drv-wu: test-api
-	@echo "Running units tests for drmem-driver-weather-wu"; \
+	@echo "✅ Running units tests for drmem-driver-weather-wu"; \
 	nice cargo test -p drmem-drv-weather-wu
 
 _test-simple: test-api
-	@echo "Running units tests for simple-backend, no-client"; \
+	@echo "✅ Running units tests for simple-backend, no-client"; \
 	nice cargo test --features simple-backend,no-client
 
 _test-simple-graphql: test-api
-	@echo "Running units tests for simple-backend, with GraphQL"; \
+	@echo "✅ Running units tests for simple-backend, with GraphQL"; \
 	nice cargo test --features simple-backend,graphql
 
 _test-redis-graphql: test-api
-	@echo "Running units tests for redis-backend, with GraphQL"; \
+	@echo "✅ Running units tests for redis-backend, with GraphQL"; \
 	nice cargo test --features redis-backend,graphql
 
 test-drmemd: _test-simple _test-simple-graphql _test-redis-graphql
 
 build mode="dev":
-	@echo "Building {{ mode }}"
+	@echo "🔧 Building {{ mode }}"
 	nice cargo build \
 	    {{ if mode == "rel" { "--release" } else { "" } }} \
 	    --features simple-backend,graphql,all-drivers
@@ -51,29 +51,30 @@ build mode="dev":
 # don't generate object files and it doesn't link anything together.
 
 _check-simple:
-	@echo "Checking simple-backend, no-client"; \
+	@echo "🤔 Checking simple-backend, no-client"; \
 	nice cargo check --features simple-backend,no-client,all-drivers
 
 _check-simple-graphql:
-	@echo "Checking simple-backend, with GraphQL"; \
+	@echo "🤔 Checking simple-backend, with GraphQL"; \
 	nice cargo check --features simple-backend,graphql,all-drivers
 
 _check-redis-graphql:
-	@echo "Checking redis-backend, with GraphQL"; \
+	@echo "🤔 Checking redis-backend, with GraphQL"; \
 	nice cargo check --features redis-backend,graphql,all-drivers
 
 check: _check-simple _check-simple-graphql _check-redis-graphql
-	@echo "DrMem source was checked successfully!"
+	@echo "🎉 DrMem source was checked successfully!"
 
 # This section helps publish the project to crates.io.
 
 publish: test-all
-	@echo "DrMem Project published successfully!"
+	@echo "🎉 DrMem Project published successfully!"
 
 # Formats the project.
 
 format:
-	nice cargo fmt --all
+	@echo "🎨 Formatting code ..."
+	@nice cargo fmt --all
 
 # Local variables:
 # mode: makefile

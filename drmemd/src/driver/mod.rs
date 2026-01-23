@@ -55,13 +55,13 @@ where
                 restart_delay = START_DELAY;
                 info!("running");
 
+                let run = instance.run(&mut devices);
+
                 // Drivers are never supposed to exit so
                 // catch_unwind() will only catch panics which means
                 // we need to only look for `Err(_)` values.
 
-                let Err(e) = AssertUnwindSafe(instance.run(&mut devices))
-                    .catch_unwind()
-                    .await;
+                let Err(e) = AssertUnwindSafe(run).catch_unwind().await;
 
                 error!("exited unexpectedly -- {e:?}")
             }
@@ -124,14 +124,15 @@ where
         let devices = async {
             match get_cfg_override(&cfg) {
                 Ok(tmo) => {
-                    T::HardwareType::register_devices(
+                    let fut = T::HardwareType::register_devices(
                         &mut req_chan,
                         &cfg,
                         tmo,
                         max_history,
                     )
-                    .instrument(info_span!("register", cfg = field::Empty))
-                    .await
+                    .instrument(info_span!("register", cfg = field::Empty));
+
+                    fut.await
                 }
                 Err(e) => Err(e),
             }

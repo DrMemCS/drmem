@@ -73,10 +73,10 @@ impl Devices {
                             // processed by the caller.
 
                             if is_good(&val) {
-                                reply(Ok(val.clone()));
+                                reply.ok(val.clone());
                                 return Poll::Ready((idx, val));
                             } else {
-                                reply(Err(Error::TypeError))
+                                reply.err(Error::TypeError)
                             }
                         }
 
@@ -94,67 +94,31 @@ impl Devices {
             Poll::Pending
         })
     }
+}
 
-    fn read_name(m: &toml::Table) -> Result<device::Base> {
-        match m.get("name") {
-            Some(toml::value::Value::String(name)) => {
-                if let v @ Ok(_) = name.parse::<device::Base>() {
-                    v
-                } else {
-                    Err(Error::ConfigError(format!(
-                        "'{name}' isn't a proper, base name for a device"
-                    )))
-                }
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'name' config parameter should be a string",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing `name` parameter in `vars` entry",
-            ))),
-        }
+mod config {
+    use drmem_api::{device, driver, Result};
+
+    #[derive(serde::Deserialize)]
+    struct Entry {
+        name: String,
+        initial: device::Value,
     }
 
-    fn read_initial(m: &toml::Table) -> Result<device::Value> {
-        if let Some(val) = m.get("initial") {
-            device::Value::try_from(val)
-        } else {
-            Err(Error::ConfigError(String::from(
-                "missing `initial` parameter in `vars` entry",
-            )))
-        }
+    #[derive(serde::Deserialize)]
+    struct InstanceConfig {
+        vars: Vec<Entry>,
     }
 
-    fn read_entries(
-        v: &toml::value::Value,
-    ) -> Result<(device::Base, device::Value)> {
-        if let toml::Value::Table(m) = v {
-            Ok((Self::read_name(m)?, Self::read_initial(m)?))
-        } else {
-            Err(Error::ConfigError(String::from(
-                "`vars` contains an entry that isn't a map",
-            )))
-        }
-    }
-
-    // Gets the variables associated with the device from the configuration.
-
-    fn get_cfg_vars(
-        cfg: &DriverConfig,
+    pub fn parse(
+        cfg: &driver::DriverConfig,
     ) -> Result<Vec<(device::Base, device::Value)>> {
-        use toml::value::Value;
+        let cfg: InstanceConfig = cfg.parse_into()?;
 
-        match cfg.get("vars") {
-            Some(Value::Array(vars)) if !vars.is_empty() => {
-                vars.iter().map(Self::read_entries).collect()
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'vars' config parameter should be an array of maps",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'vars' parameter in config",
-            ))),
-        }
+        cfg.vars
+            .iter()
+            .map(|e| e.name.clone().try_into().map(|v| (v, e.initial.clone())))
+            .collect()
     }
 }
 
@@ -174,50 +138,47 @@ impl Instance {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
-        core: &'a mut driver::RequestChan,
+    async fn register_devices(
+        core: &mut driver::RequestChan,
         cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        let vars = Self::get_cfg_vars(cfg);
+    ) -> Result<Self> {
+        let mut vars = config::parse(cfg)?;
+        let mut devs = vec![];
 
-        Box::pin(async move {
-            let mut devs = vec![];
+        for (name, init_val) in vars.drain(..) {
+            // This device is settable. Any setting is forwarded to
+            // the backend.
 
-            for (name, init_val) in vars?.drain(..) {
-                // This device is settable. Any setting is forwarded
-                // to the backend.
+            let mut entry: (
+                driver::ReadWriteDevice<device::Value>,
+                TypeChecker,
+            ) = (
+                core.add_rw_device(name, None, max_history).await?,
+                get_validator(&init_val),
+            );
 
-                let mut entry: (
-                    driver::ReadWriteDevice<device::Value>,
-                    TypeChecker,
-                ) = (
-                    core.add_rw_device(name, None, max_history).await?,
-                    get_validator(&init_val),
-                );
+            // If the user configured an initial value and there was
+            // no previous value or the previous value was of a
+            // different type, immediately set it with the initial
+            // value.
 
-                // If the user configured an initial value and there
-                // was no previous value or the previous value was of
-                // a different type, immediately set it with the
-                // initial value.
-
-                if entry
-                    .0
-                    .get_last()
-                    .map(|v| !v.is_same_type(&init_val))
-                    .unwrap_or(true)
-                {
-                    entry.0.report_update(init_val).await
-                }
-
-                // Add the entry to the driver's set of devices.
-
-                devs.push(entry)
+            if entry
+                .0
+                .get_last()
+                .map(|v| !v.is_same_type(&init_val))
+                .unwrap_or(true)
+            {
+                entry.0.report_update(init_val).await
             }
 
-            Ok(Devices { set: devs })
-        })
+            // Add the entry to the driver's set of devices.
+
+            devs.push(entry)
+        }
+
+        Ok(Devices { set: devs })
     }
 }
 
@@ -241,10 +202,11 @@ impl ResettableState for Devices {}
 
 #[cfg(test)]
 mod tests {
-    use super::TypeChecker;
+    use super::{config, TypeChecker};
     use drmem_api::{
-        device::Value,
-        driver::{ReadWriteDevice, TxDeviceSetting},
+        device,
+        driver::{DriverConfig, ReadWriteDevice, TxDeviceSetting},
+        Error, Result,
     };
     use tokio::sync::mpsc;
 
@@ -253,59 +215,75 @@ mod tests {
         use super::get_validator;
 
         {
-            let f = get_validator(&Value::Bool(true));
+            let f = get_validator(&device::Value::Bool(true));
 
-            assert!(f(&Value::Bool(false)));
-            assert!(!f(&Value::Int(10)));
-            assert!(!f(&Value::Flt(20.0)));
-            assert!(!f(&Value::Str("Hello".into())));
-            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(f(&device::Value::Bool(false)));
+            assert!(!f(&device::Value::Int(10)));
+            assert!(!f(&device::Value::Flt(20.0)));
+            assert!(!f(&device::Value::Str("Hello".into())));
+            assert!(!f(&device::Value::Color(palette::LinSrgba::new(
+                0, 0, 0, 0
+            ))));
         }
         {
-            let f = get_validator(&Value::Int(5));
+            let f = get_validator(&device::Value::Int(5));
 
-            assert!(!f(&Value::Bool(false)));
-            assert!(f(&Value::Int(10)));
-            assert!(!f(&Value::Flt(20.0)));
-            assert!(!f(&Value::Str("Hello".into())));
-            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(!f(&device::Value::Bool(false)));
+            assert!(f(&device::Value::Int(10)));
+            assert!(!f(&device::Value::Flt(20.0)));
+            assert!(!f(&device::Value::Str("Hello".into())));
+            assert!(!f(&device::Value::Color(palette::LinSrgba::new(
+                0, 0, 0, 0
+            ))));
         }
         {
-            let f = get_validator(&Value::Flt(2.0));
+            let f = get_validator(&device::Value::Flt(2.0));
 
-            assert!(!f(&Value::Bool(false)));
-            assert!(!f(&Value::Int(10)));
-            assert!(f(&Value::Flt(20.0)));
-            assert!(!f(&Value::Str("Hello".into())));
-            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(!f(&device::Value::Bool(false)));
+            assert!(!f(&device::Value::Int(10)));
+            assert!(f(&device::Value::Flt(20.0)));
+            assert!(!f(&device::Value::Str("Hello".into())));
+            assert!(!f(&device::Value::Color(palette::LinSrgba::new(
+                0, 0, 0, 0
+            ))));
         }
         {
-            let f = get_validator(&Value::Str("World".into()));
+            let f = get_validator(&device::Value::Str("World".into()));
 
-            assert!(!f(&Value::Bool(false)));
-            assert!(!f(&Value::Int(10)));
-            assert!(!f(&Value::Flt(20.0)));
-            assert!(f(&Value::Str("Hello".into())));
-            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(!f(&device::Value::Bool(false)));
+            assert!(!f(&device::Value::Int(10)));
+            assert!(!f(&device::Value::Flt(20.0)));
+            assert!(f(&device::Value::Str("Hello".into())));
+            assert!(!f(&device::Value::Color(palette::LinSrgba::new(
+                0, 0, 0, 0
+            ))));
         }
         {
-            let f = get_validator(&Value::Color(palette::LinSrgba::new(
-                100, 100, 100, 100,
-            )));
+            let f = get_validator(&device::Value::Color(
+                palette::LinSrgba::new(100, 100, 100, 100),
+            ));
 
-            assert!(!f(&Value::Bool(false)));
-            assert!(!f(&Value::Int(10)));
-            assert!(!f(&Value::Flt(20.0)));
-            assert!(!f(&Value::Str("Hello".into())));
-            assert!(f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(!f(&device::Value::Bool(false)));
+            assert!(!f(&device::Value::Int(10)));
+            assert!(!f(&device::Value::Flt(20.0)));
+            assert!(!f(&device::Value::Str("Hello".into())));
+            assert!(f(&device::Value::Color(palette::LinSrgba::new(
+                0, 0, 0, 0
+            ))));
         }
+    }
+
+    fn mk_cfg(text: &str) -> Result<Vec<(device::Base, device::Value)>> {
+        config::parse(&Into::<DriverConfig>::into(
+            toml::from_str::<toml::value::Table>(text)
+                .map_err(|e| Error::ConfigError(format!("{}", e)))?,
+        ))
     }
 
     #[test]
     fn test_configuration() {
         use super::device;
-        use super::Devices;
-        use toml::{map::Map, Table, Value};
+        use toml::{Table, Value};
 
         // Test for an empty Map or a Map that doesn't have the "vars"
         // key or a map with "vars" whose value isn't a map or is a
@@ -313,34 +291,29 @@ mod tests {
         // of these are errors.
 
         {
-            let mut map = Map::new();
+            assert!(mk_cfg("vars = [{initial = true}]").is_err());
+            assert!(mk_cfg("vars = [{name = \"var\"}]").is_err());
+            assert!(mk_cfg("vars = [{junk = \"var\"}]").is_err());
+            assert!(mk_cfg("vars = [{name = \"var\", initial = true}]").is_ok());
 
-            assert!(Devices::get_cfg_vars(&map).is_err());
-
-            let _ = map.insert("junk".into(), Value::Boolean(true));
-
-            assert!(Devices::get_cfg_vars(&map).is_err());
-
-            let _ = map.insert("vars".into(), Value::Boolean(true));
-
-            assert!(Devices::get_cfg_vars(&map).is_err());
-
-            let _ = map.insert("vars".into(), Value::Table(Table::new()));
-
-            assert!(Devices::get_cfg_vars(&map).is_err());
-
-            let _ = map.insert("vars".into(), Value::Array(vec![]));
-
-            assert!(Devices::get_cfg_vars(&map).is_err());
+            assert_eq!(
+                mk_cfg(
+                    "
+vars = [{name = \"v1\", initial = true},
+        {name = \"v2\", initial = 100}]"
+                ),
+                Ok(vec![
+                    ("v1".try_into().unwrap(), device::Value::Bool(true)),
+                    ("v2".try_into().unwrap(), device::Value::Int(100))
+                ])
+            );
         }
 
         // Now make sure the config code creates a single memory
         // device correctly. We'll deal with sets later.
 
         {
-            let mut map = Map::new();
-
-            let test_set: &[(&'static str, Value, device::Value)] = &[
+            let mut test_set: Vec<(&'static str, Value, device::Value)> = vec![
                 ("flag", Value::Boolean(true), device::Value::Bool(true)),
                 ("int-val", Value::Integer(100), device::Value::Int(100)),
                 ("flt-val", Value::Float(50.0), device::Value::Flt(50.0)),
@@ -358,16 +331,19 @@ mod tests {
                 ),
             ];
 
-            for entry in &test_set[..] {
+            for entry in test_set.drain(..) {
                 let mut tbl = Table::new();
-                let _ = tbl.insert("name".into(), entry.0.into());
+                let _ = tbl.insert("name".into(), entry.0.try_into().unwrap());
                 let _ = tbl.insert("initial".into(), entry.1.clone());
-                let _ = map.insert(
+                let mut map = Table::new();
+
+                map.insert(
                     "vars".into(),
                     Value::Array(vec![Value::Table(tbl)]),
                 );
 
-                let result = Devices::get_cfg_vars(&map).unwrap();
+                let result =
+                    config::parse(&Into::<DriverConfig>::into(map)).unwrap();
 
                 assert!(result.len() == 1);
                 assert_eq!(result[0].0.to_string(), entry.0);
@@ -380,8 +356,8 @@ mod tests {
 
     fn build_device() -> (
         TxDeviceSetting,
-        mpsc::Receiver<Value>,
-        (ReadWriteDevice<Value>, TypeChecker),
+        mpsc::Receiver<device::Value>,
+        (ReadWriteDevice<device::Value>, TypeChecker),
     ) {
         let (tx_sets, rx_sets) = mpsc::channel(20);
         let (tx_reports, rx_reports) = mpsc::channel(20);
@@ -390,7 +366,7 @@ mod tests {
             tx_sets,
             rx_reports,
             (
-                ReadWriteDevice::<Value>::new(
+                ReadWriteDevice::<device::Value>::new(
                     Box::new(move |v| {
                         tx_reports.try_send(v).expect("couldn't report value");
                         Box::pin(async {})
@@ -444,14 +420,16 @@ mod tests {
 
             let (tx_reply, _) = oneshot::channel();
 
-            setting.try_send((Value::Bool(true), tx_reply)).unwrap();
+            setting
+                .try_send((device::Value::Bool(true), tx_reply))
+                .unwrap();
 
             {
                 let fut = std::pin::pin!(dev.get_next());
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((0, Value::Bool(true)))
+                    Poll::Ready((0, device::Value::Bool(true)))
                 );
             }
 
@@ -467,13 +445,17 @@ mod tests {
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting.try_send((Value::Bool(true), tx_reply)).unwrap();
+                setting
+                    .try_send((device::Value::Bool(true), tx_reply))
+                    .unwrap();
             }
 
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting.try_send((Value::Flt(1.0), tx_reply)).unwrap();
+                setting
+                    .try_send((device::Value::Flt(1.0), tx_reply))
+                    .unwrap();
             }
 
             {
@@ -481,7 +463,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((0, Value::Bool(true)))
+                    Poll::Ready((0, device::Value::Bool(true)))
                 );
             }
 
@@ -490,7 +472,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((0, Value::Flt(1.0)))
+                    Poll::Ready((0, device::Value::Flt(1.0)))
                 );
             }
 
@@ -506,7 +488,9 @@ mod tests {
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting.try_send((Value::Bool(true), tx_reply)).unwrap();
+                setting
+                    .try_send((device::Value::Bool(true), tx_reply))
+                    .unwrap();
             }
 
             {
@@ -514,14 +498,16 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((0, Value::Bool(true)))
+                    Poll::Ready((0, device::Value::Bool(true)))
                 );
             }
 
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting.try_send((Value::Flt(1.0), tx_reply)).unwrap();
+                setting
+                    .try_send((device::Value::Flt(1.0), tx_reply))
+                    .unwrap();
             }
 
             {
@@ -529,7 +515,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((0, Value::Flt(1.0)))
+                    Poll::Ready((0, device::Value::Flt(1.0)))
                 );
             }
 
@@ -565,7 +551,9 @@ mod tests {
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting_a.try_send((Value::Flt(1.0), tx_reply)).unwrap();
+                setting_a
+                    .try_send((device::Value::Flt(1.0), tx_reply))
+                    .unwrap();
             }
 
             {
@@ -573,7 +561,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((0, Value::Flt(1.0)))
+                    Poll::Ready((0, device::Value::Flt(1.0)))
                 );
             }
 
@@ -588,7 +576,9 @@ mod tests {
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting_b.try_send((Value::Flt(2.0), tx_reply)).unwrap();
+                setting_b
+                    .try_send((device::Value::Flt(2.0), tx_reply))
+                    .unwrap();
             }
 
             {
@@ -596,7 +586,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((1, Value::Flt(2.0)))
+                    Poll::Ready((1, device::Value::Flt(2.0)))
                 );
             }
 
@@ -612,13 +602,17 @@ mod tests {
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting_a.try_send((Value::Bool(true), tx_reply)).unwrap();
+                setting_a
+                    .try_send((device::Value::Bool(true), tx_reply))
+                    .unwrap();
             }
 
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting_b.try_send((Value::Flt(1.0), tx_reply)).unwrap();
+                setting_b
+                    .try_send((device::Value::Flt(1.0), tx_reply))
+                    .unwrap();
             }
 
             {
@@ -626,7 +620,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((0, Value::Bool(true)))
+                    Poll::Ready((0, device::Value::Bool(true)))
                 );
             }
 
@@ -635,7 +629,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((1, Value::Flt(1.0)))
+                    Poll::Ready((1, device::Value::Flt(1.0)))
                 );
             }
 
@@ -651,19 +645,25 @@ mod tests {
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting_b.try_send((Value::Flt(1.0), tx_reply)).unwrap();
+                setting_b
+                    .try_send((device::Value::Flt(1.0), tx_reply))
+                    .unwrap();
             }
 
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting_a.try_send((Value::Bool(true), tx_reply)).unwrap();
+                setting_a
+                    .try_send((device::Value::Bool(true), tx_reply))
+                    .unwrap();
             }
 
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting_b.try_send((Value::Flt(5.0), tx_reply)).unwrap();
+                setting_b
+                    .try_send((device::Value::Flt(5.0), tx_reply))
+                    .unwrap();
             }
 
             {
@@ -671,7 +671,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((0, Value::Bool(true)))
+                    Poll::Ready((0, device::Value::Bool(true)))
                 );
             }
 
@@ -680,14 +680,16 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((1, Value::Flt(1.0)))
+                    Poll::Ready((1, device::Value::Flt(1.0)))
                 );
             }
 
             {
                 let (tx_reply, _) = oneshot::channel();
 
-                setting_a.try_send((Value::Bool(false), tx_reply)).unwrap();
+                setting_a
+                    .try_send((device::Value::Bool(false), tx_reply))
+                    .unwrap();
             }
 
             {
@@ -695,7 +697,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((0, Value::Bool(false)))
+                    Poll::Ready((0, device::Value::Bool(false)))
                 );
             }
 
@@ -704,7 +706,7 @@ mod tests {
 
                 assert_eq!(
                     fut.poll(&mut context),
-                    Poll::Ready((1, Value::Flt(5.0)))
+                    Poll::Ready((1, device::Value::Flt(5.0)))
                 );
             }
 

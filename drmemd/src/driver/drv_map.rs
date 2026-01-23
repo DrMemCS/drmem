@@ -1,17 +1,55 @@
 use drmem_api::{
     device,
     driver::{self, DriverConfig, ResettableState},
-    Error, Result,
+    Result,
 };
-use std::{convert::Infallible, future::Future, ops::RangeInclusive};
+use std::{convert::Infallible, ops::RangeInclusive};
 use tokio::time::Duration;
+
+mod config {
+    use drmem_api::{device, driver::DriverConfig, Error, Result};
+
+    #[derive(PartialEq, serde::Deserialize, Debug)]
+    pub struct Entry {
+        pub start: i32,
+        pub end: Option<i32>,
+        pub value: device::Value,
+    }
+
+    #[derive(serde::Deserialize)]
+    pub struct InstanceConfig {
+        pub initial: Option<i32>,
+        pub default: device::Value,
+        pub values: Vec<Entry>,
+    }
+
+    // Convert the TOML Table into `InstanceConfig`.
+
+    pub fn parse(cfg: &DriverConfig) -> Result<InstanceConfig> {
+        let mut cfg: InstanceConfig = cfg.parse_into()?;
+
+        // Sort the entries by the value of the start index.
+
+        cfg.values.sort_by(|a, b| a.start.cmp(&b.start));
+
+        // Now check to see if any ranges overlap. If so, that's an
+        // error.
+
+        if cfg
+            .values
+            .windows(2)
+            .any(|e| e[0].end.unwrap_or(e[0].start) >= e[1].start)
+        {
+            return Err(Error::ConfigError(
+                "`values` array contains overlapping ranges".into(),
+            ));
+        }
+        Ok(cfg)
+    }
+}
 
 #[derive(Debug, PartialEq)]
 struct Entry(RangeInclusive<i32>, device::Value);
-
-fn config_err<T>(msg: &str) -> Result<T> {
-    Err(Error::ConfigError(msg.into()))
-}
 
 pub struct Instance {
     init_index: Option<i32>,
@@ -27,147 +65,30 @@ impl Instance {
     pub const DESCRIPTION: &'static str = include_str!("drv_map.md");
 
     /// Creates a new `Instance` instance.
-    fn new(
-        init_index: Option<i32>,
-        def_val: device::Value,
-        values: Vec<Entry>,
-    ) -> Instance {
-        Instance {
-            init_index,
-            def_val,
-            values,
-        }
-    }
+    fn new(cfg: &DriverConfig) -> Result<Instance> {
+        let cfg = config::parse(cfg)?;
 
-    // Gets the initial value of the index from the configuration.
-
-    fn get_cfg_init_val(cfg: &DriverConfig) -> Result<Option<i32>> {
-        match cfg.get("initial") {
-            Some(toml::value::Value::Integer(v))
-                if *v >= (i32::MIN as i64) && *v <= (i32::MAX as i64) =>
-            {
-                Ok(Some(*v as i32))
-            }
-            Some(_) => config_err(
-                "'initial' config parameter should be a 32-bit integer",
-            ),
-            None => Ok(None),
-        }
-    }
-
-    // Retrieve the default value from the configuration.
-
-    fn get_cfg_def_val(cfg: &DriverConfig) -> Result<device::Value> {
-        cfg.get("default")
-            .ok_or_else(|| {
-                Error::ConfigError(
-                    "`default` config parameter is missing".into(),
-                )
-            })
-            .and_then(|v| {
-                device::Value::try_from(v).map_err(|e| {
-                    Error::ConfigError(format!(
-                        "`default` config paramter : {e}"
-                    ))
-                })
-            })
+        Ok(Instance {
+            init_index: cfg.initial,
+            def_val: cfg.default,
+            values: cfg.values.iter().map(Instance::to_entry).collect(),
+        })
     }
 
     // Helper method to convert a TOML Table into an `Entry` type.
 
-    fn to_entry(tbl: &toml::Table, def: &device::Value) -> Result<Entry> {
-        // The table *must* have a key called "start" and the value
-        // *must* be an integer.
-
-        if let Some(toml::value::Value::Integer(start)) = tbl.get("start") {
-            // The table *must* have a key called "value".
-
-            if let Some(value) = tbl.get("value") {
-                // The value associated with the "value" key *must* be
-                // convertable into a `device::Value` type.
-
-                let value = device::Value::try_from(value).map_err(|_| {
-                    Error::ConfigError(
-                        "`values` array entry contains unknown `value` type"
-                            .into(),
-                    )
-                })?;
-
-                // All values in the array must be of the same type as
-                // the default value (it's hard to imagine a device
-                // correctly handling different types.)
-
-                if def.is_same_type(&value) {
-                    // Convert to `i32`.
-
-                    let start = *start as i32;
-
-                    // The "end" key is optional. If missing, we use
-                    // "start" as the end. If it is present, however,
-                    // it must be an integer.
-
-                    match tbl.get("end") {
-                        Some(toml::value::Value::Integer(end)) => {
-                            let end = *end as i32;
-
-                            // Make sure the limits of the range are in
-                            // ascending order.
-
-                            Ok(Entry(start.min(end)..=start.max(end), value))
-                        }
-                        Some(_) => config_err(
-                            "`values` array entry has a bad `end` value",
-                        ),
-                        None => Ok(Entry(start..=start, value)),
-                    }
-                } else {
-                    config_err(
-			"all values in `values` array entries must be the same type as the default value"
-		    )
-                }
-            } else {
-                config_err("`values` array entry missing `value`")
-            }
-        } else {
-            config_err("`values` array entry missing `start`")
-        }
-    }
-
-    // Retrieve the array of entries that make up the mapping table.
-
-    fn get_cfg_values(
-        cfg: &DriverConfig,
-        def: &device::Value,
-    ) -> Result<Vec<Entry>> {
-        match cfg.get("values") {
-            Some(toml::value::Value::Array(arr)) if !arr.is_empty() => {
-                let mut result: Vec<Entry> = arr
-                    .iter()
-                    .map(|entry| {
-                        if let toml::value::Value::Table(tbl) = entry {
-                            Self::to_entry(tbl, def)
-                        } else {
-                            config_err("`values` array contains a non-table")
-                        }
-                    })
-                    .collect::<Result<Vec<Entry>>>()?;
-
-                // Sort the vector by the lower bounds of the range.
-
-                result.sort_by(|a, b| a.0.start().cmp(b.0.start()));
-
-                // If any adjacent ranges overlap, return an error.
-
-                if result.windows(2).any(|e| e[0].0.end() >= e[1].0.start()) {
-                    config_err("`values` array contains overlapping ranges")
-                } else {
-                    Ok(result)
-                }
-            }
-            Some(_) => config_err(
-                "`values` config parameter should be a non-empty array of maps",
-            ),
-            None => config_err("`values` config parameter is missing"),
+    fn to_entry(e: &config::Entry) -> Entry {
+        match e {
+            config::Entry {
+                start,
+                end: None,
+                value,
+            } => Entry(*start..=*start, value.clone()),
+            config::Entry {
+                start,
+                end: Some(end),
+                value,
+            } => Entry(*start.min(end)..=*start.max(end), value.clone()),
         }
     }
 
@@ -198,49 +119,32 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
-        core: &'a mut driver::RequestChan,
+    async fn register_devices(
+        core: &mut driver::RequestChan,
         _cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        let output_name = "output".parse::<device::Base>().unwrap();
-        let index_name = "index".parse::<device::Base>().unwrap();
+    ) -> Result<Self> {
+        // Define the devices managed by this driver.
+        //
+        // This first device is the output of the map.
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
-            //
-            // This first device is the output of the map.
+        let d_output = core.add_ro_device("output", None, max_history).await?;
 
-            let d_output =
-                core.add_ro_device(output_name, None, max_history).await?;
+        // This device is settable. Any setting is forwarded to
+        // the backend.
 
-            // This device is settable. Any setting is forwarded to
-            // the backend.
+        let d_index = core.add_rw_device("index", None, max_history).await?;
 
-            let d_index =
-                core.add_rw_device(index_name, None, max_history).await?;
-
-            Ok(Devices { d_output, d_index })
-        })
+        Ok(Devices { d_output, d_index })
     }
 }
 
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        let init_index = Instance::get_cfg_init_val(cfg);
-        let def_value = Instance::get_cfg_def_val(cfg);
-        let values = if let Ok(ref def_value) = def_value {
-            Instance::get_cfg_values(cfg, def_value)
-        } else {
-            Ok(vec![])
-        };
-
-        async move { Ok(Box::new(Instance::new(init_index?, def_value?, values?))) }
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
+        Instance::new(cfg).map(Box::new)
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
@@ -261,7 +165,7 @@ impl driver::API for Instance {
         while let Some((v, reply)) = devices.d_index.next_setting().await {
             // Send the reply to the setter.
 
-            reply(Ok(v));
+            reply.ok(v);
 
             // Send the updated values to the backend.
 
@@ -276,239 +180,191 @@ impl ResettableState for Devices {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Instance};
-    use drmem_api::device;
-    use toml::value::{Table, Value};
+    use super::config;
+    use drmem_api::{device, driver::DriverConfig, Error, Result};
+
+    // Tries to build an `InstanceConfig` from a `&str`.
+
+    fn make_cfg(text: &str) -> Result<config::InstanceConfig> {
+        config::parse(&Into::<DriverConfig>::into(
+            toml::from_str::<toml::value::Table>(text)
+                .map_err(|e| Error::ConfigError(format!("{}", e)))?,
+        ))
+    }
 
     #[test]
     fn test_cfg_initial() {
-        let mut tbl = Table::new();
+        {
+            let cfg = make_cfg(
+                "default = false
+values = []
+",
+            )
+            .unwrap();
 
-        assert_eq!(Instance::get_cfg_init_val(&tbl), Ok(None));
+            assert_eq!(cfg.initial, None);
+        }
+        {
+            let cfg = make_cfg(
+                "initial = \"hello\"
+default = false
+values = []
+",
+            );
 
-        let _ = tbl.insert("initial".into(), Value::String("hello".into()));
+            assert!(cfg.is_err());
+        }
+        {
+            let cfg = make_cfg(
+                "initial = 100
+default = false
+values = []
+",
+            )
+            .unwrap();
 
-        assert!(Instance::get_cfg_init_val(&tbl).is_err());
-
-        let _ = tbl.insert("initial".into(), Value::Integer(100));
-
-        assert_eq!(Instance::get_cfg_init_val(&tbl), Ok(Some(100)));
+            assert_eq!(cfg.initial, Some(100));
+        }
     }
 
     #[test]
     fn test_cfg_default() {
-        let mut tbl = Table::new();
+        let cfg = make_cfg(
+            "initial = 100
+default = \"hello\"
+values = []
+",
+        )
+        .unwrap();
 
-        assert!(Instance::get_cfg_def_val(&tbl).is_err());
-
-        let _ = tbl.insert("default".into(), Value::String("hello".into()));
-
-        assert_eq!(
-            Instance::get_cfg_def_val(&tbl),
-            Ok(device::Value::Str("hello".into()))
-        );
-    }
-
-    fn build_table(
-        start: Option<i64>,
-        end: Option<i64>,
-        val: Option<Value>,
-    ) -> Value {
-        let mut tbl = Table::new();
-
-        if let Some(start) = start {
-            let _ = tbl.insert("start".into(), Value::Integer(start));
-        }
-
-        if let Some(val) = val {
-            let _ = tbl.insert("value".into(), val);
-        }
-
-        if let Some(end) = end {
-            let _ = tbl.insert("end".into(), Value::Integer(end));
-        }
-
-        Value::Table(tbl)
+        assert_eq!(cfg.default, device::Value::Str("hello".into()));
     }
 
     #[test]
-    fn test_cfg_values() {
+    fn test_bad_cfg_values() {
+        // Missing the 'values' array.
+
         {
-            let def_val = device::Value::Str("world".into());
-            let mut tbl = Table::new();
+            let cfg = make_cfg("default = 100");
 
-            // First test for bad configurations.
-            //
-            // This tests that a missing "values" key is an error.
-
-            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
-
-            // Tests if the range entry is missing a "start" key.
-
-            let _ = tbl.insert(
-                "values".into(),
-                Value::Array(vec![build_table(None, None, None)]),
-            );
-
-            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
-
-            // Tests if the range entry is missing a "value" key.
-
-            let _ = tbl.insert(
-                "values".into(),
-                Value::Array(vec![build_table(Some(0), None, None)]),
-            );
-
-            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
+            assert!(cfg.is_err());
         }
 
-        // Now test good configurations.
+        // Missing the 'start' field.
 
         {
-            let def_val = device::Value::Str("world".into());
-            let mut tbl = Table::new();
-
-            // Test that providing all fields generates a entry.
-
-            let _ = tbl.insert(
-                "values".into(),
-                Value::Array(vec![build_table(
-                    Some(0),
-                    Some(10),
-                    Some(Value::String("hello".into())),
-                )]),
+            let cfg = make_cfg(
+                "default = 100
+values = [{ value = false }]",
             );
+
+            assert!(cfg.is_err());
+        }
+
+        // Missing a 'value' field.
+
+        {
+            let cfg = make_cfg(
+                "default = 100
+values = [{ start = 0 }]",
+            );
+
+            assert!(cfg.is_err());
+        }
+
+        // The first and third entry's ranges overlap.
+
+        {
+            let cfg = make_cfg(
+                "default = 100
+values = [{ start = 2, end = 7, value = \"there\" },
+          { start = 8, end = 11, value = \"world\" },
+          { start = 0, end = 3, value = \"hello\" }]",
+            );
+
+            assert!(cfg.is_err());
+        }
+
+        // The second and third entry's ranges share an endpoint
+        // (i.e. overlap.).
+
+        {
+            let cfg = make_cfg(
+                "default = 100
+values = [{ start = 8, end = 11, value = \"there\" },
+          { start = 3, end = 7, value = \"world\" },
+          { start = 0, end = 3, value = \"hello\" }]",
+            );
+
+            assert!(cfg.is_err());
+        }
+    }
+
+    #[test]
+    fn test_good_cfg_values() {
+        {
+            let cfg = make_cfg(
+                "default = 100
+values = [{ start = 0, value = false }]",
+            )
+            .unwrap();
 
             assert_eq!(
-                Instance::get_cfg_values(&tbl, &def_val).unwrap(),
-                vec![Entry(0..=10, device::Value::Str("hello".into()))]
+                cfg.values,
+                vec![config::Entry {
+                    start: 0,
+                    end: None,
+                    value: device::Value::Bool(false)
+                }]
             );
+        }
 
-            // Test that omitting the "end" set it equal to "start".
-
-            let _ = tbl.insert(
-                "values".into(),
-                Value::Array(vec![build_table(
-                    Some(0),
-                    None,
-                    Some(Value::String("hello".into())),
-                )]),
-            );
+        {
+            let cfg = make_cfg(
+                "default = 100
+values = [{ start = 0, end = 1, value = \"hello\" }]",
+            )
+            .unwrap();
 
             assert_eq!(
-                Instance::get_cfg_values(&tbl, &def_val).unwrap(),
-                vec![Entry(0..=0, device::Value::Str("hello".into()))]
+                cfg.values,
+                vec![config::Entry {
+                    start: 0,
+                    end: Some(1),
+                    value: device::Value::Str("hello".into())
+                }],
             );
+        }
 
-            // Test that the function sorts the results.
-
-            let _ = tbl.insert(
-                "values".into(),
-                Value::Array(vec![
-                    build_table(
-                        Some(0),
-                        Some(3),
-                        Some(Value::String("hello".into())),
-                    ),
-                    build_table(
-                        Some(4),
-                        Some(7),
-                        Some(Value::String("there".into())),
-                    ),
-                    build_table(
-                        Some(8),
-                        Some(11),
-                        Some(Value::String("world".into())),
-                    ),
-                ]),
-            );
+        {
+            let cfg = make_cfg(
+                "default = 100
+values = [{ start = 4, end = 7, value = \"there\" },
+          { start = 8, end = 11, value = \"world\" },
+          { start = 0, end = 3, value = \"hello\" }]",
+            )
+            .unwrap();
 
             assert_eq!(
-                Instance::get_cfg_values(&tbl, &def_val).unwrap(),
+                cfg.values,
                 vec![
-                    Entry(0..=3, device::Value::Str("hello".into())),
-                    Entry(4..=7, device::Value::Str("there".into())),
-                    Entry(8..=11, device::Value::Str("world".into()))
+                    config::Entry {
+                        start: 0,
+                        end: Some(3),
+                        value: device::Value::Str("hello".into())
+                    },
+                    config::Entry {
+                        start: 4,
+                        end: Some(7),
+                        value: device::Value::Str("there".into())
+                    },
+                    config::Entry {
+                        start: 8,
+                        end: Some(11),
+                        value: device::Value::Str("world".into())
+                    }
                 ]
             );
-
-            let _ = tbl.insert(
-                "values".into(),
-                Value::Array(vec![
-                    build_table(
-                        Some(8),
-                        Some(11),
-                        Some(Value::String("world".into())),
-                    ),
-                    build_table(
-                        Some(4),
-                        Some(7),
-                        Some(Value::String("there".into())),
-                    ),
-                    build_table(
-                        Some(0),
-                        Some(3),
-                        Some(Value::String("hello".into())),
-                    ),
-                ]),
-            );
-
-            assert_eq!(
-                Instance::get_cfg_values(&tbl, &def_val).unwrap(),
-                vec![
-                    Entry(0..=3, device::Value::Str("hello".into())),
-                    Entry(4..=7, device::Value::Str("there".into())),
-                    Entry(8..=11, device::Value::Str("world".into()))
-                ]
-            );
-
-            // Test that it rejects an array with overlapping ranges.
-
-            let _ = tbl.insert(
-                "values".into(),
-                Value::Array(vec![
-                    build_table(
-                        Some(8),
-                        Some(11),
-                        Some(Value::String("world".into())),
-                    ),
-                    build_table(
-                        Some(2),
-                        Some(7),
-                        Some(Value::String("there".into())),
-                    ),
-                    build_table(
-                        Some(0),
-                        Some(3),
-                        Some(Value::String("hello".into())),
-                    ),
-                ]),
-            );
-
-            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
-
-            let _ = tbl.insert(
-                "values".into(),
-                Value::Array(vec![
-                    build_table(
-                        Some(8),
-                        Some(11),
-                        Some(Value::String("world".into())),
-                    ),
-                    build_table(
-                        Some(3),
-                        Some(7),
-                        Some(Value::String("there".into())),
-                    ),
-                    build_table(
-                        Some(0),
-                        Some(3),
-                        Some(Value::String("hello".into())),
-                    ),
-                ]),
-            );
-
-            assert!(Instance::get_cfg_values(&tbl, &def_val).is_err());
         }
     }
 }

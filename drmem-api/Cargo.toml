@@ -22,6 +22,7 @@ chrono.default-features = false
 
 toml.workspace = true
 toml.default-features = false
+toml.features = ["parse"]
 
 tokio.workspace = true
 tokio.default-features = false
@@ -35,9 +36,7 @@ tracing.default-features = false
 
 serde.workspace = true
 serde.default-features = false
-
-serde_derive.workspace = true
-serde_derive.default-features = false
+serde.features = ["derive"]
 
 palette.workspace = true
 palette.default-features = false

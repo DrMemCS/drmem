@@ -1,11 +1,18 @@
 use drmem_api::{
     device,
     driver::{self, DriverConfig, ResettableState},
-    Error, Result,
+    Result,
 };
-use std::{convert::Infallible, future::Future};
+use std::convert::Infallible;
 use tokio::time::{self, Duration};
 use tracing::{debug, info};
+
+#[derive(serde::Deserialize)]
+struct InstanceConfig {
+    millis: u64,
+    disabled: device::Value,
+    enabled: device::Value,
+}
 
 // This enum represents the four states in which the timer can
 // be. They are a combination of the `enable` input and whether we're
@@ -64,50 +71,6 @@ impl Instance {
             self.state = TimerState::TimedOut;
         } else if self.state == TimerState::TimingAndArmed {
             self.state = TimerState::Armed;
-        }
-    }
-
-    // Validates the time duration from the driver configuration.
-
-    fn get_cfg_millis(cfg: &DriverConfig) -> Result<Duration> {
-        match cfg.get("millis") {
-            Some(toml::value::Value::Integer(millis)) => {
-                if (50..=3_600_000).contains(millis) {
-                    Ok(Duration::from_millis(*millis as u64))
-                } else {
-                    Err(Error::ConfigError(String::from(
-                        "'millis' out of range",
-                    )))
-                }
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'millis' config parameter should be an integer",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'millis' parameter in config",
-            ))),
-        }
-    }
-
-    // Validates the active value parameter.
-
-    fn get_active_value(cfg: &DriverConfig) -> Result<device::Value> {
-        match cfg.get("enabled") {
-            Some(value) => value.try_into(),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'enabled' parameter in config",
-            ))),
-        }
-    }
-
-    // Validates the inactive value parameter.
-
-    fn get_inactive_value(cfg: &DriverConfig) -> Result<device::Value> {
-        match cfg.get("disabled") {
-            Some(value) => value.try_into(),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'disabled' parameter in config",
-            ))),
         }
     }
 
@@ -186,34 +149,26 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
-        core: &'a mut driver::RequestChan,
+    async fn register_devices(
+        core: &mut driver::RequestChan,
         _cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        let output_name = "output".parse::<device::Base>().unwrap();
-        let enable_name = "enable".parse::<device::Base>().unwrap();
+    ) -> Result<Self> {
+        // Define the devices managed by this driver.
+        //
+        // This first device is the output of the timer. When it's not
+        // timing, this device's value with be `!level`. While it's
+        // timing, `level`.
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
-            //
-            // This first device is the output of the timer. When
-            // it's not timing, this device's value with be
-            // `!level`. While it's timing, `level`.
+        let d_output = core.add_ro_device("output", None, max_history).await?;
 
-            let d_output =
-                core.add_ro_device(output_name, None, max_history).await?;
+        // This device is settable. Any time it transitions from
+        // `false` to `true`, the timer begins a timing cycle.
 
-            // This device is settable. Any time it transitions
-            // from `false` to `true`, the timer begins a timing
-            // cycle.
+        let d_enable = core.add_rw_device("enable", None, max_history).await?;
 
-            let d_enable =
-                core.add_rw_device(enable_name, None, max_history).await?;
-
-            Ok(Devices { d_output, d_enable })
-        })
+        Ok(Devices { d_output, d_enable })
     }
 }
 
@@ -221,22 +176,14 @@ impl driver::API for Instance {
     type HardwareType = Devices;
 
     async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
-        let millis = Instance::get_cfg_millis(cfg);
-        let active_value = Instance::get_active_value(cfg);
-        let inactive_value = Instance::get_inactive_value(cfg);
-
-        // Validate the configuration.
-
-        let millis = millis?;
-        let active_value = active_value?;
-        let inactive_value = inactive_value?;
+        let cfg: InstanceConfig = cfg.parse_into()?;
 
         // Build and return the future.
 
         Ok(Box::new(Instance::new(
-            active_value,
-            inactive_value,
-            millis,
+            cfg.enabled,
+            cfg.disabled,
+            Duration::from_millis(cfg.millis),
         )))
     }
 
@@ -281,7 +228,7 @@ impl driver::API for Instance {
                 Some((b, reply)) = devices.d_enable.next_setting() => {
                     let (out, tmo) = self.update_state(b);
 
-                    reply(Ok(b));
+                    reply.ok(b);
 
                     debug!("state {:?} : new input -> {}", &self.state, b);
 

@@ -45,9 +45,7 @@ tracing-subscriber.features = ["ansi"]
 
 serde.workspace = true
 serde.default-features = false
-
-serde_derive.workspace = true
-serde_derive.default-features = false
+serde.features = ["derive"]
 
 clap.version = "4"
 clap.default-features = false

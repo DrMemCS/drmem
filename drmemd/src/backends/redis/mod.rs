@@ -1004,9 +1004,7 @@ impl Store for RedisStore {
         for key in result {
             // Only process keys that are valid device names.
 
-            if let Ok(name) =
-                key.trim_end_matches("#info").parse::<device::Name>()
-            {
+            if let Ok(name) = key.trim_end_matches("#info").try_into() {
                 let dev_info = self.lookup_device(name).await?;
 
                 devices.push(dev_info)
@@ -1920,16 +1918,12 @@ $4\r\nEXEC\r\n"
 
     #[test]
     fn test_hash_to_info() {
-        let device = "path:junk".parse::<device::Name>().unwrap();
+        let device: device::Name = "path:junk".try_into().unwrap();
         let mut st = HashMap::new();
         let mut fm = HashMap::new();
 
         assert_eq!(
-            RedisStore::hash_to_info(
-                &st,
-                &"path:junk".parse::<device::Name>().unwrap(),
-                &fm
-            ),
+            RedisStore::hash_to_info(&st, &device, &fm),
             Err(Error::NotFound)
         );
 

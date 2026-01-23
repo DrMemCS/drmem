@@ -1,9 +1,9 @@
 use drmem_api::{
     device,
     driver::{self, DriverConfig, ResettableState},
-    Error, Result,
+    Result,
 };
-use std::{convert::Infallible, future::Future};
+use std::convert::Infallible;
 use tokio::time::Duration;
 
 // This enum represents the two states in which the latch can be.
@@ -12,6 +12,12 @@ use tokio::time::Duration;
 enum LatchState {
     Idle,
     Tripped,
+}
+
+#[derive(serde::Deserialize)]
+struct InstanceConfig {
+    disabled: device::Value,
+    enabled: device::Value,
 }
 
 pub struct Instance {
@@ -36,28 +42,6 @@ impl<'a> Instance {
             state: LatchState::Idle,
             active_value,
             inactive_value,
-        }
-    }
-
-    // Validates the active value parameter.
-
-    fn get_active_value(cfg: &DriverConfig) -> Result<device::Value> {
-        match cfg.get("enabled") {
-            Some(value) => value.try_into(),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'enabled' parameter in config",
-            ))),
-        }
-    }
-
-    // Validates the inactive value parameter.
-
-    fn get_inactive_value(cfg: &DriverConfig) -> Result<device::Value> {
-        match cfg.get("disabled") {
-            Some(value) => value.try_into(),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'disabled' parameter in config",
-            ))),
         }
     }
 
@@ -96,35 +80,27 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
-        core: &'a mut driver::RequestChan,
+    async fn register_devices(
+        core: &mut driver::RequestChan,
         _cfg: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        let output_name = "output".parse::<device::Base>().unwrap();
-        let trigger_name = "trigger".parse::<device::Base>().unwrap();
-        let reset_name = "reset".parse::<device::Base>().unwrap();
+    ) -> Result<Self> {
+        // Define the devices managed by this driver.
+        //
+        // This first device is the output of the timer.
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
-            //
-            // This first device is the output of the timer.
+        let d_output = core.add_ro_device("output", None, max_history).await?;
 
-            let d_output =
-                core.add_ro_device(output_name, None, max_history).await?;
+        let d_trigger =
+            core.add_rw_device("trigger", None, max_history).await?;
 
-            let d_trigger =
-                core.add_rw_device(trigger_name, None, max_history).await?;
+        let d_reset = core.add_rw_device("reset", None, max_history).await?;
 
-            let d_reset =
-                core.add_rw_device(reset_name, None, max_history).await?;
-
-            Ok(Devices {
-                d_output,
-                d_trigger,
-                d_reset,
-            })
+        Ok(Devices {
+            d_output,
+            d_trigger,
+            d_reset,
         })
     }
 }
@@ -132,22 +108,12 @@ impl driver::Registrator for Devices {
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        let active_value = Instance::get_active_value(cfg);
-        let inactive_value = Instance::get_inactive_value(cfg);
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
+        let cfg: InstanceConfig = cfg.parse_into()?;
 
-        async move {
-            // Validate the configuration.
+        // Build and return the future.
 
-            let active_value = active_value?;
-            let inactive_value = inactive_value?;
-
-            // Build and return the future.
-
-            Ok(Box::new(Instance::new(active_value, inactive_value)))
-        }
+        Ok(Box::new(Instance::new(cfg.enabled, cfg.disabled)))
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
@@ -173,7 +139,7 @@ impl driver::API for Instance {
                 Some((b, reply)) = d_trigger.next_setting() => {
                     let result = self.update_state(reset, !trigger && b);
 
-                    reply(Ok(b));
+                    reply.ok(b);
                     devices.d_trigger.report_update(b).await;
                     trigger = b;
                     result
@@ -182,7 +148,7 @@ impl driver::API for Instance {
                 Some((b, reply)) = d_reset.next_setting() => {
                     let result = self.update_state(reset, false);
 
-                    reply(Ok(b));
+                    reply.ok(b);
                     devices.d_reset.report_update(b).await;
                     reset = b;
                     result

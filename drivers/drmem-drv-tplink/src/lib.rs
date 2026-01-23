@@ -35,7 +35,7 @@ use drmem_api::{
     },
     Error, Result,
 };
-use futures::{Future, FutureExt};
+use futures::FutureExt;
 use std::convert::Infallible;
 use std::net::SocketAddrV4;
 use tokio::{
@@ -86,45 +86,42 @@ impl ResettableState for DevType {
 
 impl Registrator for DevType {
     // Defines the registration interface for the device set.
-    fn register_devices<'a>(
+    async fn register_devices<'a>(
         drc: &'a mut RequestChan,
         cfg: &'a DriverConfig,
         override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        async move {
-            match cfg.get("type") {
-                Some(toml::value::Value::String(dtype)) => match dtype.as_str()
-                {
-                    "outlet" | "switch" => Ok(DevType::Switch(
-                        classes::Switch::register_devices(
-                            drc,
-                            cfg,
-                            override_timeout,
-                            max_history,
-                        )
-                        .await?,
-                    )),
-                    "dimmer" => Ok(DevType::Dimmer(
-                        classes::Dimmer::register_devices(
-                            drc,
-                            cfg,
-                            override_timeout,
-                            max_history,
-                        )
-                        .await?,
-                    )),
-                    _ => Err(Error::ConfigError(String::from(
-                        "'type' must be \"dimmer\", \"outlet\", or \"switch\"",
-                    ))),
-                },
-                Some(_) => Err(Error::ConfigError(String::from(
-                    "'type' config parameter should be a string",
+    ) -> Result<Self> {
+        match cfg.get("type") {
+            Some(toml::value::Value::String(dtype)) => match dtype.as_str() {
+                "outlet" | "switch" => Ok(DevType::Switch(
+                    classes::Switch::register_devices(
+                        drc,
+                        cfg,
+                        override_timeout,
+                        max_history,
+                    )
+                    .await?,
+                )),
+                "dimmer" => Ok(DevType::Dimmer(
+                    classes::Dimmer::register_devices(
+                        drc,
+                        cfg,
+                        override_timeout,
+                        max_history,
+                    )
+                    .await?,
+                )),
+                _ => Err(Error::ConfigError(String::from(
+                    "'type' must be \"dimmer\", \"outlet\", or \"switch\"",
                 ))),
-                None => Err(Error::ConfigError(String::from(
-                    "missing 'type' parameter in config",
-                ))),
-            }
+            },
+            Some(_) => Err(Error::ConfigError(String::from(
+                "'type' config parameter should be a string",
+            ))),
+            None => Err(Error::ConfigError(String::from(
+                "missing 'type' parameter in config",
+            ))),
         }
     }
 }
@@ -469,11 +466,11 @@ impl Instance {
 
     // Handles incoming settings for brightness.
 
-    async fn handle_brightness_setting<'a>(
+    async fn handle_brightness_setting(
         &mut self,
-        s: &'a mut TcpStream,
+        s: &mut TcpStream,
         v: f64,
-        reply: Option<driver::SettingReply<f64>>,
+        reply: Option<driver::SettingResponder<f64>>,
     ) -> Result<()> {
         if !v.is_nan() {
             // Clip incoming settings to the range 0.0..=100.0. Handle
@@ -490,7 +487,7 @@ impl Instance {
             // Send an OK reply to the client with the updated value.
 
             if let Some(reply) = reply {
-                reply(Ok(v));
+                reply.ok(v);
             }
 
             // Always log incoming settings. Let the client know there
@@ -500,9 +497,9 @@ impl Instance {
             self.set_brightness(s, v).await
         } else {
             if let Some(reply) = reply {
-                reply(Err(Error::InvArgument(
+                reply.err(Error::InvArgument(
                     "device doesn't accept NaN".into(),
-                )));
+                ));
             }
             Ok(())
         }
@@ -510,14 +507,14 @@ impl Instance {
 
     // Handles incoming settings for controlling the LED indicator.
 
-    async fn handle_led_setting<'a>(
+    async fn handle_led_setting(
         &mut self,
-        s: &'a mut TcpStream,
+        s: &mut TcpStream,
         v: bool,
-        reply: Option<driver::SettingReply<bool>>,
+        reply: Option<driver::SettingResponder<bool>>,
     ) -> Result<()> {
         if let Some(reply) = reply {
-            reply(Ok(v));
+            reply.ok(v);
         }
         self.led_state_rpc(s, v).await
     }
@@ -558,12 +555,12 @@ impl Instance {
                 }
                 Some((v, reply)) = d_b.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
             }
@@ -588,12 +585,12 @@ impl Instance {
                 }
                 Some((v, reply)) = d_r.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
             }
@@ -629,12 +626,12 @@ impl Instance {
                 }
                 Some((v, reply)) = d_r.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
             }
@@ -670,21 +667,21 @@ impl Instance {
                 }
                 Some((v, reply)) = d_b.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
                 Some((v, reply)) = d_i.next_setting() => {
                     if let Some(reply) = reply {
-                        reply(Ok(v));
+                        reply.ok(v);
                     }
                 }
             }
         }
     }
 
-    async fn manage_switch<'a>(
+    async fn manage_switch(
         &mut self,
-        s: &'a mut TcpStream,
+        s: &mut TcpStream,
         dev: &mut classes::Switch,
     ) -> bool {
         // Get mutable references to the setting channels.
@@ -733,7 +730,7 @@ impl Instance {
 
             Some((v, reply)) = d_r.next_setting() => {
                 if let Some(reply) = reply {
-                    reply(Ok(v));
+                    reply.ok(v);
                 }
                 if let Err(e) = self.relay_state_rpc(s, v).await {
                     error!("couldn't set relay state -- {e}");
@@ -753,12 +750,12 @@ impl Instance {
                 self.poll_timeout = Duration::from_secs(0);
             }
         }
-        return true;
+        true
     }
 
-    async fn manage_dimmer<'a>(
+    async fn manage_dimmer(
         &mut self,
-        s: &'a mut TcpStream,
+        s: &mut TcpStream,
         dev: &mut classes::Dimmer,
     ) -> bool {
         // Get mutable references to the setting channels.
@@ -824,7 +821,7 @@ impl Instance {
                 self.poll_timeout = Duration::from_secs(0);
             }
         }
-        return true;
+        true
     }
 
     async fn main_loop(
@@ -851,19 +848,15 @@ impl driver::API for Instance {
     // This driver doesn't store any data in its instance; it's all
     // stored in local variables in the `.run()` method.
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
         let cfg_addr = Instance::get_cfg_address(cfg);
 
-        async {
-            Ok(Box::new(Instance {
-                addr: cfg_addr?,
-                reported_error: None,
-                buf: [0; BUF_TOTAL],
-                poll_timeout: Duration::from_secs(0),
-            }))
-        }
+        Ok(Box::new(Instance {
+            addr: cfg_addr?,
+            reported_error: None,
+            buf: [0; BUF_TOTAL],
+            poll_timeout: Duration::from_secs(0),
+        }))
     }
 
     // Main run loop for the driver.

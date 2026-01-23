@@ -1,10 +1,8 @@
 use drmem_api::{
-    device,
     driver::{self, DriverConfig, ResettableState},
     Error, Result,
 };
 use std::convert::Infallible;
-use std::future::Future;
 use std::{
     net::{SocketAddr, SocketAddrV4},
     str,
@@ -103,6 +101,11 @@ mod server {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct InstanceConfig {
+    addr: SocketAddrV4,
+}
+
 pub struct Instance {
     sock: UdpSocket,
     seq: u16,
@@ -115,28 +118,6 @@ impl Instance {
         "monitors an NTP server and reports its state";
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
-
-    // Attempts to pull the hostname/port for the remote process.
-
-    fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
-        match cfg.get("addr") {
-            Some(toml::value::Value::String(addr)) => {
-                if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                    Ok(addr)
-                } else {
-                    Err(Error::ConfigError(String::from(
-                        "'addr' not in hostname:port format",
-                    )))
-                }
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'addr' config parameter should be a string",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'addr' parameter in config",
-            ))),
-        }
-    }
 
     // Combines and returns the first two bytes from a buffer as a
     // big-endian, 16-bit value.
@@ -363,41 +344,27 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
-    fn register_devices<'a>(
-        core: &'a mut driver::RequestChan,
+    async fn register_devices(
+        core: &mut driver::RequestChan,
         _: &DriverConfig,
         _override_timeout: Option<Duration>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self>> + Send + 'a {
-        // It's safe to use `.unwrap()` for these names because, in a
-        // fully-tested, released version of this driver, we would
-        // have seen and fixed any panics.
+    ) -> Result<Self> {
+        // Define the devices managed by this driver.
 
-        let state_name = "state".parse::<device::Base>().unwrap();
-        let source_name = "source".parse::<device::Base>().unwrap();
-        let offset_name = "offset".parse::<device::Base>().unwrap();
-        let delay_name = "delay".parse::<device::Base>().unwrap();
+        let d_state = core.add_ro_device("state", None, max_history).await?;
+        let d_source = core.add_ro_device("source", None, max_history).await?;
+        let d_offset = core
+            .add_ro_device("offset", Some("ms"), max_history)
+            .await?;
+        let d_delay =
+            core.add_ro_device("delay", Some("ms"), max_history).await?;
 
-        Box::pin(async move {
-            // Define the devices managed by this driver.
-
-            let d_state =
-                core.add_ro_device(state_name, None, max_history).await?;
-            let d_source =
-                core.add_ro_device(source_name, None, max_history).await?;
-            let d_offset = core
-                .add_ro_device(offset_name, Some("ms"), max_history)
-                .await?;
-            let d_delay = core
-                .add_ro_device(delay_name, Some("ms"), max_history)
-                .await?;
-
-            Ok(Devices {
-                d_state,
-                d_source,
-                d_offset,
-                d_delay,
-            })
+        Ok(Devices {
+            d_state,
+            d_source,
+            d_offset,
+            d_delay,
         })
     }
 }
@@ -405,26 +372,18 @@ impl driver::Registrator for Devices {
 impl driver::API for Instance {
     type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        let addr = Instance::get_cfg_address(cfg);
+    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
+        let cfg: InstanceConfig = cfg.parse_into()?;
+        let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();
 
-        async move {
-            // Validate the configuration.
+        Span::current().record("cfg", cfg.addr.to_string());
 
-            let addr = addr?;
-            let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();
-
-            Span::current().record("cfg", addr.to_string());
-
-            if let Ok(sock) = UdpSocket::bind(loc_if).await {
-                if sock.connect(addr).await.is_ok() {
-                    return Ok(Box::new(Instance { sock, seq: 1 }));
-                }
+        if let Ok(sock) = UdpSocket::bind(loc_if).await {
+            if sock.connect(cfg.addr).await.is_ok() {
+                return Ok(Box::new(Instance { sock, seq: 1 }));
             }
-            Err(Error::OperationError("couldn't create socket".to_owned()))
         }
+        Err(Error::OperationError("couldn't create socket".to_owned()))
     }
 
     async fn run<'a>(
@@ -504,6 +463,28 @@ impl driver::API for Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use drmem_api::{driver::DriverConfig, Result};
+
+    // Helper function to build a config from a string view.
+
+    fn mk_cfg(text: &str) -> Result<InstanceConfig> {
+        Into::<DriverConfig>::into(
+            toml::from_str::<toml::value::Table>(text)
+                .map_err(|e| Error::ConfigError(format!("{}", e)))?,
+        )
+        .parse_into()
+    }
+
+    #[test]
+    fn test_config() {
+        assert!(mk_cfg("addr = 5").is_err());
+        assert!(mk_cfg("addr = true").is_err());
+        assert!(mk_cfg("addr = \"hello\"").is_err());
+
+        let cfg = mk_cfg("addr = \"192.168.1.100:50\"").unwrap();
+
+        assert_eq!(cfg.addr, SocketAddrV4::new([192, 168, 1, 100].into(), 50));
+    }
 
     #[test]
     fn test_decoding() {

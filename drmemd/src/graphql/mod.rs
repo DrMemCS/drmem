@@ -486,7 +486,7 @@ impl Control {
     ) -> result::Result<T, FieldError> {
         // Make sure the device name is properly formed.
 
-        if let Ok(name) = device.parse::<device::Name>() {
+        if let Ok(name) = device.try_into() {
             let tx = db.1.clone();
 
             // Send the setting to the driver. Map the error, if any,
@@ -878,14 +878,13 @@ impl Subscription {
     ) -> device::DataStream<FieldResult<Reading>> {
         use tokio_stream::StreamExt;
 
-        if let Ok(name) = device.parse::<device::Name>() {
+        if let Ok(name) = device.clone().try_into() {
             debug!("setting monitor for '{}'", &name);
 
             let start = range.as_ref().and_then(|v| v.start);
             let end = range.as_ref().and_then(|v| v.end);
 
-            if let Ok(rx) = db.1.monitor_device(name.clone(), start, end).await
-            {
+            if let Ok(rx) = db.1.monitor_device(name, start, end).await {
                 let stream = StreamExt::map(rx, Subscription::xlat(device));
 
                 Box::pin(stream) as device::DataStream<FieldResult<Reading>>
