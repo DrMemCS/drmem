@@ -17,7 +17,7 @@ These are the configuration parameters for an instance of the driver.
 - `interval` is the number of minutes between each update. If a
   personal key isn't specified, the interval can't be less than 10
   minutes. If this parameter isn't provided, 10 minutes is used.
-- `units` can be either "metric" or "imperial" and determines how the
+- `units` can be either "Metric" or "English" and determines how the
   device data is scaled (i.e. Celsius or Fahrenheit, etc.)
 
 ## Devices
