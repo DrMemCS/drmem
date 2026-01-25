@@ -5,7 +5,7 @@
 /// users outside of DrMem. LED WiFi light bulbs are one, obvious
 /// example. For devices that can be controlled outside of DrMem, we
 /// need a way to cooperatively control them. That's what
-/// `SharedReadWriteDevice`s do.
+/// `OverridableDevice`s do.
 ///
 /// A driver that uses this type of device must do these steps in
 /// their main loop:
@@ -16,8 +16,8 @@
 /// - after setting the hardware to a new value, a poll should
 ///   immediately be done followed by a `.report_update()`
 ///
-/// `SharedReadWriteDevice`s implement a simple state machine to know
-/// how to handle incoming incoming settings.
+/// `OverridableDevice`s implement a simple state machine to know how
+/// to handle incoming incoming settings.
 use crate::{
     device,
     driver::{rw_device, ReportReading, RxDeviceSetting, SettingResponder},
@@ -62,14 +62,14 @@ enum State<T: device::ReadWriteCompat> {
     },
 }
 
-pub struct SharedReadWriteDevice<T: device::ReadWriteCompat> {
+pub struct OverridableDevice<T: device::ReadWriteCompat> {
     state: State<T>,
     override_duration: Option<tokio::time::Duration>,
     report_chan: ReportReading,
     set_stream: rw_device::SettingStream<T>,
 }
 
-impl<T> SharedReadWriteDevice<T>
+impl<T> OverridableDevice<T>
 where
     T: device::ReadWriteCompat,
 {
@@ -79,7 +79,7 @@ where
         desired_value: Option<T>,
         override_duration: Option<tokio::time::Duration>,
     ) -> Self {
-        SharedReadWriteDevice {
+        OverridableDevice {
             state: desired_value
                 .map(|value| State::SettingTrans {
                     value: (value, None),
@@ -453,7 +453,7 @@ where
     }
 }
 
-impl<T> super::ResettableState for SharedReadWriteDevice<T>
+impl<T> super::ResettableState for OverridableDevice<T>
 where
     T: device::ReadWriteCompat,
 {
@@ -476,7 +476,7 @@ mod tests {
         time::{timeout, Duration},
     };
 
-    // Helper function that creates a `SharedReadWriteDevice`.
+    // Helper function that creates a `OverridableDevice`.
 
     fn mk_device<T: device::ReadWriteCompat>(
         init: Option<T>,
@@ -484,7 +484,7 @@ mod tests {
     ) -> (
         TxDeviceSetting,
         mpsc::Receiver<device::Value>,
-        SharedReadWriteDevice<T>,
+        OverridableDevice<T>,
     ) {
         let (rrtx, rrrx) = mpsc::channel(20);
         let (srtx, srrx) = mpsc::channel(20);
@@ -492,7 +492,7 @@ mod tests {
         (
             srtx,
             rrrx,
-            SharedReadWriteDevice::new(
+            OverridableDevice::new(
                 Box::new(move |v| {
                     let rrtx = rrtx.clone();
 

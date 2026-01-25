@@ -17,7 +17,7 @@
 //! ```
 
 use crate::driver::{
-    ro_device::ReadOnlyDevice, shared_rw_device::SharedReadWriteDevice,
+    overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
     DriverConfig, Registrator, RequestChan, Result,
 };
 use tokio::time::Duration;
@@ -29,10 +29,10 @@ pub struct Dimmer {
     pub error: ReadOnlyDevice<bool>,
     /// Controls the brightness setting of the dimmer. Off is 0.0 and
     /// full-on is 100.0.
-    pub brightness: SharedReadWriteDevice<f64>,
+    pub brightness: OverridableDevice<f64>,
     /// A product might include an indicator. If the hardware does,
     /// this device can turn it on and off.
-    pub indicator: SharedReadWriteDevice<bool>,
+    pub indicator: OverridableDevice<bool>,
 }
 
 impl Registrator for Dimmer {
@@ -45,7 +45,7 @@ impl Registrator for Dimmer {
         Ok(Dimmer {
             error: drc.add_ro_device("error", None, max_history).await?,
             brightness: drc
-                .add_shared_rw_device(
+                .add_overridable_device(
                     "brightness",
                     Some("%"),
                     override_timeout,
@@ -53,7 +53,7 @@ impl Registrator for Dimmer {
                 )
                 .await?,
             indicator: drc
-                .add_shared_rw_device(
+                .add_overridable_device(
                     "indicator",
                     None,
                     override_timeout,

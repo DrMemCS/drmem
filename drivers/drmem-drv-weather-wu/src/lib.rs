@@ -263,19 +263,11 @@ impl Instance {
             };
 
         if let Some(dewpt) = dewpt {
-            if (0.0..=200.0).contains(&dewpt) {
-                devices.dewpt.report_update(dewpt).await
-            } else {
-                warn!("ignoring bad dew point value: {:.1}", dewpt)
-            }
+            devices.dewpt.report_update(dewpt).await
         }
 
         if let Some(htidx) = htidx {
-            if (0.0..=200.0).contains(&htidx) {
-                devices.htidx.report_update(htidx).await
-            } else {
-                warn!("ignoring bad heat index value: {:.1}", htidx)
-            }
+            devices.htidx.report_update(htidx).await
         }
 
         if let (Some(prate), Some(ptotal)) = (prate, ptotal) {
