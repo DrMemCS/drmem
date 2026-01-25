@@ -17,7 +17,7 @@
 //! ```
 
 use crate::driver::{
-    ro_device::ReadOnlyDevice, shared_rw_device::SharedReadWriteDevice,
+    ro_device::ReadOnlyDevice, overridable_device::OverridableDevice,
     DriverConfig, Registrator, RequestChan, Result,
 };
 use std::future::Future;
@@ -30,10 +30,10 @@ pub struct Switch {
     pub error: ReadOnlyDevice<bool>,
     /// Indicates the state of the switch. Writing `true` or `false`
     /// turns the switch on and off, respectively.
-    pub state: SharedReadWriteDevice<bool>,
+    pub state: OverridableDevice<bool>,
     /// A product might include an indicator. If the hardware does,
     /// this device can turn it on and off.
-    pub indicator: SharedReadWriteDevice<bool>,
+    pub indicator: OverridableDevice<bool>,
 }
 
 impl Registrator for Switch {
@@ -57,7 +57,7 @@ impl Registrator for Switch {
                     .add_ro_device::<bool>(nm_error, None, max_history)
                     .await?,
                 state: drc
-                    .add_shared_rw_device::<bool>(
+                    .add_overridable_device::<bool>(
                         nm_state,
                         None,
                         override_timeout,
@@ -65,7 +65,7 @@ impl Registrator for Switch {
                     )
                     .await?,
                 indicator: drc
-                    .add_shared_rw_device::<bool>(
+                    .add_overridable_device::<bool>(
                         nm_indicator,
                         None,
                         override_timeout,

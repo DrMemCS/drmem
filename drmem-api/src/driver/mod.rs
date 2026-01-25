@@ -25,14 +25,14 @@ pub type DriverConfig = value::Table;
 pub mod classes;
 mod ro_device;
 mod rw_device;
-mod shared_rw_device;
+mod overridable_device;
 
 pub use ro_device::{ReadOnlyDevice, ReportReading};
 pub use rw_device::{
     ReadWriteDevice, RxDeviceSetting, SettingReply, SettingRequest,
     TxDeviceSetting,
 };
-pub use shared_rw_device::SharedReadWriteDevice;
+pub use overridable_device::OverridableDevice;
 
 /// Defines the requests that can be sent to core. Drivers don't use
 /// this type directly. They are indirectly used by `RequestChan`.
@@ -219,13 +219,13 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_shared_rw_device<T: device::ReadWriteCompat>(
+    pub async fn add_overridable_device<T: device::ReadWriteCompat>(
         &self,
         name: device::Base,
         units: Option<&str>,
         override_duration: Option<Duration>,
         max_history: Option<usize>,
-    ) -> Result<SharedReadWriteDevice<T>> {
+    ) -> Result<OverridableDevice<T>> {
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
@@ -241,7 +241,7 @@ impl RequestChan {
         if result.is_ok() {
             if let Ok(v) = rx.await {
                 return v.map(|(rr, rs, prev)| {
-                    SharedReadWriteDevice::new(
+                    OverridableDevice::new(
                         rr,
                         rs,
                         prev.and_then(|v| T::try_from(v).ok()),

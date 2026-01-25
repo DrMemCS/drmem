@@ -17,7 +17,7 @@
 //! ```
 
 use crate::driver::{
-    ro_device::ReadOnlyDevice, shared_rw_device::SharedReadWriteDevice,
+    ro_device::ReadOnlyDevice, overridable_device::OverridableDevice,
     DriverConfig, Registrator, RequestChan, Result,
 };
 use std::future::Future;
@@ -30,10 +30,10 @@ pub struct Dimmer {
     pub error: ReadOnlyDevice<bool>,
     /// Controls the brightness setting of the dimmer. Off is 0.0 and
     /// full-on is 100.0.
-    pub brightness: SharedReadWriteDevice<f64>,
+    pub brightness: OverridableDevice<f64>,
     /// A product might include an indicator. If the hardware does,
     /// this device can turn it on and off.
-    pub indicator: SharedReadWriteDevice<bool>,
+    pub indicator: OverridableDevice<bool>,
 }
 
 impl Registrator for Dimmer {
@@ -61,7 +61,7 @@ impl Registrator for Dimmer {
                     .add_ro_device::<bool>(nm_error, None, max_history)
                     .await?,
                 brightness: drc
-                    .add_shared_rw_device::<f64>(
+                    .add_overridable_device::<f64>(
                         nm_brightness,
                         Some("%"),
                         override_timeout,
@@ -69,7 +69,7 @@ impl Registrator for Dimmer {
                     )
                     .await?,
                 indicator: drc
-                    .add_shared_rw_device::<bool>(
+                    .add_overridable_device::<bool>(
                         nm_indicator,
                         None,
                         override_timeout,
