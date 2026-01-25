@@ -999,6 +999,60 @@ mod test {
         assert_eq!(emu.await.unwrap(), Ok(true));
     }
 
+    // Test a basic logic block in which a def expression can possibly
+    // not return a value and whether that condition is passed onto
+    // the controlling expression.
+
+    #[tokio::test]
+    async fn test_forwarding_none() {
+        let cfg = build_config(
+            &[("in", "device:in")],
+            &[("out", "device:out")],
+            &[("maybe", "if {in} <> 5 then {in} end")],
+            &["{maybe} -> {out}"],
+        );
+        let (tx_in, rx_in) = mpsc::channel(100);
+        let (tx_out, mut rx_out) = mpsc::channel(100);
+
+        let (_, _, emu, tx_stop) = Emulator::start(
+            vec![("device:in".into(), rx_in)],
+            vec![("device:out".into(), tx_out)],
+            cfg,
+        )
+        .await
+        .unwrap();
+
+        // Send a value and see if it was forwarded.
+
+        assert!(tx_in.send(device::Value::Int(4)).await.is_ok());
+
+        let (value, rpy) = rx_out.recv().await.unwrap();
+        let _ = rpy.send(Ok(value.clone()));
+
+        assert_eq!(value, device::Value::Int(4));
+
+        // Send a value that results in `def` not generating a value.
+        // The shouldn't be any change in the output.
+
+        assert!(tx_in.send(device::Value::Int(5)).await.is_ok());
+        assert!(time::timeout(Duration::from_millis(100), rx_out.recv())
+            .await
+            .is_err());
+
+        assert!(tx_in.send(device::Value::Int(6)).await.is_ok());
+
+        let (value, rpy) = rx_out.recv().await.unwrap();
+        let _ = rpy.send(Ok(value.clone()));
+
+        assert_eq!(value, device::Value::Int(6));
+
+        // Stop the emulator and see that its return status is good.
+
+        let _ = tx_stop.send(());
+
+        assert_eq!(emu.await.unwrap(), Ok(true));
+    }
+
     // Test a basic logic block in which forwards a solar parameter to
     // a memory device.
 
