@@ -17,7 +17,7 @@
 //! ```
 
 use crate::driver::{
-    ro_device::ReadOnlyDevice, shared_rw_device::SharedReadWriteDevice,
+    overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
     DriverConfig, Registrator, RequestChan, Result,
 };
 use tokio::time::Duration;
@@ -29,10 +29,10 @@ pub struct Switch {
     pub error: ReadOnlyDevice<bool>,
     /// Indicates the state of the switch. Writing `true` or `false`
     /// turns the switch on and off, respectively.
-    pub state: SharedReadWriteDevice<bool>,
+    pub state: OverridableDevice<bool>,
     /// A product might include an indicator. If the hardware does,
     /// this device can turn it on and off.
-    pub indicator: SharedReadWriteDevice<bool>,
+    pub indicator: OverridableDevice<bool>,
 }
 
 impl Registrator for Switch {
@@ -45,7 +45,7 @@ impl Registrator for Switch {
         Ok(Switch {
             error: drc.add_ro_device("error", None, max_history).await?,
             state: drc
-                .add_shared_rw_device(
+                .add_overridable_device(
                     "state",
                     None,
                     override_timeout,
@@ -53,7 +53,7 @@ impl Registrator for Switch {
                 )
                 .await?,
             indicator: drc
-                .add_shared_rw_device(
+                .add_overridable_device(
                     "indicator",
                     None,
                     override_timeout,

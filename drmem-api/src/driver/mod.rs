@@ -18,17 +18,17 @@ pub type Name = Arc<str>;
 
 pub mod classes;
 mod config;
+mod overridable_device;
 mod ro_device;
 mod rw_device;
-mod shared_rw_device;
 
 pub use config::DriverConfig;
+pub use overridable_device::OverridableDevice;
 pub use ro_device::{ReadOnlyDevice, ReportReading};
 pub use rw_device::{
     ReadWriteDevice, RxDeviceSetting, SettingRequest, SettingResponder,
     TxDeviceSetting,
 };
-pub use shared_rw_device::SharedReadWriteDevice;
 
 /// Defines the requests that can be sent to core. Drivers don't use
 /// this type directly. They are indirectly used by `RequestChan`.
@@ -233,13 +233,13 @@ impl RequestChan {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_shared_rw_device<T, N>(
+    pub async fn add_overridable_device<T, N>(
         &self,
         name: N,
         units: Option<&str>,
         override_duration: Option<Duration>,
         max_history: Option<usize>,
-    ) -> Result<SharedReadWriteDevice<T>>
+    ) -> Result<OverridableDevice<T>>
     where
         T: device::ReadWriteCompat,
         N: TryInto<Base>,
@@ -263,7 +263,7 @@ impl RequestChan {
         if result.is_ok() {
             if let Ok(v) = rx.await {
                 return v.map(|(rr, rs, prev)| {
-                    SharedReadWriteDevice::new(
+                    OverridableDevice::new(
                         rr,
                         rs,
                         prev.and_then(|v| T::try_from(v).ok()),
@@ -291,6 +291,43 @@ pub trait ResettableState {
 /// The only function in this trait is one to register the device(s)
 /// with core and return the set of handles.
 pub trait Registrator: ResettableState + Sized + Send {
+    /// Before a driver is run, the set of devices it uses needs to be
+    /// registered. The structure that holds the registered device
+    /// channels should implement this trait.
+    ///
+    /// `drc` is a communication channel with which the driver makes
+    /// requests to the core. Its typical use is to register devices
+    /// with the framework, which is usually done in this method. As
+    /// other request types are added, they can be used while the
+    /// driver is running.
+    ///
+    /// `cfg` holds the configuration parameters for the instance of
+    /// the driver. This parameter is also passed to the driver's
+    /// `create_instance` method where it is more useful. Since the
+    /// purpose of this trait is to register devices, the other useful
+    /// configuration paramters would be ones that manipulate the
+    /// names of devices. This method should not use this parameter to
+    /// set up resouces (like sockets) for the driver instance.
+    ///
+    /// `override_timeout` is used to set how long a device can be
+    /// overridden. Some drivers control devices that can also be
+    /// controlled by other means than DrMem. When those devices
+    /// recognize they've been controlled externally, they go into
+    /// "override" mode in which settings are remembered but not
+    /// forwarded to the hardware. When override mode is entered, a
+    /// timer is set to expire at which the devices are again
+    /// controlled by DrMem .
+    ///
+    /// `max_history` is specified in the configuration file. It is a
+    /// hint as to the maximum number of data point to save for each
+    /// of the devices created by this driver. A backend can choose to
+    /// interpret this in its own way. For instance, the simple
+    /// backend can only ever save one data point. Redis will take
+    /// this as a hint and will choose the most efficient way to prune
+    /// the history. That means, if more than the limit is present,
+    /// redis won't prune the history to less than the limit. However
+    /// there may be more than the limit -- it just won't grow without
+    /// bound.
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
         cfg: &'a DriverConfig,
@@ -316,23 +353,6 @@ pub trait API: Send + Sync {
     /// validate the parameters and convert them into forms useful to
     /// the driver. By convention, if any errors are found in the
     /// configuration, this method should return `Error::BadConfig`.
-    ///
-    /// `drc` is a communication channel with which the driver makes
-    /// requests to the core. Its typical use is to register devices
-    /// with the framework, which is usually done in this method. As
-    /// other request types are added, they can be used while the
-    /// driver is running.
-    ///
-    /// `max_history` is specified in the configuration file. It is a
-    /// hint as to the maximum number of data point to save for each
-    /// of the devices created by this driver. A backend can choose to
-    /// interpret this in its own way. For instance, the simple
-    /// backend can only ever save one data point. Redis will take
-    /// this as a hint and will choose the most efficient way to prune
-    /// the history. That means, if more than the limit is present,
-    /// redis won't prune the history to less than the limit. However
-    /// there may be more than the limit -- it just won't grow without
-    /// bound.
     fn create_instance(
         cfg: &DriverConfig,
     ) -> impl Future<Output = Result<Box<Self>>> + Send;
