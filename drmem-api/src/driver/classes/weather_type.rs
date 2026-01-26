@@ -1,21 +1,18 @@
-use crate::driver::{self, DriverConfig, Registrator, RequestChan, Result};
-use tokio::time::Duration;
+use crate::driver::{self, Registrator, RequestChan, Result};
 
-#[derive(serde::Deserialize)]
-pub enum Units {
+#[derive(serde::Deserialize, Clone)]
+pub enum WeatherUnits {
     English,
     Metric,
 }
 
 #[derive(serde::Deserialize)]
-struct WeatherCfg {
-    station: String,
-    units: Units,
+pub struct WeatherConfig {
+    pub units: WeatherUnits,
 }
 
 pub struct Weather {
-    pub station: String,
-    pub units: Units,
+    pub units: WeatherUnits,
 
     pub dewpt: driver::ReadOnlyDevice<f64>,
     pub htidx: driver::ReadOnlyDevice<f64>,
@@ -35,20 +32,19 @@ pub struct Weather {
 }
 
 impl Registrator for Weather {
+    type Config = WeatherConfig;
+
     async fn register_devices(
         drc: &mut RequestChan,
-        cfg: &DriverConfig,
-        _override_timeout: Option<Duration>,
+        cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let cfg: WeatherCfg = cfg.parse_into()?;
-
-        let temp_unit = Some(if let Units::English = cfg.units {
+        let temp_unit = Some(if let WeatherUnits::English = cfg.units {
             "°F"
         } else {
             "°C"
         });
-        let speed_unit = Some(if let Units::English = cfg.units {
+        let speed_unit = Some(if let WeatherUnits::English = cfg.units {
             "mph"
         } else {
             "km/h"
@@ -66,7 +62,7 @@ impl Registrator for Weather {
         let prec_rate = drc
             .add_ro_device(
                 "precip-rate",
-                Some(if let Units::English = cfg.units {
+                Some(if let WeatherUnits::English = cfg.units {
                     "in/hr"
                 } else {
                     "mm/hr"
@@ -78,7 +74,7 @@ impl Registrator for Weather {
         let prec_total = drc
             .add_ro_device(
                 "precip-total",
-                Some(if let Units::English = cfg.units {
+                Some(if let WeatherUnits::English = cfg.units {
                     "in"
                 } else {
                     "mm"
@@ -90,7 +86,7 @@ impl Registrator for Weather {
         let prec_last_total = drc
             .add_ro_device(
                 "precip-last-total",
-                Some(if let Units::English = cfg.units {
+                Some(if let WeatherUnits::English = cfg.units {
                     "in"
                 } else {
                     "mm"
@@ -102,7 +98,7 @@ impl Registrator for Weather {
         let pressure = drc
             .add_ro_device(
                 "pressure",
-                Some(if let Units::English = cfg.units {
+                Some(if let WeatherUnits::English = cfg.units {
                     "inHg"
                 } else {
                     "hPa"
@@ -133,8 +129,7 @@ impl Registrator for Weather {
             .await?;
 
         Ok(Weather {
-            station: cfg.station,
-            units: cfg.units,
+            units: cfg.units.clone(),
             dewpt,
             htidx,
             humidity,

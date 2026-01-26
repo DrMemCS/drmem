@@ -18,7 +18,7 @@
 
 use crate::driver::{
     overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
-    DriverConfig, Registrator, RequestChan, Result,
+    Registrator, RequestChan, Result,
 };
 use tokio::time::Duration;
 
@@ -36,10 +36,11 @@ pub struct Dimmer {
 }
 
 impl Registrator for Dimmer {
+    type Config = Option<Duration>;
+
     async fn register_devices(
         drc: &mut RequestChan,
-        _cfg: &DriverConfig,
-        override_timeout: Option<Duration>,
+        cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         Ok(Dimmer {
@@ -48,17 +49,12 @@ impl Registrator for Dimmer {
                 .add_overridable_device(
                     "brightness",
                     Some("%"),
-                    override_timeout,
+                    *cfg,
                     max_history,
                 )
                 .await?,
             indicator: drc
-                .add_overridable_device(
-                    "indicator",
-                    None,
-                    override_timeout,
-                    max_history,
-                )
+                .add_overridable_device("indicator", None, *cfg, max_history)
                 .await?,
         })
     }

@@ -52,6 +52,14 @@ impl From<DriverConfig> for Table {
     }
 }
 
+impl std::convert::TryFrom<DriverConfig> for () {
+    type Error = std::convert::Infallible;
+
+    fn try_from(_cfg: DriverConfig) -> std::result::Result<Self, Self::Error> {
+        Ok(())
+    }
+}
+
 impl Deref for DriverConfig {
     type Target = Table;
 
