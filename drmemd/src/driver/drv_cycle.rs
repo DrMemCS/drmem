@@ -1,7 +1,7 @@
 use drmem_api::{
     device,
     driver::{self, DriverConfig, ResettableState},
-    Result,
+    Error, Result,
 };
 use std::convert::Infallible;
 use tokio::time::{self, Duration};
@@ -16,12 +16,20 @@ enum CycleState {
 }
 
 #[derive(serde::Deserialize)]
-struct InstanceConfig {
+pub struct InstanceConfig {
     millis: u64,
     #[serde(default = "cfg_eab_default")]
     enabled_at_boot: bool,
     disabled: device::Value,
     enabled: Vec<device::Value>,
+}
+
+impl TryFrom<DriverConfig> for InstanceConfig {
+    type Error = Error;
+
+    fn try_from(cfg: DriverConfig) -> std::result::Result<Self, Self::Error> {
+        cfg.parse_into()
+    }
 }
 
 fn cfg_eab_default() -> bool {
@@ -139,10 +147,11 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
+    type Config = InstanceConfig;
+
     async fn register_devices(
         core: &mut driver::RequestChan,
-        _cfg: &DriverConfig,
-        _override_timeout: Option<Duration>,
+        _cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         // Define the devices managed by this driver.
@@ -165,16 +174,15 @@ impl driver::Registrator for Devices {
 }
 
 impl driver::API for Instance {
+    type Config = InstanceConfig;
     type HardwareType = Devices;
 
-    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
-        let cfg: InstanceConfig = cfg.parse_into()?;
-
+    async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         Ok(Box::new(Instance::new(
             cfg.enabled_at_boot,
             Duration::from_millis(cfg.millis),
-            cfg.disabled,
-            cfg.enabled,
+            cfg.disabled.clone(),
+            cfg.enabled.clone(),
         )))
     }
 

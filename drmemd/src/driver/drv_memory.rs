@@ -1,10 +1,9 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig, ResettableState},
+    driver::{self, ResettableState},
     Error, Result,
 };
 use std::{convert::Infallible, future::Future};
-use tokio::time::Duration;
 
 // Defines the signature if a function that validates a
 // `device::Value`'s type.
@@ -97,28 +96,27 @@ impl Devices {
 }
 
 mod config {
-    use drmem_api::{device, driver, Result};
+    use drmem_api::{device, driver, Error};
 
-    #[derive(serde::Deserialize)]
-    struct Entry {
-        name: String,
-        initial: device::Value,
+    #[derive(serde::Deserialize, Debug, PartialEq)]
+    pub struct Entry {
+        pub name: device::Base,
+        pub initial: device::Value,
     }
 
-    #[derive(serde::Deserialize)]
-    struct InstanceConfig {
-        vars: Vec<Entry>,
+    #[derive(serde::Deserialize, Debug, PartialEq)]
+    pub struct InstanceConfig {
+        pub vars: Vec<Entry>,
     }
 
-    pub fn parse(
-        cfg: &driver::DriverConfig,
-    ) -> Result<Vec<(device::Base, device::Value)>> {
-        let cfg: InstanceConfig = cfg.parse_into()?;
+    impl TryFrom<driver::DriverConfig> for InstanceConfig {
+        type Error = Error;
 
-        cfg.vars
-            .iter()
-            .map(|e| e.name.clone().try_into().map(|v| (v, e.initial.clone())))
-            .collect()
+        fn try_from(
+            cfg: driver::DriverConfig,
+        ) -> std::result::Result<Self, Self::Error> {
+            cfg.parse_into()
+        }
     }
 }
 
@@ -138,16 +136,16 @@ impl Instance {
 }
 
 impl driver::Registrator for Devices {
+    type Config = config::InstanceConfig;
+
     async fn register_devices(
         core: &mut driver::RequestChan,
-        cfg: &DriverConfig,
-        _override_timeout: Option<Duration>,
+        cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        let mut vars = config::parse(cfg)?;
         let mut devs = vec![];
 
-        for (name, init_val) in vars.drain(..) {
+        for e in cfg.vars.iter() {
             // This device is settable. Any setting is forwarded to
             // the backend.
 
@@ -155,8 +153,9 @@ impl driver::Registrator for Devices {
                 driver::ReadWriteDevice<device::Value>,
                 TypeChecker,
             ) = (
-                core.add_rw_device(name, None, max_history).await?,
-                get_validator(&init_val),
+                core.add_rw_device(e.name.clone(), None, max_history)
+                    .await?,
+                get_validator(&e.initial),
             );
 
             // If the user configured an initial value and there was
@@ -167,10 +166,10 @@ impl driver::Registrator for Devices {
             if entry
                 .0
                 .get_last()
-                .map(|v| !v.is_same_type(&init_val))
+                .map(|v| !v.is_same_type(&e.initial))
                 .unwrap_or(true)
             {
-                entry.0.report_update(init_val).await
+                entry.0.report_update(e.initial.clone()).await
             }
 
             // Add the entry to the driver's set of devices.
@@ -183,9 +182,10 @@ impl driver::Registrator for Devices {
 }
 
 impl driver::API for Instance {
+    type Config = config::InstanceConfig;
     type HardwareType = Devices;
 
-    async fn create_instance(_cfg: &DriverConfig) -> Result<Box<Self>> {
+    async fn create_instance(_cfg: &Self::Config) -> Result<Box<Self>> {
         Ok(Box::new(Instance::new()))
     }
 
@@ -273,11 +273,12 @@ mod tests {
         }
     }
 
-    fn mk_cfg(text: &str) -> Result<Vec<(device::Base, device::Value)>> {
-        config::parse(&Into::<DriverConfig>::into(
+    fn mk_cfg(text: &str) -> Result<config::InstanceConfig> {
+        Into::<DriverConfig>::into(
             toml::from_str::<toml::value::Table>(text)
                 .map_err(|e| Error::ConfigError(format!("{}", e)))?,
-        ))
+        )
+        .parse_into()
     }
 
     #[test]
@@ -302,10 +303,18 @@ mod tests {
 vars = [{name = \"v1\", initial = true},
         {name = \"v2\", initial = 100}]"
                 ),
-                Ok(vec![
-                    ("v1".try_into().unwrap(), device::Value::Bool(true)),
-                    ("v2".try_into().unwrap(), device::Value::Int(100))
-                ])
+                Ok(config::InstanceConfig {
+                    vars: vec![
+                        config::Entry {
+                            name: "v1".try_into().unwrap(),
+                            initial: device::Value::Bool(true)
+                        },
+                        config::Entry {
+                            name: "v2".try_into().unwrap(),
+                            initial: device::Value::Int(100)
+                        }
+                    ]
+                })
             );
         }
 
@@ -342,12 +351,12 @@ vars = [{name = \"v1\", initial = true},
                     Value::Array(vec![Value::Table(tbl)]),
                 );
 
-                let result =
-                    config::parse(&Into::<DriverConfig>::into(map)).unwrap();
+                let result: config::InstanceConfig =
+                    Into::<DriverConfig>::into(map).parse_into().unwrap();
 
-                assert!(result.len() == 1);
-                assert_eq!(result[0].0.to_string(), entry.0);
-                assert_eq!(result[0].1, entry.2);
+                assert!(result.vars.len() == 1);
+                assert_eq!(result.vars[0].name.to_string(), entry.0);
+                assert_eq!(result.vars[0].initial, entry.2);
             }
         }
     }
