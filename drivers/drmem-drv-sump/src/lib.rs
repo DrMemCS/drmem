@@ -140,9 +140,17 @@ impl State {
 }
 
 #[derive(serde::Deserialize)]
-struct InstanceConfig {
+pub struct InstanceConfig {
     addr: SocketAddrV4,
     gpm: f64,
+}
+
+impl TryFrom<DriverConfig> for InstanceConfig {
+    type Error = Error;
+
+    fn try_from(cfg: DriverConfig) -> std::result::Result<Self, Self::Error> {
+        cfg.parse_into()
+    }
 }
 
 pub struct Instance {
@@ -246,10 +254,11 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
+    type Config = InstanceConfig;
+
     async fn register_devices(
         core: &mut driver::RequestChan,
-        _: &DriverConfig,
-        _override_timeout: Option<Duration>,
+        _: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         // Define the devices managed by this driver.
@@ -276,11 +285,10 @@ impl driver::Registrator for Devices {
 }
 
 impl driver::API for Instance {
+    type Config = InstanceConfig;
     type HardwareType = Devices;
 
-    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
-        let cfg: InstanceConfig = cfg.parse_into()?;
-
+    async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         Span::current().record("cfg", cfg.addr.to_string());
 
         // Connect with the remote process that is connected to the
