@@ -1,9 +1,11 @@
 use drmem_api::{
-    driver::{self, classes, DriverConfig},
+    driver::{
+        self, classes, DriverConfig, Registrator, RequestChan, ResettableState,
+    },
     Error, Result,
 };
 use std::convert::{Infallible, TryFrom};
-use std::{future::Future, time::SystemTime};
+use std::time::SystemTime;
 use tokio::time::{interval_at, Duration, Instant};
 use tracing::{debug, error, warn, Span};
 use weather_underground as wu;
@@ -156,10 +158,56 @@ impl PrecipState {
     }
 }
 
+#[derive(serde::Deserialize)]
+pub struct InstanceConfig {
+    pub api_key: Option<String>,
+    pub station: String,
+    pub interval: Option<u64>,
+    pub units: classes::WeatherUnits,
+}
+
+impl TryFrom<DriverConfig> for InstanceConfig {
+    type Error = Error;
+
+    fn try_from(cfg: DriverConfig) -> std::result::Result<Self, Self::Error> {
+        cfg.parse_into()
+    }
+}
+
+pub struct Devices(classes::Weather);
+
+impl Registrator for Devices {
+    type Config = InstanceConfig;
+
+    async fn register_devices(
+        drc: &mut RequestChan,
+        cfg: &Self::Config,
+        max_history: Option<usize>,
+    ) -> Result<Self> {
+        Ok(Devices(
+            classes::Weather::register_devices(
+                drc,
+                &classes::WeatherConfig {
+                    units: cfg.units.clone(),
+                },
+                max_history,
+            )
+            .await?,
+        ))
+    }
+}
+
+impl ResettableState for Devices {
+    fn reset_state(&mut self) {
+        self.0.reset_state()
+    }
+}
+
 pub struct Instance {
     con: reqwest::Client,
     api_key: String,
     interval: Duration,
+    station: String,
 
     precip: PrecipState,
 }
@@ -171,28 +219,6 @@ impl Instance {
         "obtains weather data from Weather Underground";
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
-
-    fn get_cfg_interval(cfg: &DriverConfig) -> Result<u64> {
-        match cfg.get("interval") {
-            Some(toml::value::Value::Integer(val)) => {
-                Ok(std::cmp::max(*val as u64, 1))
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'interval' config parameter should be a positive integer",
-            ))),
-            None => Ok(DEFAULT_INTERVAL),
-        }
-    }
-
-    fn get_cfg_key(cfg: &DriverConfig) -> Result<Option<String>> {
-        match cfg.get("key") {
-            Some(toml::value::Value::String(val)) => Ok(Some(val.to_string())),
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'key' config parameter should be a string",
-            ))),
-            None => Ok(None),
-        }
-    }
 
     async fn get_cfg_key_and_interval(
         con: &mut reqwest::Client,
@@ -230,7 +256,7 @@ impl Instance {
         // English and Metric.
 
         let (dewpt, htidx, prate, ptotal, press, temp, wndchl, wndgst, wndspd) =
-            if let classes::Units::Metric = devices.units {
+            if let classes::WeatherUnits::Metric = devices.0.units {
                 if let Some(params) = &obs.metric {
                     (
                         params.dewpt,
@@ -263,45 +289,45 @@ impl Instance {
             };
 
         if let Some(dewpt) = dewpt {
-            devices.dewpt.report_update(dewpt).await
+            devices.0.dewpt.report_update(dewpt).await
         }
 
         if let Some(htidx) = htidx {
-            devices.htidx.report_update(htidx).await
+            devices.0.htidx.report_update(htidx).await
         }
 
         if let (Some(prate), Some(ptotal)) = (prate, ptotal) {
             let (nrate, ntotal, nlast) =
                 self.precip.update(prate, ptotal, SystemTime::now());
 
-            devices.prec_rate.report_update(nrate).await;
-            devices.prec_total.report_update(ntotal).await;
+            devices.0.prec_rate.report_update(nrate).await;
+            devices.0.prec_total.report_update(ntotal).await;
 
             if let Some(last) = nlast {
-                devices.prec_last_total.report_update(last).await;
+                devices.0.prec_last_total.report_update(last).await;
             }
         } else {
             warn!("need both precip fields to update precip calculations")
         }
 
         if let Some(press) = press {
-            devices.pressure.report_update(press).await
+            devices.0.pressure.report_update(press).await
         }
 
         if let Some(temp) = temp {
-            devices.temp.report_update(temp).await
+            devices.0.temp.report_update(temp).await
         }
 
         if let Some(wndchl) = wndchl {
-            devices.wndchl.report_update(wndchl).await
+            devices.0.wndchl.report_update(wndchl).await
         }
 
         if let Some(wndgst) = wndgst {
-            devices.wndgst.report_update(wndgst).await
+            devices.0.wndgst.report_update(wndgst).await
         }
 
         if let Some(wndspd) = wndspd {
-            devices.wndspd.report_update(wndspd).await
+            devices.0.wndspd.report_update(wndspd).await
         }
 
         // If solar radiation readings are provided, report them.
@@ -313,7 +339,7 @@ impl Instance {
             // slightly inaccurate sensors won't be ignored.
 
             if (0.0..=1400.0).contains(&sol_rad) {
-                devices.solrad.report_update(sol_rad).await
+                devices.0.solrad.report_update(sol_rad).await
             } else {
                 warn!("ignoring bad solar radiation value: {:.1}", sol_rad)
             }
@@ -326,7 +352,7 @@ impl Instance {
             // doubtful there's a place on earth that gets that low.
 
             if (0.0..=100.0).contains(&humidity) {
-                devices.humidity.report_update(humidity).await
+                devices.0.humidity.report_update(humidity).await
             } else {
                 warn!("ignoring bad humidity value: {:.1}", humidity)
             }
@@ -335,7 +361,7 @@ impl Instance {
         // If UV readings are provided, report them.
 
         if let Some(uv) = obs.uv {
-            devices.uv.report_update(uv).await
+            devices.0.uv.report_update(uv).await
         }
 
         // If wind direction readings are provided, report them.
@@ -344,7 +370,7 @@ impl Instance {
             // Make sure the reading is in range.
 
             if (0.0..=360.0).contains(&winddir) {
-                devices.wnddir.report_update(winddir).await
+                devices.0.wnddir.report_update(winddir).await
             } else {
                 warn!("ignoring bad wind direction value: {:.1}", winddir)
             }
@@ -352,58 +378,52 @@ impl Instance {
     }
 }
 
-fn xlat_units(u: &classes::Units) -> wu::Unit {
+fn xlat_units(u: &classes::WeatherUnits) -> wu::Unit {
     match u {
-        classes::Units::English => wu::Unit::English,
-        classes::Units::Metric => wu::Unit::Metric,
+        classes::WeatherUnits::English => wu::Unit::English,
+        classes::WeatherUnits::Metric => wu::Unit::Metric,
     }
 }
 
 impl driver::API for Instance {
-    type HardwareType = classes::Weather;
+    type Config = InstanceConfig;
+    type HardwareType = Devices;
 
-    fn create_instance(
-        cfg: &DriverConfig,
-    ) -> impl Future<Output = Result<Box<Self>>> + Send {
-        debug!("reading config parameters");
+    async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
+        match wu::create_client(Duration::from_secs(5)) {
+            Ok(mut con) => {
+                // Validate the driver parameters.
 
-        let interval = Instance::get_cfg_interval(cfg);
-        let key = Instance::get_cfg_key(cfg);
+                let (api_key, interval) = Instance::get_cfg_key_and_interval(
+                    &mut con,
+                    cfg.api_key.clone(),
+                    cfg.interval.unwrap_or(DEFAULT_INTERVAL),
+                )
+                .await?;
 
-        async move {
-            match wu::create_client(Duration::from_secs(5)) {
-                Ok(mut con) => {
-                    // Validate the driver parameters.
+                // Assemble and return the state of the driver.
 
-                    let (api_key, interval) =
-                        Instance::get_cfg_key_and_interval(
-                            &mut con, key?, interval?,
-                        )
-                        .await?;
+                debug!("instance successfully created");
 
-                    // Assemble and return the state of the driver.
-
-                    debug!("instance successfully created");
-
-                    Ok(Box::new(Instance {
-                        con,
-                        api_key,
-                        interval,
-                        precip: PrecipState::new(),
-                    }))
-                }
-                Err(e) => Err(Error::ConfigError(format!(
-                    "couldn't build client connection -- {}",
-                    &e
-                ))),
+                Ok(Box::new(Instance {
+                    con,
+                    api_key,
+                    interval,
+                    station: cfg.station.clone(),
+                    precip: PrecipState::new(),
+                }))
             }
+            Err(e) => Err(Error::ConfigError(format!(
+                "couldn't build client connection -- {}",
+                &e
+            ))),
         }
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {
-        Span::current().record("cfg", devices.station.as_str());
+        Span::current().record("cfg", self.station.as_str());
 
-        devices.error.report_update(false).await;
+        devices.0.error.report_update(false).await;
 
         let mut timer = interval_at(Instant::now(), self.interval);
 
@@ -421,8 +441,8 @@ impl driver::API for Instance {
             let result = wu::fetch_observation(
                 &self.con,
                 &self.api_key,
-                &devices.station,
-                &xlat_units(&devices.units),
+                &self.station,
+                &xlat_units(&devices.0.units),
             )
             .await;
 
@@ -440,7 +460,7 @@ impl driver::API for Instance {
                                     if obs.len() > 1 {
                                         warn!("ignoring {} extra weather observations", obs.len() - 1);
                                     }
-                                    devices.error.report_update(false).await;
+                                    devices.0.error.report_update(false).await;
                                     self.handle(&obs[0], devices).await;
                                     continue;
                                 }
@@ -449,19 +469,19 @@ impl driver::API for Instance {
                         }
 
                         Err(e) => {
-                            devices.error.report_update(true).await;
+                            devices.0.error.report_update(true).await;
                             panic!("error response from Weather Underground -- {:?}", &e)
                         }
                     }
                 }
 
                 Ok(None) => {
-                    devices.error.report_update(true).await;
+                    devices.0.error.report_update(true).await;
                     panic!("no response from Weather Underground")
                 }
 
                 Err(e) => {
-                    devices.error.report_update(true).await;
+                    devices.0.error.report_update(true).await;
                     panic!("error accessing Weather Underground -- {:?}", &e)
                 }
             }
