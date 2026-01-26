@@ -1,10 +1,9 @@
 use drmem_api::{
     device,
     driver::{self, DriverConfig, ResettableState},
-    Result,
+    Error, Result,
 };
 use std::convert::Infallible;
-use tokio::time::Duration;
 
 // This enum represents the two states in which the latch can be.
 
@@ -15,9 +14,17 @@ enum LatchState {
 }
 
 #[derive(serde::Deserialize)]
-struct InstanceConfig {
+pub struct InstanceConfig {
     disabled: device::Value,
     enabled: device::Value,
+}
+
+impl TryFrom<DriverConfig> for InstanceConfig {
+    type Error = Error;
+
+    fn try_from(cfg: DriverConfig) -> std::result::Result<Self, Self::Error> {
+        cfg.parse_into()
+    }
 }
 
 pub struct Instance {
@@ -80,10 +87,11 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
+    type Config = InstanceConfig;
+
     async fn register_devices(
         core: &mut driver::RequestChan,
-        _cfg: &DriverConfig,
-        _override_timeout: Option<Duration>,
+        _cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         // Define the devices managed by this driver.
@@ -106,14 +114,16 @@ impl driver::Registrator for Devices {
 }
 
 impl driver::API for Instance {
+    type Config = InstanceConfig;
     type HardwareType = Devices;
 
-    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
-        let cfg: InstanceConfig = cfg.parse_into()?;
-
+    async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         // Build and return the future.
 
-        Ok(Box::new(Instance::new(cfg.enabled, cfg.disabled)))
+        Ok(Box::new(Instance::new(
+            cfg.enabled.clone(),
+            cfg.disabled.clone(),
+        )))
     }
 
     async fn run(&mut self, devices: &mut Self::HardwareType) -> Infallible {

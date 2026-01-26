@@ -1,6 +1,6 @@
 [package]
 name = "drmem-drv-weather-wu"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 homepage = "https://github.com/DrMemCS/drmem"
@@ -36,4 +36,4 @@ reqwest.default-features = false
 weather-underground.version = "0.1"
 weather-underground.default-features = false
 
-drmem-api = { path = "../../drmem-api", version = "0.6" }
+drmem-api = { path = "../../drmem-api", version = "0.7" }

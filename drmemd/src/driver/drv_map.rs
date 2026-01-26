@@ -1,10 +1,9 @@
 use drmem_api::{
     device,
-    driver::{self, DriverConfig, ResettableState},
+    driver::{self, ResettableState},
     Result,
 };
 use std::{convert::Infallible, ops::RangeInclusive};
-use tokio::time::Duration;
 
 mod config {
     use drmem_api::{device, driver::DriverConfig, Error, Result};
@@ -21,6 +20,16 @@ mod config {
         pub initial: Option<i32>,
         pub default: device::Value,
         pub values: Vec<Entry>,
+    }
+
+    impl TryFrom<DriverConfig> for InstanceConfig {
+        type Error = Error;
+
+        fn try_from(
+            cfg: DriverConfig,
+        ) -> std::result::Result<Self, Self::Error> {
+            parse(&cfg)
+        }
     }
 
     // Convert the TOML Table into `InstanceConfig`.
@@ -65,12 +74,10 @@ impl Instance {
     pub const DESCRIPTION: &'static str = include_str!("drv_map.md");
 
     /// Creates a new `Instance` instance.
-    fn new(cfg: &DriverConfig) -> Result<Instance> {
-        let cfg = config::parse(cfg)?;
-
+    fn new(cfg: &config::InstanceConfig) -> Result<Instance> {
         Ok(Instance {
             init_index: cfg.initial,
-            def_val: cfg.default,
+            def_val: cfg.default.clone(),
             values: cfg.values.iter().map(Instance::to_entry).collect(),
         })
     }
@@ -119,10 +126,11 @@ pub struct Devices {
 }
 
 impl driver::Registrator for Devices {
+    type Config = config::InstanceConfig;
+
     async fn register_devices(
         core: &mut driver::RequestChan,
-        _cfg: &DriverConfig,
-        _override_timeout: Option<Duration>,
+        _cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         // Define the devices managed by this driver.
@@ -141,9 +149,10 @@ impl driver::Registrator for Devices {
 }
 
 impl driver::API for Instance {
+    type Config = config::InstanceConfig;
     type HardwareType = Devices;
 
-    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
+    async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         Instance::new(cfg).map(Box::new)
     }
 

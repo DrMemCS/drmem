@@ -5,7 +5,11 @@ use crate::types::{
     device::{self, Base},
     Error,
 };
-use std::{convert::Infallible, future::Future, sync::Arc};
+use std::{
+    convert::{Infallible, TryFrom},
+    future::Future,
+    sync::Arc,
+};
 use tokio::{
     sync::{mpsc, oneshot},
     time::Duration,
@@ -291,6 +295,8 @@ pub trait ResettableState {
 /// The only function in this trait is one to register the device(s)
 /// with core and return the set of handles.
 pub trait Registrator: ResettableState + Sized + Send {
+    type Config: Send + Sync;
+
     /// Before a driver is run, the set of devices it uses needs to be
     /// registered. The structure that holds the registered device
     /// channels should implement this trait.
@@ -309,15 +315,6 @@ pub trait Registrator: ResettableState + Sized + Send {
     /// names of devices. This method should not use this parameter to
     /// set up resouces (like sockets) for the driver instance.
     ///
-    /// `override_timeout` is used to set how long a device can be
-    /// overridden. Some drivers control devices that can also be
-    /// controlled by other means than DrMem. When those devices
-    /// recognize they've been controlled externally, they go into
-    /// "override" mode in which settings are remembered but not
-    /// forwarded to the hardware. When override mode is entered, a
-    /// timer is set to expire at which the devices are again
-    /// controlled by DrMem .
-    ///
     /// `max_history` is specified in the configuration file. It is a
     /// hint as to the maximum number of data point to save for each
     /// of the devices created by this driver. A backend can choose to
@@ -330,8 +327,7 @@ pub trait Registrator: ResettableState + Sized + Send {
     /// bound.
     fn register_devices<'a>(
         drc: &'a mut RequestChan,
-        cfg: &'a DriverConfig,
-        override_timeout: Option<Duration>,
+        cfg: &'a Self::Config,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send;
 }
@@ -342,7 +338,8 @@ pub trait Registrator: ResettableState + Sized + Send {
 /// from a driver instance. By supporting this API, the framework can
 /// create driver instances and monitor them as they run.
 pub trait API: Send + Sync {
-    type HardwareType: Registrator;
+    type Config: TryFrom<DriverConfig> + Send + Sync;
+    type HardwareType: Registrator<Config = Self::Config>;
 
     /// Creates an instance of the driver.
     ///
@@ -354,7 +351,7 @@ pub trait API: Send + Sync {
     /// the driver. By convention, if any errors are found in the
     /// configuration, this method should return `Error::BadConfig`.
     fn create_instance(
-        cfg: &DriverConfig,
+        cfg: &Self::Config,
     ) -> impl Future<Output = Result<Box<Self>>> + Send;
 
     /// Runs the instance of the driver.

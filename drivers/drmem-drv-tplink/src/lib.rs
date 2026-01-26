@@ -50,6 +50,28 @@ mod tplink;
 
 const BUF_TOTAL: usize = 4_096;
 
+#[derive(serde::Deserialize)]
+pub enum DevCfgType {
+    Switch,
+    Outlet,
+    Dimmer,
+}
+
+#[derive(serde::Deserialize)]
+pub struct InstanceConfig {
+    addr: SocketAddrV4,
+    r#type: DevCfgType,
+    override_timeout: Option<u64>,
+}
+
+impl TryFrom<DriverConfig> for InstanceConfig {
+    type Error = Error;
+
+    fn try_from(cfg: DriverConfig) -> std::result::Result<Self, Self::Error> {
+        cfg.parse_into()
+    }
+}
+
 // Holds the state of the device received by an info request. Switch
 // and outlet devices will always return None for the brightness.
 struct DeviceState {
@@ -85,43 +107,31 @@ impl ResettableState for DevType {
 }
 
 impl Registrator for DevType {
+    type Config = InstanceConfig;
+
     // Defines the registration interface for the device set.
     async fn register_devices<'a>(
         drc: &'a mut RequestChan,
-        cfg: &'a DriverConfig,
-        override_timeout: Option<Duration>,
+        cfg: &'a Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
-        match cfg.get("type") {
-            Some(toml::value::Value::String(dtype)) => match dtype.as_str() {
-                "outlet" | "switch" => Ok(DevType::Switch(
-                    classes::Switch::register_devices(
-                        drc,
-                        cfg,
-                        override_timeout,
-                        max_history,
-                    )
-                    .await?,
-                )),
-                "dimmer" => Ok(DevType::Dimmer(
-                    classes::Dimmer::register_devices(
-                        drc,
-                        cfg,
-                        override_timeout,
-                        max_history,
-                    )
-                    .await?,
-                )),
-                _ => Err(Error::ConfigError(String::from(
-                    "'type' must be \"dimmer\", \"outlet\", or \"switch\"",
-                ))),
-            },
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'type' config parameter should be a string",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'type' parameter in config",
-            ))),
+        match cfg.r#type {
+            DevCfgType::Switch | DevCfgType::Outlet => Ok(DevType::Switch(
+                classes::Switch::register_devices(
+                    drc,
+                    &cfg.override_timeout.map(|v| Duration::from_secs(60 * v)),
+                    max_history,
+                )
+                .await?,
+            )),
+            DevCfgType::Dimmer => Ok(DevType::Dimmer(
+                classes::Dimmer::register_devices(
+                    drc,
+                    &cfg.override_timeout.map(|v| Duration::from_secs(60 * v)),
+                    max_history,
+                )
+                .await?,
+            )),
         }
     }
 }
@@ -139,29 +149,6 @@ impl Instance {
     pub const SUMMARY: &'static str = "monitors and controls TP-Link devices";
 
     pub const DESCRIPTION: &'static str = include_str!("../README.md");
-
-    // Pull the hostname/port for the remote process from the
-    // configuration.
-
-    fn get_cfg_address(cfg: &DriverConfig) -> Result<SocketAddrV4> {
-        match cfg.get("addr") {
-            Some(toml::value::Value::String(addr)) => {
-                if let Ok(addr) = addr.parse::<SocketAddrV4>() {
-                    Ok(addr)
-                } else {
-                    Err(Error::ConfigError(String::from(
-                        "'addr' not in hostname:port format",
-                    )))
-                }
-            }
-            Some(_) => Err(Error::ConfigError(String::from(
-                "'addr' config parameter should be a string",
-            ))),
-            None => Err(Error::ConfigError(String::from(
-                "missing 'addr' parameter in config",
-            ))),
-        }
-    }
 
     // Attempts to read a `tplink::Reply` type from the socket.
     // All replies have a 4-byte length header so we know how much
@@ -843,16 +830,15 @@ impl Instance {
 }
 
 impl driver::API for Instance {
+    type Config = InstanceConfig;
     type HardwareType = DevType;
 
     // This driver doesn't store any data in its instance; it's all
     // stored in local variables in the `.run()` method.
 
-    async fn create_instance(cfg: &DriverConfig) -> Result<Box<Self>> {
-        let cfg_addr = Instance::get_cfg_address(cfg);
-
+    async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         Ok(Box::new(Instance {
-            addr: cfg_addr?,
+            addr: cfg.addr,
             reported_error: None,
             buf: [0; BUF_TOTAL],
             poll_timeout: Duration::from_secs(0),

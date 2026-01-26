@@ -16,4 +16,4 @@ mod weather_type;
 
 pub use dimmer_type::Dimmer;
 pub use switch_type::Switch;
-pub use weather_type::{Units, Weather};
+pub use weather_type::{Weather, WeatherConfig, WeatherUnits};

@@ -1,11 +1,11 @@
 use drmem_api::{
     driver::{self, Registrator, ResettableState, API},
-    Error, Result,
+    Result,
 };
 use futures::future::Future;
 use std::collections::HashMap;
 use std::{convert::Infallible, pin::Pin, sync::Arc};
-use tokio::{sync::Barrier, time::Duration};
+use tokio::sync::Barrier;
 use tracing::{error, field, info, info_span, warn, Instrument};
 
 mod drv_cycle;
@@ -29,12 +29,10 @@ type DriverInfo = (&'static str, &'static str, Launcher);
 // This is the main loop of the driver manager. It only returns if the
 // driver panics.
 
-async fn mgr_body<T>(
-    mut devices: T::HardwareType,
-    cfg: driver::DriverConfig,
-) -> Infallible
+async fn mgr_body<T>(mut devices: T::HardwareType, cfg: T::Config) -> Infallible
 where
     T: API + Send + 'static,
+    <T::Config as TryFrom<driver::DriverConfig>>::Error: std::fmt::Display,
 {
     const START_DELAY: u64 = 5;
     const MAX_DELAY: u64 = 600;
@@ -86,24 +84,6 @@ where
     }
 }
 
-fn get_cfg_override(cfg: &driver::DriverConfig) -> Result<Option<Duration>> {
-    match cfg.get("override_timeout") {
-        Some(toml::value::Value::Integer(secs)) => {
-            if (1..=(60 * 60 * 24 * 365)).contains(secs) {
-                Ok(Some(Duration::from_secs(*secs as u64)))
-            } else {
-                Err(Error::ConfigError(String::from(
-                    "'override_timeout' out of range",
-                )))
-            }
-        }
-        Some(_) => Err(Error::ConfigError(String::from(
-            "'override_timeout' config parameter should be an integer",
-        ))),
-        None => Ok(None),
-    }
-}
-
 // This generic function manages an instance of a specific driver. We
 // use generics because each driver has a different set of devices
 // (T::HardwareType), so one function wouldn't be able to handle every
@@ -117,27 +97,26 @@ fn manage_instance<T>(
 ) -> MgrTask
 where
     T: API + Send + 'static,
+    <T::Config as TryFrom<driver::DriverConfig>>::Error:
+        std::fmt::Display + Send,
+    drmem_api::Error: From<<<T as API>::Config as TryFrom<driver::DriverConfig>>::Error>
+        + Send,
 {
     Box::pin(async move {
+        let cfg = match T::Config::try_from(cfg) {
+            Ok(cfg) => Ok(cfg),
+            err @ Err(_) => {
+                barrier.wait().await;
+                err
+            }
+        }?;
+
         // Let the driver API register the necessary devices.
 
-        let devices = async {
-            match get_cfg_override(&cfg) {
-                Ok(tmo) => {
-                    let fut = T::HardwareType::register_devices(
-                        &mut req_chan,
-                        &cfg,
-                        tmo,
-                        max_history,
-                    )
-                    .instrument(info_span!("register", cfg = field::Empty));
-
-                    fut.await
-                }
-                Err(e) => Err(e),
-            }
-        }
-        .await;
+        let devices =
+            T::HardwareType::register_devices(&mut req_chan, &cfg, max_history)
+                .instrument(info_span!("register", cfg = field::Empty))
+                .await;
 
         // When we reached this location, all devices have been
         // registered (or not, if an error occurred). Sync to the

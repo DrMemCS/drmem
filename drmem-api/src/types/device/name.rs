@@ -105,7 +105,7 @@ impl TryFrom<&str> for Path {
     type Error = Error;
 
     fn try_from(s: &str) -> Result<Self> {
-        Path::create(&s)
+        Path::create(s)
     }
 }
 
@@ -155,7 +155,7 @@ impl TryFrom<&str> for Base {
     type Error = Error;
 
     fn try_from(s: &str) -> Result<Self> {
-        Base::create(&s)
+        Base::create(s)
     }
 }
 

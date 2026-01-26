@@ -18,7 +18,7 @@
 
 use crate::driver::{
     overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
-    DriverConfig, Registrator, RequestChan, Result,
+    Registrator, RequestChan, Result,
 };
 use tokio::time::Duration;
 
@@ -36,29 +36,20 @@ pub struct Switch {
 }
 
 impl Registrator for Switch {
+    type Config = Option<Duration>;
+
     async fn register_devices(
         drc: &mut RequestChan,
-        _cfg: &DriverConfig,
-        override_timeout: Option<Duration>,
+        cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         Ok(Switch {
             error: drc.add_ro_device("error", None, max_history).await?,
             state: drc
-                .add_overridable_device(
-                    "state",
-                    None,
-                    override_timeout,
-                    max_history,
-                )
+                .add_overridable_device("state", None, *cfg, max_history)
                 .await?,
             indicator: drc
-                .add_overridable_device(
-                    "indicator",
-                    None,
-                    override_timeout,
-                    max_history,
-                )
+                .add_overridable_device("indicator", None, *cfg, max_history)
                 .await?,
         })
     }
