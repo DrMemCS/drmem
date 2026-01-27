@@ -1,4 +1,4 @@
-use crate::tplink::crypt;
+use super::crypt;
 use serde::Serialize;
 
 // This module holds the types that represent values used in the

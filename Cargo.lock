@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-tplink"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "drmem-api",
  "futures",
