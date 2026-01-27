@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-sump"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "drmem-api",
  "serde",
