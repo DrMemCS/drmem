@@ -1,0 +1,447 @@
+use drmem_api::{driver, Error, Result};
+use std::convert::Infallible;
+use std::{net::SocketAddr, str};
+use tokio::net::UdpSocket;
+use tokio::time::{self, Duration};
+use tracing::{debug, error, trace, warn, Span};
+
+use super::{config, device};
+
+// This module defines the server task that retrieves the NTP information.
+
+mod server {
+    #[derive(Debug, PartialEq)]
+    pub struct Info(String, f64, f64);
+
+    impl Info {
+        // Creates a new, initialized `Info` type.
+
+        pub fn new(host: String, offset: f64, delay: f64) -> Info {
+            Info(host, offset, delay)
+        }
+
+        // Creates a value which will never match any value returned
+        // by an NTP server (because the host will never be blank.)
+
+        pub fn bad_value() -> Info {
+            Info(String::from(""), 0.0, 0.0)
+        }
+
+        // Returns the IP address of the NTP server.
+
+        pub fn get_host(&self) -> &String {
+            &self.0
+        }
+
+        // Returns the estimated offset (in milliseconds) of the
+        // system time compared to the NTP server.
+
+        pub fn get_offset(&self) -> f64 {
+            self.1
+        }
+
+        // Returns the estimated time-of-flight delay (in
+        // milliseconds) to the NTP server.
+
+        pub fn get_delay(&self) -> f64 {
+            self.2
+        }
+    }
+
+    // Updates the `Info` object using up to three "interesting"
+    // parameters from text consisting of comma-separated,
+    // key/value pairs. The original `Info` is consumed by this
+    // method.
+
+    fn update_host_info(
+        mut state: (Option<String>, Option<f64>, Option<f64>),
+        item: &str,
+    ) -> (Option<String>, Option<f64>, Option<f64>) {
+        match item.split('=').collect::<Vec<&str>>()[..] {
+            ["srcadr", adr] => state.0 = Some(String::from(adr)),
+            ["offset", offset] => {
+                if let Ok(o) = offset.parse::<f64>() {
+                    state.1 = Some(o)
+                }
+            }
+            ["delay", delay] => {
+                if let Ok(d) = delay.parse::<f64>() {
+                    state.2 = Some(d)
+                }
+            }
+            _ => (),
+        }
+        state
+    }
+
+    // Returns an `Info` type that has been initialized with the
+    // parameters defined in `input`.
+
+    pub fn decode_info(input: &str) -> Option<Info> {
+        let result = input
+            .split(',')
+            .filter(|v| !v.is_empty())
+            .map(|v| v.trim_start())
+            .fold((None, None, None), update_host_info);
+
+        if let (Some(a), Some(o), Some(d)) = result {
+            Some(Info::new(a, o, d))
+        } else {
+            None
+        }
+    }
+}
+
+pub struct Instance {
+    sock: UdpSocket,
+    seq: u16,
+}
+
+impl Instance {
+    pub const NAME: &'static str = "ntp";
+
+    pub const SUMMARY: &'static str =
+        "monitors an NTP server and reports its state";
+
+    pub const DESCRIPTION: &'static str = include_str!("../README.md");
+
+    // Combines and returns the first two bytes from a buffer as a
+    // big-endian, 16-bit value.
+
+    fn read_u16(buf: &[u8]) -> u16 {
+        (buf[0] as u16) * 256 + (buf[1] as u16)
+    }
+
+    async fn get_synced_host(&mut self) -> Option<u16> {
+        let req: [u8; 12] = [
+            0x26,
+            0x01,
+            (self.seq / 256) as u8,
+            (self.seq % 256) as u8,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+        ];
+
+        self.seq += 1;
+
+        // Try to send the request. If there's a failure with the
+        // socket, report the error and return `None`.
+
+        if let Err(e) = self.sock.send(&req).await {
+            error!("couldn't send \"synced hosts\" request -> {}", e);
+            return None;
+        }
+
+        let mut buf = [0u8; 500];
+
+        #[rustfmt::skip]
+	tokio::select! {
+	    result = self.sock.recv(&mut buf) => {
+		match result {
+		    // The packet has to be at least 12 bytes so we
+		    // can use all parts of the header without
+		    // worrying about panicking.
+
+		    Ok(len) if len < 12 => {
+			warn!(
+			    "response from ntpd < 12 bytes -> only {} bytes",
+			    len
+			)
+		    }
+
+		    Ok(len) => {
+			let total = Instance::read_u16(&buf[10..=11]) as usize;
+			let expected_len = total + 12 + (4 - total % 4) % 4;
+
+			// Make sure the incoming buffer is as large
+			// as the length field says it is (so we can
+			// safely access the entire payload.)
+
+			if expected_len == len {
+			    for ii in buf[12..len].chunks_exact(4) {
+				if (ii[2] & 0x7) == 6 {
+				    return Some(Instance::read_u16(
+					&ii[0..=1],
+				    ));
+				}
+			    }
+			} else {
+			    warn!(
+				"bad packet length -> expected {}, got {}",
+				expected_len, len
+			    );
+			}
+		    }
+		    Err(e) => error!("couldn't receive data -> {}", e),
+		}
+	    },
+	    _ = tokio::time::sleep(Duration::from_millis(1_000)) => {
+		warn!("timed-out waiting for reply to \"get synced host\" request")
+	    }
+	}
+
+        None
+    }
+
+    // Requests information about a given association ID. An `Info`
+    // type is returned containing the parameters we find interesting.
+
+    pub async fn get_host_info(&mut self, id: u16) -> Option<server::Info> {
+        let req = &[
+            0x26,
+            0x02,
+            (self.seq / 256) as u8,
+            (self.seq % 256) as u8,
+            0x00,
+            0x00,
+            (id / 256) as u8,
+            (id % 256) as u8,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+        ];
+
+        self.seq += 1;
+
+        if let Err(e) = self.sock.send(req).await {
+            error!("couldn't send \"host info\" request -> {}", e);
+            return None;
+        }
+
+        let mut buf = [0u8; 500];
+        let mut payload = [0u8; 2048];
+        let mut next_offset = 0;
+
+        loop {
+            #[rustfmt::skip]
+	    tokio::select! {
+		result = self.sock.recv(&mut buf) => {
+		    match result {
+			// The packet has to be at least 12 bytes so
+			// we can use all parts of the header without
+			// worrying about panicking.
+
+			Ok(len) if len < 12 => {
+			    warn!("response from ntpd < 12 bytes -> {}", len);
+			    break;
+			}
+
+			Ok(len) => {
+			    let offset = Instance::read_u16(&buf[8..=9]) as usize;
+
+			    // We don't keep track of which of the
+			    // multiple packets we've already
+			    // received. Instead, we require the
+			    // packets are sent in order. This warning
+			    // has never been emitted.
+
+			    if offset != next_offset {
+				warn!("dropped packet (incorrect offset)");
+				break;
+			    }
+
+			    let total = Instance::read_u16(&buf[10..=11]) as usize;
+			    let expected_len = total + 12 + (4 - total % 4) % 4;
+
+			    // Make sure the incoming buffer is as
+			    // large as the length field says it is
+			    // (so we can safely access the entire
+			    // payload.)
+
+			    if expected_len != len {
+				warn!(
+				    "bad packet length -> expected {}, got {}",
+				    expected_len, len
+				);
+				break;
+			    }
+
+			    // Make sure the reply's offset and total
+			    // won't push us past the end of our
+			    // buffer.
+
+			    if offset + total > payload.len() {
+				warn!(
+				    "payload too big (offset {}, total {}, target buf: {})",
+				    offset,
+				    total,
+				    payload.len()
+				);
+				break;
+			    }
+
+			    // Update the next, expected offset.
+
+			    next_offset += total;
+
+			    // Copy the fragment into the final buffer.
+
+			    let dst_range = offset..offset + total;
+			    let src_range = 12..12 + total;
+
+			    trace!(
+				"copying {} bytes into {} through {}",
+				dst_range.len(),
+				dst_range.start,
+				dst_range.end - 1
+			    );
+
+			    payload[dst_range].clone_from_slice(&buf[src_range]);
+
+			    // If this is the last packet, we can
+			    // process it. Convert the byte buffer to
+			    // text and decode it.
+
+			    if (buf[1] & 0x20) == 0 {
+				let payload = &payload[..next_offset];
+
+				return str::from_utf8(payload)
+				    .ok()
+				    .and_then(server::decode_info)
+			    }
+			}
+			Err(e) => {
+			    error!("couldn't receive data -> {}", e);
+			    break;
+			}
+		    }
+		},
+		_ = tokio::time::sleep(Duration::from_millis(1_000)) => {
+		    warn!("timed-out waiting for reply to \"get host info\" request")
+		}
+	    }
+        }
+        None
+    }
+}
+
+impl driver::API for Instance {
+    type Config = config::Params;
+    type HardwareType = device::Set;
+
+    async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
+        let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();
+
+        Span::current().record("cfg", cfg.addr.to_string());
+
+        if let Ok(sock) = UdpSocket::bind(loc_if).await {
+            if sock.connect(cfg.addr).await.is_ok() {
+                return Ok(Box::new(Instance { sock, seq: 1 }));
+            }
+        }
+        Err(Error::OperationError("couldn't create socket".to_owned()))
+    }
+
+    async fn run<'a>(
+        &'a mut self,
+        devices: &'a mut Self::HardwareType,
+    ) -> Infallible {
+        // Record the peer's address in the "cfg" field of the span.
+
+        {
+            let addr = self
+                .sock
+                .peer_addr()
+                .map(|v| format!("{v}"))
+                .unwrap_or_else(|_| String::from("**unknown**"));
+
+            Span::current().record("cfg", addr.as_str());
+        }
+
+        // Set `info` to an initial, unmatchable value. `None` would
+        // be preferrable here but, if DrMem had a problem at startup
+        // getting the NTP state, it wouldn't print the warning(s).
+
+        let mut info = Some(server::Info::bad_value());
+        let mut interval = time::interval(Duration::from_millis(20_000));
+
+        loop {
+            interval.tick().await;
+
+            if let Some(id) = self.get_synced_host().await {
+                debug!("synced to host ID: {:#04x}", id);
+
+                let host_info = self.get_host_info(id).await;
+
+                match host_info {
+                    Some(ref tmp) => {
+                        if info != host_info {
+                            debug!(
+                                "host: {}, offset: {} ms, delay: {} ms",
+                                tmp.get_host(),
+                                tmp.get_offset(),
+                                tmp.get_delay()
+                            );
+                            devices
+                                .d_source
+                                .report_update(tmp.get_host().clone())
+                                .await;
+                            devices
+                                .d_offset
+                                .report_update(tmp.get_offset())
+                                .await;
+                            devices
+                                .d_delay
+                                .report_update(tmp.get_delay())
+                                .await;
+                            devices.d_state.report_update(true).await;
+                            info = host_info;
+                        }
+                        continue;
+                    }
+                    None => {
+                        if info.is_some() {
+                            warn!("no synced host information found");
+                            info = None;
+                            devices.d_state.report_update(false).await;
+                        }
+                    }
+                }
+            } else if info.is_some() {
+                warn!("we're not synced to any host");
+                info = None;
+                devices.d_state.report_update(false).await;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::server;
+
+    #[test]
+    fn test_decoding() {
+        assert_eq!(
+            server::decode_info("srcadr=192.168.1.1,offset=0.0,delay=0.0"),
+            Some(server::Info::new(String::from("192.168.1.1"), 0.0, 0.0))
+        );
+        assert_eq!(
+            server::decode_info(" srcadr=192.168.1.1, offset=0.0, delay=0.0"),
+            Some(server::Info::new(String::from("192.168.1.1"), 0.0, 0.0))
+        );
+
+        // Should return `None` if fields are missing.
+
+        assert_eq!(server::decode_info(" offset=0.0, delay=0.0"), None);
+        assert_eq!(server::decode_info(" srcadr=192.168.1.1, delay=0.0"), None);
+        assert_eq!(
+            server::decode_info(" srcadr=192.168.1.1, offset=0.0"),
+            None
+        );
+
+        // Test badly formed input.
+
+        assert!(server::decode_info("srcadr=192.168.1.1,offset=b,delay=0.0")
+            .is_none());
+        assert!(server::decode_info("srcadr=192.168.1.1,offset=0.0,delay=b")
+            .is_none());
+    }
+}

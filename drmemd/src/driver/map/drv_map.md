@@ -27,7 +27,7 @@ the values in the array and the default value are of the same type.
 
 ## Devices
 
-The driver creates these devices:
+The driver creates these devices: 
 
 | Base Name | Type       | Units | Comment                                                      |
 |-----------|------------|-------|--------------------------------------------------------------|

@@ -27,7 +27,7 @@ The driver creates these devices:
 | Base Name | Type     | Units | Comment                                                        |
 |-----------|----------|-------|----------------------------------------------------------------|
 | `enable`  | bool, RW |       | A `false` to `true` transition will reset and start the timer. |
-| `output`  | T, RO    |       | Output state of timer.                                         |
+| `output`  | T, RO    |       | Output state of timer.                                         | 
 
 Every value sent to the `enable` device will be reported -- even
 duplicates. This allows one to, if using the redis backend, see the

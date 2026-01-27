@@ -1,11 +1,13 @@
 use drmem_api::{
-    device,
-    driver::{self, DriverConfig, ResettableState},
-    Error, Result,
+    device::Value,
+    driver::{self},
+    Result,
 };
 use std::convert::Infallible;
 use tokio::time::{self, Duration};
 use tracing::{self, debug};
+
+use super::{config, device};
 
 // This enum represents the three states in which the device can be.
 
@@ -15,33 +17,12 @@ enum CycleState {
     Cycling,
 }
 
-#[derive(serde::Deserialize)]
-pub struct InstanceConfig {
-    millis: u64,
-    #[serde(default = "cfg_eab_default")]
-    enabled_at_boot: bool,
-    disabled: device::Value,
-    enabled: Vec<device::Value>,
-}
-
-impl TryFrom<DriverConfig> for InstanceConfig {
-    type Error = Error;
-
-    fn try_from(cfg: DriverConfig) -> std::result::Result<Self, Self::Error> {
-        cfg.parse_into()
-    }
-}
-
-fn cfg_eab_default() -> bool {
-    false
-}
-
 // The state of a driver instance.
 
 pub struct Instance {
     enabled_at_boot: bool,
-    disabled: device::Value,
-    enabled: Vec<device::Value>,
+    disabled: Value,
+    enabled: Vec<Value>,
     state: CycleState,
     index: usize,
     millis: Duration,
@@ -59,8 +40,8 @@ impl Instance {
     pub fn new(
         enabled_at_boot: bool,
         millis: Duration,
-        disabled: device::Value,
-        enabled: Vec<device::Value>,
+        disabled: Value,
+        enabled: Vec<Value>,
     ) -> Instance {
         Instance {
             enabled_at_boot,
@@ -72,7 +53,7 @@ impl Instance {
         }
     }
 
-    fn time_expired(&mut self) -> Option<device::Value> {
+    fn time_expired(&mut self) -> Option<Value> {
         match self.state {
             CycleState::Idle => None,
 
@@ -96,7 +77,7 @@ impl Instance {
     // value with to set the output. If `None`, the output remains
     // unchanged.
 
-    fn update_state(&mut self, val: bool) -> (bool, Option<device::Value>) {
+    fn update_state(&mut self, val: bool) -> (bool, Option<Value>) {
         match self.state {
             CycleState::Idle => {
                 if val {
@@ -141,41 +122,9 @@ impl Instance {
     }
 }
 
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_enable: driver::ReadWriteDevice<bool>,
-}
-
-impl driver::Registrator for Devices {
-    type Config = InstanceConfig;
-
-    async fn register_devices(
-        core: &mut driver::RequestChan,
-        _cfg: &Self::Config,
-        max_history: Option<usize>,
-    ) -> Result<Self> {
-        // Define the devices managed by this driver.
-        //
-        // This first device is the output signal. It toggles between
-        // `false` and `true` at a rate determined by the `interval`
-        // config option.
-
-        let d_output = core.add_ro_device("output", None, max_history).await?;
-
-        // This device is settable. Any time it transitions from
-        // `false` to `true`, the output device begins a cycling.
-        // When this device is set to `false`, the device stops
-        // cycling.
-
-        let d_enable = core.add_rw_device("enable", None, max_history).await?;
-
-        Ok(Devices { d_output, d_enable })
-    }
-}
-
 impl driver::API for Instance {
-    type Config = InstanceConfig;
-    type HardwareType = Devices;
+    type Config = config::Params;
+    type HardwareType = device::Set;
 
     async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         Ok(Box::new(Instance::new(
@@ -250,8 +199,6 @@ impl driver::API for Instance {
     }
 }
 
-impl ResettableState for Devices {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,7 +207,7 @@ mod tests {
     #[tokio::test]
     async fn test_cfg() {
         {
-            let cfg = toml::from_str::<InstanceConfig>(
+            let cfg = toml::from_str::<config::Params>(
                 "millis = 500
 enabled_at_boot = true
 disabled = false
@@ -270,15 +217,15 @@ enabled = [true, false]",
 
             assert_eq!(cfg.enabled_at_boot, true);
             assert_eq!(cfg.millis, 500);
-            assert_eq!(cfg.disabled, device::Value::Bool(false));
+            assert_eq!(cfg.disabled, Value::Bool(false));
             assert_eq!(
                 cfg.enabled,
-                vec![device::Value::Bool(true), device::Value::Bool(false)]
+                vec![Value::Bool(true), Value::Bool(false)]
             );
         }
 
         {
-            let cfg = toml::from_str::<InstanceConfig>(
+            let cfg = toml::from_str::<config::Params>(
                 "millis = 500
 disabled = false
 enabled = [true, false]
@@ -288,15 +235,15 @@ enabled = [true, false]
 
             assert_eq!(cfg.enabled_at_boot, false);
             assert_eq!(cfg.millis, 500);
-            assert_eq!(cfg.disabled, device::Value::Bool(false));
+            assert_eq!(cfg.disabled, Value::Bool(false));
             assert_eq!(
                 cfg.enabled,
-                vec![device::Value::Bool(true), device::Value::Bool(false)]
+                vec![Value::Bool(true), Value::Bool(false)]
             );
         }
 
         {
-            let cfg = toml::from_str::<InstanceConfig>(
+            let cfg = toml::from_str::<config::Params>(
                 "
 disabled = false
 enabled = [true, false]",
@@ -306,7 +253,7 @@ enabled = [true, false]",
         }
 
         {
-            let cfg = toml::from_str::<InstanceConfig>(
+            let cfg = toml::from_str::<config::Params>(
                 "
 millis = 500
 enabled = [true, false]",
@@ -316,7 +263,7 @@ enabled = [true, false]",
         }
 
         {
-            let cfg = toml::from_str::<InstanceConfig>(
+            let cfg = toml::from_str::<config::Params>(
                 "
 millis = 500
 disabled = false",
@@ -326,7 +273,7 @@ disabled = false",
         }
 
         {
-            let cfg = toml::from_str::<InstanceConfig>(
+            let cfg = toml::from_str::<config::Params>(
                 "millis = 500
 disabled = false
 enabled = [true, false]",
@@ -335,10 +282,10 @@ enabled = [true, false]",
 
             assert_eq!(cfg.enabled_at_boot, false);
             assert_eq!(cfg.millis, 500);
-            assert_eq!(cfg.disabled, device::Value::Bool(false));
+            assert_eq!(cfg.disabled, Value::Bool(false));
             assert_eq!(
                 cfg.enabled,
-                vec![device::Value::Bool(true), device::Value::Bool(false)]
+                vec![Value::Bool(true), Value::Bool(false)]
             );
         }
     }
@@ -348,8 +295,8 @@ enabled = [true, false]",
         let mut timer = Instance::new(
             false,
             Duration::from_millis(1000),
-            device::Value::Bool(false),
-            vec![device::Value::Bool(true), device::Value::Bool(false)],
+            Value::Bool(false),
+            vec![Value::Bool(true), Value::Bool(false)],
         );
 
         // Verify that, when in the Idle state, an input of `false` or
@@ -386,12 +333,8 @@ enabled = [true, false]",
         let mut timer = Instance::new(
             false,
             Duration::from_millis(1000),
-            device::Value::Int(0),
-            vec![
-                device::Value::Int(1),
-                device::Value::Int(2),
-                device::Value::Int(3),
-            ],
+            Value::Int(0),
+            vec![Value::Int(1), Value::Int(2), Value::Int(3)],
         );
 
         // Verify that, when in the Idle state, an input of `false` or
@@ -433,12 +376,8 @@ enabled = [true, false]",
         let mut timer = Instance::new(
             false,
             Duration::from_millis(1000),
-            device::Value::Bool(false),
-            vec![
-                device::Value::Bool(true),
-                device::Value::Bool(false),
-                device::Value::Bool(false),
-            ],
+            Value::Bool(false),
+            vec![Value::Bool(true), Value::Bool(false), Value::Bool(false)],
         );
 
         // Verify that, when in the Idle state, an input of `false` or
@@ -477,12 +416,8 @@ enabled = [true, false]",
         let mut timer = Instance::new(
             false,
             Duration::from_millis(1000),
-            device::Value::Bool(false),
-            vec![
-                device::Value::Bool(false),
-                device::Value::Bool(true),
-                device::Value::Bool(false),
-            ],
+            Value::Bool(false),
+            vec![Value::Bool(false), Value::Bool(true), Value::Bool(false)],
         );
 
         // Verify that, when in the Idle state, an input of `false` or

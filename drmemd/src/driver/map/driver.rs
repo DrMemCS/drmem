@@ -1,68 +1,14 @@
-use drmem_api::{
-    device,
-    driver::{self, ResettableState},
-    Result,
-};
+use drmem_api::{device::Value, driver, Result};
 use std::{convert::Infallible, ops::RangeInclusive};
 
-mod config {
-    use drmem_api::{device, driver::DriverConfig, Error, Result};
-
-    #[derive(PartialEq, serde::Deserialize, Debug)]
-    pub struct Entry {
-        pub start: i32,
-        pub end: Option<i32>,
-        pub value: device::Value,
-    }
-
-    #[derive(serde::Deserialize)]
-    pub struct InstanceConfig {
-        pub initial: Option<i32>,
-        pub default: device::Value,
-        pub values: Vec<Entry>,
-    }
-
-    impl TryFrom<DriverConfig> for InstanceConfig {
-        type Error = Error;
-
-        fn try_from(
-            cfg: DriverConfig,
-        ) -> std::result::Result<Self, Self::Error> {
-            parse(&cfg)
-        }
-    }
-
-    // Convert the TOML Table into `InstanceConfig`.
-
-    pub fn parse(cfg: &DriverConfig) -> Result<InstanceConfig> {
-        let mut cfg: InstanceConfig = cfg.parse_into()?;
-
-        // Sort the entries by the value of the start index.
-
-        cfg.values.sort_by(|a, b| a.start.cmp(&b.start));
-
-        // Now check to see if any ranges overlap. If so, that's an
-        // error.
-
-        if cfg
-            .values
-            .windows(2)
-            .any(|e| e[0].end.unwrap_or(e[0].start) >= e[1].start)
-        {
-            return Err(Error::ConfigError(
-                "`values` array contains overlapping ranges".into(),
-            ));
-        }
-        Ok(cfg)
-    }
-}
+use super::{config, device};
 
 #[derive(Debug, PartialEq)]
-struct Entry(RangeInclusive<i32>, device::Value);
+struct Entry(RangeInclusive<i32>, Value);
 
 pub struct Instance {
     init_index: Option<i32>,
-    def_val: device::Value,
+    def_val: Value,
     values: Vec<Entry>,
 }
 
@@ -74,7 +20,7 @@ impl Instance {
     pub const DESCRIPTION: &'static str = include_str!("drv_map.md");
 
     /// Creates a new `Instance` instance.
-    fn new(cfg: &config::InstanceConfig) -> Result<Instance> {
+    fn new(cfg: &config::Params) -> Result<Instance> {
         Ok(Instance {
             init_index: cfg.initial,
             def_val: cfg.default.clone(),
@@ -102,7 +48,7 @@ impl Instance {
     // Find the entry that contains the index. Return the associated
     // value. If no entry matches, return the error value.
 
-    fn map_to(&self, idx: i32) -> device::Value {
+    fn map_to(&self, idx: i32) -> Value {
         use std::cmp::Ordering;
 
         self.values
@@ -120,37 +66,9 @@ impl Instance {
     }
 }
 
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_index: driver::ReadWriteDevice<i32>,
-}
-
-impl driver::Registrator for Devices {
-    type Config = config::InstanceConfig;
-
-    async fn register_devices(
-        core: &mut driver::RequestChan,
-        _cfg: &Self::Config,
-        max_history: Option<usize>,
-    ) -> Result<Self> {
-        // Define the devices managed by this driver.
-        //
-        // This first device is the output of the map.
-
-        let d_output = core.add_ro_device("output", None, max_history).await?;
-
-        // This device is settable. Any setting is forwarded to
-        // the backend.
-
-        let d_index = core.add_rw_device("index", None, max_history).await?;
-
-        Ok(Devices { d_output, d_index })
-    }
-}
-
 impl driver::API for Instance {
-    type Config = config::InstanceConfig;
-    type HardwareType = Devices;
+    type Config = config::Params;
+    type HardwareType = device::Set;
 
     async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         Instance::new(cfg).map(Box::new)
@@ -185,8 +103,6 @@ impl driver::API for Instance {
     }
 }
 
-impl ResettableState for Devices {}
-
 #[cfg(test)]
 mod tests {
     use super::config;
@@ -194,7 +110,7 @@ mod tests {
 
     // Tries to build an `InstanceConfig` from a `&str`.
 
-    fn make_cfg(text: &str) -> Result<config::InstanceConfig> {
+    fn make_cfg(text: &str) -> Result<config::Params> {
         config::parse(&Into::<DriverConfig>::into(
             toml::from_str::<toml::value::Table>(text)
                 .map_err(|e| Error::ConfigError(format!("{}", e)))?,

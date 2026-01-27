@@ -1,9 +1,7 @@
-use drmem_api::{
-    device,
-    driver::{self, DriverConfig, ResettableState},
-    Error, Result,
-};
+use drmem_api::{device::Value, driver, Result};
 use std::convert::Infallible;
+
+use super::{config, device};
 
 // This enum represents the two states in which the latch can be.
 
@@ -13,24 +11,10 @@ enum LatchState {
     Tripped,
 }
 
-#[derive(serde::Deserialize)]
-pub struct InstanceConfig {
-    disabled: device::Value,
-    enabled: device::Value,
-}
-
-impl TryFrom<DriverConfig> for InstanceConfig {
-    type Error = Error;
-
-    fn try_from(cfg: DriverConfig) -> std::result::Result<Self, Self::Error> {
-        cfg.parse_into()
-    }
-}
-
 pub struct Instance {
     state: LatchState,
-    active_value: device::Value,
-    inactive_value: device::Value,
+    active_value: Value,
+    inactive_value: Value,
 }
 
 impl<'a> Instance {
@@ -41,10 +25,7 @@ impl<'a> Instance {
     pub const DESCRIPTION: &'static str = include_str!("drv_latch.md");
 
     /// Creates a new `Instance` instance.
-    pub fn new(
-        active_value: device::Value,
-        inactive_value: device::Value,
-    ) -> Instance {
+    pub fn new(active_value: Value, inactive_value: Value) -> Instance {
         Instance {
             state: LatchState::Idle,
             active_value,
@@ -59,7 +40,7 @@ impl<'a> Instance {
         &'b mut self,
         reset: bool,
         delta_trigger: bool,
-    ) -> (Option<&'a device::Value>, Option<&'a device::Value>) {
+    ) -> (Option<&'a Value>, Option<&'a Value>) {
         match self.state {
             LatchState::Idle if !delta_trigger => (None, None),
             LatchState::Idle if reset => {
@@ -80,42 +61,9 @@ impl<'a> Instance {
     }
 }
 
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_trigger: driver::ReadWriteDevice<bool>,
-    d_reset: driver::ReadWriteDevice<bool>,
-}
-
-impl driver::Registrator for Devices {
-    type Config = InstanceConfig;
-
-    async fn register_devices(
-        core: &mut driver::RequestChan,
-        _cfg: &Self::Config,
-        max_history: Option<usize>,
-    ) -> Result<Self> {
-        // Define the devices managed by this driver.
-        //
-        // This first device is the output of the timer.
-
-        let d_output = core.add_ro_device("output", None, max_history).await?;
-
-        let d_trigger =
-            core.add_rw_device("trigger", None, max_history).await?;
-
-        let d_reset = core.add_rw_device("reset", None, max_history).await?;
-
-        Ok(Devices {
-            d_output,
-            d_trigger,
-            d_reset,
-        })
-    }
-}
-
 impl driver::API for Instance {
-    type Config = InstanceConfig;
-    type HardwareType = Devices;
+    type Config = config::Params;
+    type HardwareType = device::Set;
 
     async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         // Build and return the future.
@@ -140,7 +88,7 @@ impl driver::API for Instance {
             .await;
 
         loop {
-            let Devices {
+            let device::Set {
                 d_trigger, d_reset, ..
             } = &mut *devices;
 
@@ -175,18 +123,13 @@ impl driver::API for Instance {
     }
 }
 
-impl ResettableState for Devices {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_state_changes() {
-        let mut latch = Instance::new(
-            device::Value::Bool(true),
-            device::Value::Bool(false),
-        );
+        let mut latch = Instance::new(Value::Bool(true), Value::Bool(false));
 
         assert_eq!(latch.state, LatchState::Idle);
         assert_eq!((None, None), latch.update_state(false, false));
@@ -194,7 +137,7 @@ mod tests {
         {
             let (a, b) = latch.update_state(false, true);
 
-            assert_eq!(Some(&device::Value::Bool(true)), a);
+            assert_eq!(Some(&Value::Bool(true)), a);
             assert!(b.is_none());
         }
         assert_eq!(latch.state, LatchState::Tripped);
@@ -234,7 +177,7 @@ mod tests {
         {
             let (a, b) = latch.update_state(true, false);
 
-            assert_eq!(Some(&device::Value::Bool(false)), a);
+            assert_eq!(Some(&Value::Bool(false)), a);
             assert!(b.is_none());
         }
         assert_eq!(latch.state, LatchState::Idle);
@@ -250,8 +193,8 @@ mod tests {
         {
             let (a, b) = latch.update_state(true, true);
 
-            assert_eq!(Some(&device::Value::Bool(true)), a);
-            assert_eq!(Some(&device::Value::Bool(false)), b);
+            assert_eq!(Some(&Value::Bool(true)), a);
+            assert_eq!(Some(&Value::Bool(false)), b);
         }
         assert_eq!(latch.state, LatchState::Idle);
     }

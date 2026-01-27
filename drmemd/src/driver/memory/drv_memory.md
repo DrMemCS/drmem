@@ -34,7 +34,7 @@ and will set the device to the specified, initial value.
 
 ## Devices
 
-The driver creates these devices:
+The driver creates these devices: 
 
 | Base Name | Type       | Units | Comment                                                      |
 |-----------|------------|-------|--------------------------------------------------------------|

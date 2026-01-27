@@ -378,7 +378,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-ntp"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "drmem-api",
  "serde",
@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-sump"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "drmem-api",
  "serde",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-tplink"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "drmem-api",
  "futures",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-weather-wu"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "drmem-api",
  "reqwest",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "drmemd"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cfgrammar",
  "chrono",
