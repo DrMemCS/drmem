@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "drmemd"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cfgrammar",
  "chrono",

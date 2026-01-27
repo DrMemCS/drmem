@@ -16,7 +16,7 @@ This driver uses the following configuration parameters.
   last value of the array is used, the driver starts over at the
   beginning. The only way to stop it is to set the `enable` device to
   `false`.
-- `enabled_at_boot` is an optional boolean value which, when `true`,
+- `enabled_at_boot` is an optional boolean value which, when `true`, 
   will set the `enable` device's initial value to `true` and,
   therefore, start the cycling at boot time. If not provided, it
   defaults to `false`.

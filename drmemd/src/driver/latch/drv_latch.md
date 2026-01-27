@@ -12,7 +12,7 @@ This driver uses the following configuration parameters.
   disabled. This value can be any type supported by DrMem devices.
 - `enabled` is the value of the `output` device while the latch is
   active. This value can be any type supported by DrMem devices.
-
+ 
 Both values must be of the same type.
 
 ## Devices

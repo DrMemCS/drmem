@@ -1,28 +1,9 @@
-use drmem_api::{
-    device,
-    driver::{self, ResettableState},
-    Error, Result,
-};
+use drmem_api::{device::Value, driver, Result};
 use std::convert::Infallible;
 use tokio::time::{self, Duration};
 use tracing::{debug, info};
 
-#[derive(serde::Deserialize)]
-pub struct InstanceConfig {
-    millis: u64,
-    disabled: device::Value,
-    enabled: device::Value,
-}
-
-impl TryFrom<driver::DriverConfig> for InstanceConfig {
-    type Error = Error;
-
-    fn try_from(
-        cfg: driver::DriverConfig,
-    ) -> std::result::Result<Self, Self::Error> {
-        cfg.parse_into()
-    }
-}
+use super::{config, device};
 
 // This enum represents the four states in which the timer can
 // be. They are a combination of the `enable` input and whether we're
@@ -38,8 +19,8 @@ enum TimerState {
 
 pub struct Instance {
     state: TimerState,
-    active_value: device::Value,
-    inactive_value: device::Value,
+    active_value: Value,
+    inactive_value: Value,
     millis: Duration,
 }
 
@@ -54,8 +35,8 @@ impl Instance {
     /// Creates a new `Instance` instance. It is assumed the external
     /// input is `false` so the initial timer state is `Armed`.
     pub fn new(
-        active_value: device::Value,
-        inactive_value: device::Value,
+        active_value: Value,
+        inactive_value: Value,
         millis: Duration,
     ) -> Instance {
         Instance {
@@ -91,7 +72,7 @@ impl Instance {
     fn update_state(
         &mut self,
         val: bool,
-    ) -> (Option<device::Value>, Option<time::Instant>) {
+    ) -> (Option<Value>, Option<time::Instant>) {
         match self.state {
             // Currently timing and the input was set to `false`.
             TimerState::TimingAndArmed => {
@@ -153,39 +134,9 @@ impl Instance {
     }
 }
 
-pub struct Devices {
-    d_output: driver::ReadOnlyDevice<device::Value>,
-    d_enable: driver::ReadWriteDevice<bool>,
-}
-
-impl driver::Registrator for Devices {
-    type Config = InstanceConfig;
-
-    async fn register_devices(
-        core: &mut driver::RequestChan,
-        _cfg: &Self::Config,
-        max_history: Option<usize>,
-    ) -> Result<Self> {
-        // Define the devices managed by this driver.
-        //
-        // This first device is the output of the timer. When it's not
-        // timing, this device's value with be `!level`. While it's
-        // timing, `level`.
-
-        let d_output = core.add_ro_device("output", None, max_history).await?;
-
-        // This device is settable. Any time it transitions from
-        // `false` to `true`, the timer begins a timing cycle.
-
-        let d_enable = core.add_rw_device("enable", None, max_history).await?;
-
-        Ok(Devices { d_output, d_enable })
-    }
-}
-
 impl driver::API for Instance {
-    type Config = InstanceConfig;
-    type HardwareType = Devices;
+    type Config = config::Params;
+    type HardwareType = device::Set;
 
     async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         Ok(Box::new(Instance::new(
@@ -255,8 +206,6 @@ impl driver::API for Instance {
     }
 }
 
-impl ResettableState for Devices {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,8 +213,8 @@ mod tests {
     #[test]
     fn test_state_changes() {
         let mut timer = Instance::new(
-            device::Value::Bool(true),
-            device::Value::Bool(false),
+            Value::Bool(true),
+            Value::Bool(false),
             Duration::from_millis(1000),
         );
 
@@ -275,7 +224,7 @@ mod tests {
         let (a, b) = timer.update_state(true);
 
         assert_eq!(timer.state, TimerState::Timing);
-        assert_eq!(Some(device::Value::Bool(true)), a);
+        assert_eq!(Some(Value::Bool(true)), a);
         assert!(b.is_some());
 
         assert_eq!((None, None), timer.update_state(true));
@@ -305,7 +254,7 @@ mod tests {
         let (a, b) = timer.update_state(true);
 
         assert_eq!(timer.state, TimerState::Timing);
-        assert_eq!(Some(device::Value::Bool(true)), a);
+        assert_eq!(Some(Value::Bool(true)), a);
         assert!(b.is_some());
 
         assert_eq!((None, None), timer.update_state(false));

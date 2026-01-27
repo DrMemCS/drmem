@@ -8,11 +8,11 @@ use std::{convert::Infallible, pin::Pin, sync::Arc};
 use tokio::sync::Barrier;
 use tracing::{error, field, info, info_span, warn, Instrument};
 
-mod drv_cycle;
-mod drv_latch;
-mod drv_map;
-mod drv_memory;
-mod drv_timer;
+mod cycle;
+mod latch;
+mod map;
+mod memory;
+mod timer;
 
 pub type Fut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type MgrTask = Fut<Result<Infallible>>;
@@ -138,7 +138,7 @@ impl DriverDb {
         let mut table: HashMap<driver::Name, DriverInfo> = HashMap::new();
 
         {
-            use drv_memory::Instance;
+            use memory::Instance;
 
             table.insert(
                 Instance::NAME.into(),
@@ -151,7 +151,7 @@ impl DriverDb {
         }
 
         {
-            use drv_latch::Instance;
+            use latch::Instance;
 
             table.insert(
                 Instance::NAME.into(),
@@ -164,7 +164,7 @@ impl DriverDb {
         }
 
         {
-            use drv_map::Instance;
+            use map::Instance;
 
             table.insert(
                 Instance::NAME.into(),
@@ -177,7 +177,7 @@ impl DriverDb {
         }
 
         {
-            use drv_timer::Instance;
+            use timer::Instance;
 
             table.insert(
                 Instance::NAME.into(),
@@ -190,7 +190,7 @@ impl DriverDb {
         }
 
         {
-            use drv_cycle::Instance;
+            use cycle::Instance;
 
             table.insert(
                 Instance::NAME.into(),
