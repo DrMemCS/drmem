@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "drmem-drv-weather-wu"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "drmem-api",
  "reqwest",
