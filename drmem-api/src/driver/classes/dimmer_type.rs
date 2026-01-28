@@ -22,6 +22,11 @@ use crate::driver::{
 };
 use tokio::time::Duration;
 
+pub struct DimmerProperty {
+    pub brightness: Option<f64>,
+    pub indicator: Option<bool>,
+}
+
 /// Defines the common API used by Dimmers.
 pub struct Dimmer<R: Reporter> {
     /// This device returns `true` when the driver has a problem
@@ -33,6 +38,38 @@ pub struct Dimmer<R: Reporter> {
     /// A product might include an indicator. If the hardware does,
     /// this device can turn it on and off.
     pub indicator: OverridableDevice<bool, R>,
+}
+
+impl<R: Reporter> Dimmer<R> {
+    // Reports any new properties specified in the `prop` parameter.
+    pub async fn report_update(&mut self, prop: DimmerProperty) {
+        if let Some(v) = prop.brightness {
+            self.brightness.report_update(v).await
+        }
+
+        if let Some(v) = prop.indicator {
+            self.indicator.report_update(v).await
+        }
+    }
+
+    pub async fn next_setting(&mut self) -> DimmerProperty {
+        tokio::select! {
+            Some((value, resp)) = self.brightness.next_setting() => {
+                let value = value.clamp(0.0, 100.0);
+
+                if let Some(resp) = resp {
+                    resp.ok(value);
+                }
+                DimmerProperty { brightness: Some(value), indicator: None }
+            }
+            Some((value, resp)) = self.indicator.next_setting() => {
+                if let Some(resp) = resp {
+                    resp.ok(value);
+                }
+                DimmerProperty { brightness: None, indicator: Some(value) }
+            }
+        }
+    }
 }
 
 impl<R: Reporter> Registrator<R> for Dimmer<R> {

@@ -8,12 +8,14 @@
 
 // Pull in the modules that define each hardware type.
 
+mod colorbulb_type;
 mod dimmer_type;
 mod switch_type;
 mod weather_type;
 
 // Make top-level types available to driver writers.
 
+pub use colorbulb_type::ColorBulb;
 pub use dimmer_type::Dimmer;
-pub use switch_type::Switch;
+pub use switch_type::{Switch, SwitchProperty};
 pub use weather_type::{Weather, WeatherConfig, WeatherUnits};

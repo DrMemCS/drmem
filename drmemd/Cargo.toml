@@ -84,6 +84,11 @@ noop-waker = "0.1"
 # optional, but a few drivers define common devices for a `drmem`
 # installation.
 
+[dependencies.drmem-drv-hue]
+path = "../drivers/drmem-drv-hue"
+version = "0.1"
+optional = true
+
 [dependencies.drmem-drv-ntp]
 path = "../drivers/drmem-drv-ntp"
 version = "0.7"
@@ -178,5 +183,5 @@ graphiql = ["graphql"]
 
 # Drivers
 
-all-drivers = ["drmem-drv-ntp", "drmem-drv-sump", "drmem-drv-tplink",
-               "drmem-drv-weather-wu"]
+all-drivers = ["drmem-drv-hue", "drmem-drv-ntp", "drmem-drv-sump",
+               "drmem-drv-tplink", "drmem-drv-weather-wu"]
