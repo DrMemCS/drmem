@@ -1,7 +1,7 @@
 use super::config;
 use drmem_api::{
     device::Value,
-    driver::{self, ResettableState},
+    driver::{self, Reporter, ResettableState},
     Error, Result,
 };
 use std::future::Future;
@@ -29,14 +29,14 @@ fn get_validator(val: &Value) -> TypeChecker {
 // function which is used to make sure incoming settings are of the
 // correct type.
 
-pub struct Set {
-    pub set: Vec<(driver::ReadWriteDevice<Value>, TypeChecker)>,
+pub struct Set<R: Reporter> {
+    pub set: Vec<(driver::ReadWriteDevice<Value, R>, TypeChecker)>,
 }
 
-impl Set {
+impl<R: Reporter> Set<R> {
     pub fn get_next(
         &mut self,
-    ) -> impl Future<Output = (usize, Value)> + use<'_> {
+    ) -> impl Future<Output = (usize, Value)> + use<'_, R> {
         use std::future::poll_fn;
 
         poll_fn(move |ctxt| {
@@ -94,11 +94,11 @@ impl Set {
     }
 }
 
-impl driver::Registrator for Set {
+impl<R: Reporter> driver::Registrator<R> for Set<R> {
     type Config = config::Params;
 
     async fn register_devices(
-        core: &mut driver::RequestChan,
+        core: &mut driver::RequestChan<R>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -108,7 +108,7 @@ impl driver::Registrator for Set {
             // This device is settable. Any setting is forwarded to
             // the backend.
 
-            let mut entry: (driver::ReadWriteDevice<Value>, TypeChecker) = (
+            let mut entry: (driver::ReadWriteDevice<Value, R>, TypeChecker) = (
                 core.add_rw_device(e.name.clone(), None, max_history)
                     .await?,
                 get_validator(&e.initial),
@@ -137,7 +137,7 @@ impl driver::Registrator for Set {
     }
 }
 
-impl ResettableState for Set {}
+impl<R: Reporter> ResettableState for Set<R> {}
 
 #[cfg(test)]
 mod test {

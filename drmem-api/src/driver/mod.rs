@@ -8,7 +8,6 @@ use crate::types::{
 use std::{
     convert::{Infallible, TryFrom},
     future::Future,
-    pin::Pin,
     sync::Arc,
 };
 use tokio::{
@@ -19,6 +18,7 @@ use tokio::{
 use super::Result;
 
 /// Represents the type used to specify the name of a driver.
+
 pub type Name = Arc<str>;
 
 pub mod classes;
@@ -35,16 +35,16 @@ pub use rw_device::{
     TxDeviceSetting,
 };
 
-/// A function that drivers use to report updated values of a device.
-pub type ReportReading = Box<
-    dyn Fn(device::Value) -> Pin<Box<dyn Future<Output = ()> + Send>>
-        + Send
-        + Sync,
->;
+pub trait Reporter: Send + Sync + 'static {
+    fn report_value(
+        &mut self,
+        value: device::Value,
+    ) -> impl Future<Output = ()> + Send;
+}
 
 /// Defines the requests that can be sent to core. Drivers don't use
 /// this type directly. They are indirectly used by `RequestChan`.
-pub enum Request {
+pub enum Request<R: Reporter> {
     /// Registers a read-only device with core.
     ///
     /// The reply is a pair where the first element is a channel to
@@ -55,7 +55,7 @@ pub enum Request {
         dev_name: device::Name,
         dev_units: Option<String>,
         max_history: Option<usize>,
-        rpy_chan: oneshot::Sender<Result<ReportReading>>,
+        rpy_chan: oneshot::Sender<Result<R>>,
     },
 
     /// Registers a writable device with core.
@@ -70,7 +70,7 @@ pub enum Request {
         dev_units: Option<String>,
         max_history: Option<usize>,
         rpy_chan: oneshot::Sender<
-            Result<(ReportReading, RxDeviceSetting, Option<device::Value>)>,
+            Result<(R, RxDeviceSetting, Option<device::Value>)>,
         >,
     },
 }
@@ -81,17 +81,17 @@ pub enum Request {
 ///
 /// This type wraps the `mpsc::Sender<>` and defines a set of helper
 /// methods to send requests and receive replies with the core.
-pub struct RequestChan {
+pub struct RequestChan<R: Reporter> {
     driver_name: Name,
     prefix: device::Path,
-    req_chan: mpsc::Sender<Request>,
+    req_chan: mpsc::Sender<Request<R>>,
 }
 
-impl RequestChan {
+impl<R: Reporter> RequestChan<R> {
     pub fn new(
         driver_name: Name,
         prefix: &device::Path,
-        req_chan: &mpsc::Sender<Request>,
+        req_chan: &mpsc::Sender<Request<R>>,
     ) -> Self {
         RequestChan {
             driver_name,
@@ -121,7 +121,7 @@ impl RequestChan {
         name: N,
         units: Option<&str>,
         max_history: Option<usize>,
-    ) -> Result<ReadOnlyDevice<T>>
+    ) -> Result<ReadOnlyDevice<T, R>>
     where
         T: device::ReadCompat,
         N: TryInto<Base>,
@@ -185,7 +185,7 @@ impl RequestChan {
         name: N,
         units: Option<&str>,
         max_history: Option<usize>,
-    ) -> Result<ReadWriteDevice<T>>
+    ) -> Result<ReadWriteDevice<T, R>>
     where
         T: device::ReadWriteCompat,
         N: TryInto<Base>,
@@ -251,7 +251,7 @@ impl RequestChan {
         units: Option<&str>,
         override_duration: Option<Duration>,
         max_history: Option<usize>,
-    ) -> Result<OverridableDevice<T>>
+    ) -> Result<OverridableDevice<T, R>>
     where
         T: device::ReadWriteCompat,
         N: TryInto<Base>,
@@ -302,7 +302,7 @@ pub trait ResettableState {
 ///
 /// The only function in this trait is one to register the device(s)
 /// with core and return the set of handles.
-pub trait Registrator: ResettableState + Sized + Send {
+pub trait Registrator<R: Reporter>: ResettableState + Sized + Send {
     type Config: Send + Sync;
 
     /// Before a driver is run, the set of devices it uses needs to be
@@ -334,7 +334,7 @@ pub trait Registrator: ResettableState + Sized + Send {
     /// there may be more than the limit -- it just won't grow without
     /// bound.
     fn register_devices<'a>(
-        drc: &'a mut RequestChan,
+        drc: &'a mut RequestChan<R>,
         cfg: &'a Self::Config,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send;
@@ -345,9 +345,9 @@ pub trait Registrator: ResettableState + Sized + Send {
 /// The `API` trait defines methods that are expected to be available
 /// from a driver instance. By supporting this API, the framework can
 /// create driver instances and monitor them as they run.
-pub trait API: Send + Sync {
+pub trait API<R: Reporter>: Send + Sync {
     type Config: TryFrom<DriverConfig> + Send + Sync;
-    type HardwareType: Registrator<Config = Self::Config>;
+    type HardwareType: Registrator<R, Config = Self::Config>;
 
     /// Creates an instance of the driver.
     ///

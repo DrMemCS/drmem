@@ -20,7 +20,7 @@
 /// to handle incoming incoming settings.
 use crate::{
     device,
-    driver::{rw_device, ReportReading, RxDeviceSetting, SettingResponder},
+    driver::{rw_device, Reporter, RxDeviceSetting, SettingResponder},
 };
 use tokio_stream::StreamExt;
 use tracing::info;
@@ -62,19 +62,20 @@ enum State<T: device::ReadWriteCompat> {
     },
 }
 
-pub struct OverridableDevice<T: device::ReadWriteCompat> {
+pub struct OverridableDevice<T: device::ReadWriteCompat, R: Reporter> {
     state: State<T>,
     override_duration: Option<tokio::time::Duration>,
-    report_chan: ReportReading,
+    reporter: R,
     set_stream: rw_device::SettingStream<T>,
 }
 
-impl<T> OverridableDevice<T>
+impl<T, R> OverridableDevice<T, R>
 where
     T: device::ReadWriteCompat,
+    R: Reporter,
 {
     pub fn new(
-        report_chan: ReportReading,
+        reporter: R,
         setting_chan: RxDeviceSetting,
         desired_value: Option<T>,
         override_duration: Option<tokio::time::Duration>,
@@ -85,7 +86,7 @@ where
                     value: (value, None),
                 })
                 .unwrap_or(State::Unknown),
-            report_chan,
+            reporter,
             set_stream: rw_device::create_setting_stream(setting_chan),
             override_duration,
         }
@@ -98,7 +99,7 @@ where
     pub async fn report_update(&mut self, new_value: T) {
         match &mut self.state {
             State::Unknown => {
-                (self.report_chan)(new_value.clone().into()).await;
+                self.reporter.report_value(new_value.clone().into()).await;
 
                 // If we are in the unknown state and we get a polled
                 // reading, we switch to the synced state. If a
@@ -127,13 +128,13 @@ where
                 // reading.
 
                 if setting == &new_value {
-                    (self.report_chan)(new_value.clone().into()).await;
+                    self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Synced {
                         value: setting.clone(),
                     };
                     info!("value matches setting ... exiting override mode")
                 } else if value != &new_value {
-                    (self.report_chan)(new_value.clone().into()).await;
+                    self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Overridden {
                         tmo: tokio::time::Instant::now(),
                         setting: value.clone(),
@@ -148,7 +149,7 @@ where
                 // polled value, then we go into the overridden state.
 
                 if value != &new_value {
-                    (self.report_chan)(new_value.clone().into()).await;
+                    self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Overridden {
                         tmo: tokio::time::Instant::now(),
                         setting: value.clone(),
@@ -219,8 +220,8 @@ where
                     // never going to be active when a new value is
                     // reported with this method.
 
-                    (self.report_chan)(value.clone().into()).await;
-                    (self.report_chan)(new_value.clone().into()).await;
+                    self.reporter.report_value(value.clone().into()).await;
+                    self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Overridden {
                         tmo: tokio::time::Instant::now(),
                         setting: value.clone(),
@@ -276,7 +277,7 @@ where
                 // state so that each state has one future to
                 // await. This makes the function "cancel safe".
                 State::UnknownTrans { value, .. } => {
-                    (self.report_chan)(value.clone().into()).await;
+                    self.reporter.report_value(value.clone().into()).await;
 
                     let value = value.clone();
 
@@ -298,7 +299,7 @@ where
                 // If we have an unreported setting, re-report it and
                 // switch to the "reported" setting state.
                 {
-                    (self.report_chan)(value.clone().into()).await;
+                    self.reporter.report_value(value.clone().into()).await;
                     self.state = State::Setting {
                         value: value.clone(),
                     };
@@ -348,7 +349,7 @@ where
                 },
 
                 State::SettingTrans { value: (val, _) } => {
-                    (self.report_chan)(val.clone().into()).await;
+                    self.reporter.report_value(val.clone().into()).await;
 
                     let val = val.clone();
 
@@ -365,7 +366,7 @@ where
                 }
 
                 State::SyncedTrans { value } => {
-                    (self.report_chan)(value.clone().into()).await;
+                    self.reporter.report_value(value.clone().into()).await;
                     self.state = State::Synced {
                         value: value.clone(),
                     };
@@ -453,9 +454,10 @@ where
     }
 }
 
-impl<T> super::ResettableState for OverridableDevice<T>
+impl<T, R> super::ResettableState for OverridableDevice<T, R>
 where
     T: device::ReadWriteCompat,
+    R: Reporter,
 {
     fn reset_state(&mut self) {
         self.state = State::Unknown
@@ -476,6 +478,14 @@ mod tests {
         time::{timeout, Duration},
     };
 
+    struct MockReporter(mpsc::Sender<device::Value>);
+
+    impl Reporter for MockReporter {
+        async fn report_value(&mut self, v: device::Value) {
+            self.0.send(v).await.unwrap()
+        }
+    }
+
     // Helper function that creates a `OverridableDevice`.
 
     fn mk_device<T: device::ReadWriteCompat>(
@@ -484,7 +494,7 @@ mod tests {
     ) -> (
         TxDeviceSetting,
         mpsc::Receiver<device::Value>,
-        OverridableDevice<T>,
+        OverridableDevice<T, MockReporter>,
     ) {
         let (rrtx, rrrx) = mpsc::channel(20);
         let (srtx, srrx) = mpsc::channel(20);
@@ -492,16 +502,7 @@ mod tests {
         (
             srtx,
             rrrx,
-            OverridableDevice::new(
-                Box::new(move |v| {
-                    let rrtx = rrtx.clone();
-
-                    Box::pin(async move { rrtx.send(v).await.unwrap() })
-                }),
-                srrx,
-                init,
-                tmo,
-            ),
+            OverridableDevice::new(MockReporter(rrtx), srrx, init, tmo),
         )
     }
 

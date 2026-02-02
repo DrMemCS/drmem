@@ -1,6 +1,10 @@
 use crate::config::Logic;
 use chrono::prelude::*;
-use drmem_api::{client, device, driver, Error};
+use drmem_api::{
+    client, device,
+    driver::{self, Reporter},
+    Error,
+};
 use futures::Future;
 use juniper::{
     executor::FieldError, graphql_object, graphql_subscription, graphql_value,
@@ -23,26 +27,27 @@ impl reject::Reject for NoAuthorization {}
 // The Context parameter for Queries.
 
 #[derive(Clone)]
-struct ConfigDb(
-    crate::driver::DriverDb,
+struct ConfigDb<R: Reporter>(
+    crate::driver::DriverDb<R>,
     client::RequestChan,
-    Vec<Arc<LogicBlock>>,
+    Vec<Arc<LogicBlock<R>>>,
 );
 
-impl juniper::Context for ConfigDb {}
+impl<R: Reporter> juniper::Context for ConfigDb<R> {}
 
 // `DriverInfo` is an object that can be returned by a GraphQL
 // query. It contains information related to drivers that are
 // available in the DrMem environment (executable.)
 
-struct DriverInfo {
+struct DriverInfo<R: Reporter> {
     name: driver::Name,
     summary: &'static str,
     description: &'static str,
+    phant: std::marker::PhantomData<R>,
 }
 
 #[graphql_object(
-    Context = ConfigDb,
+    Context = ConfigDb<R>,
     description = "Information about a driver in the running version \
 		   of `drmemd`.\n\n\
 		   An instance of DrMem has a set of drivers that are \
@@ -51,7 +56,7 @@ struct DriverInfo {
 		   restart may be a new executable with a different set \
 		   of drivers.)"
 )]
-impl DriverInfo {
+impl<R: Reporter> DriverInfo<R> {
     #[graphql(description = "The name of the driver.")]
     fn name(&self) -> driver::Name {
         self.name.clone()
@@ -116,21 +121,21 @@ struct DeviceHistory {
 // `DeviceInfo` is a GraphQL object which contains information about a
 // device.
 
-struct DeviceInfo {
+struct DeviceInfo<R: Reporter> {
     device_name: String,
     units: Option<String>,
     settable: bool,
     driver_name: driver::Name,
     history: DeviceHistory,
-    db: crate::driver::DriverDb,
+    db: crate::driver::DriverDb<R>,
 }
 
 #[graphql_object(
-    Context = ConfigDb,
+    Context = ConfigDb<R>,
     description = "Information about a registered device in the running \
 		   version of `drmemd`."
 )]
-impl DeviceInfo {
+impl<R: Reporter> DeviceInfo<R> {
     #[graphql(description = "The name of the device.")]
     fn device_name(&self) -> &str {
         &self.device_name
@@ -149,13 +154,14 @@ impl DeviceInfo {
 
     #[graphql(description = "Information about the driver that implements \
 			     this device.")]
-    fn driver(&self) -> DriverInfo {
+    fn driver(&self) -> DriverInfo<R> {
         self.db
             .get_driver(&self.driver_name)
             .map(|di| DriverInfo {
                 name: self.driver_name.clone(),
                 summary: di.0,
                 description: di.1,
+                phant: std::marker::PhantomData,
             })
             .unwrap()
     }
@@ -165,16 +171,17 @@ impl DeviceInfo {
     }
 }
 
-struct LogicBlockVariable {
+struct LogicBlockVariable<R: Reporter> {
     name: String,
     device: String,
+    phant: std::marker::PhantomData<R>,
 }
 
 #[graphql_object(
-    Context = ConfigDb,
+    Context = ConfigDb<R>,
     description = "Shows the input/output variable mapping in a logic block."
 )]
-impl LogicBlockVariable {
+impl<R: Reporter> LogicBlockVariable<R> {
     #[graphql(description = "The name of the variable.")]
     fn name(&self) -> &str {
         &self.name
@@ -186,16 +193,17 @@ impl LogicBlockVariable {
     }
 }
 
-struct LogicBlockExpression {
+struct LogicBlockExpression<R: Reporter> {
     name: String,
     expr: String,
+    phant: std::marker::PhantomData<R>,
 }
 
 #[graphql_object(
-    Context = ConfigDb,
+    Context = ConfigDb<R>,
     description = "Shows the expression definitions in a logic block."
 )]
-impl LogicBlockExpression {
+impl<R: Reporter> LogicBlockExpression<R> {
     #[graphql(description = "The name of the definition.")]
     fn name(&self) -> &str {
         &self.name
@@ -207,20 +215,20 @@ impl LogicBlockExpression {
     }
 }
 
-struct LogicBlock {
+struct LogicBlock<R: Reporter> {
     name: Arc<str>,
     description: String,
-    inputs: Vec<LogicBlockVariable>,
-    outputs: Vec<LogicBlockVariable>,
-    defs: Vec<LogicBlockExpression>,
+    inputs: Vec<LogicBlockVariable<R>>,
+    outputs: Vec<LogicBlockVariable<R>>,
+    defs: Vec<LogicBlockExpression<R>>,
     expr: Vec<String>,
 }
 
 #[graphql_object(
-    Context = ConfigDb,
+    Context = ConfigDb<R>,
     description = "Shows the configuration of a logic block."
 )]
-impl LogicBlock {
+impl<R: Reporter> LogicBlock<R> {
     #[graphql(description = "The name of the logic block.")]
     fn name(&self) -> &str {
         &self.name
@@ -232,17 +240,17 @@ impl LogicBlock {
     }
 
     #[graphql(description = "The inputs needed by the logic block.")]
-    fn inputs(&self) -> &[LogicBlockVariable] {
+    fn inputs(&self) -> &[LogicBlockVariable<R>] {
         &self.inputs
     }
 
     #[graphql(description = "The outputs controlled by the logic block.")]
-    fn outputs(&self) -> &[LogicBlockVariable] {
+    fn outputs(&self) -> &[LogicBlockVariable<R>] {
         &self.outputs
     }
 
     #[graphql(description = "Shared expressions used by the logic block.")]
-    fn defs(&self) -> &[LogicBlockExpression] {
+    fn defs(&self) -> &[LogicBlockExpression<R>] {
         &self.defs
     }
 
@@ -254,9 +262,9 @@ impl LogicBlock {
 
 // This defines the top-level Query API.
 
-struct Config;
+struct Config<R: Reporter>(std::marker::PhantomData<R>);
 
-impl Config {
+impl<R: Reporter> Config<R> {
     // These helper functions are used by a call to `Iterator::filter`
     // to select a set of devices.
 
@@ -278,8 +286,8 @@ impl Config {
     fn logic_block_filter(
         name: Option<String>,
         devices: Option<Vec<String>>,
-    ) -> impl FnMut(&Arc<LogicBlock>) -> bool {
-        move |lb: &Arc<LogicBlock>| {
+    ) -> impl FnMut(&Arc<LogicBlock<R>>) -> bool {
+        move |lb: &Arc<LogicBlock<R>>| {
             // If a name was specified, return `false` if the current
             // LogicBlock doesn't that name. If it has the name, we
             // still need to see if the device name  filter further
@@ -319,17 +327,17 @@ impl Config {
 }
 
 #[graphql_object(
-    context = ConfigDb,
+    context = ConfigDb<R>,
     description = "Reports configuration information for `drmemd`."
 )]
-impl Config {
+impl<R: Reporter + Clone> Config<R> {
     #[graphql(description = "Returns logic blocks configured in the node. By \
                              default, all logic blocks are returned. If either \
                              parameter is given, the results are filtered to \
                              only return information that matches the selection \
                              values.")]
     fn logic_blocks(
-        #[graphql(context)] db: &ConfigDb,
+        #[graphql(context)] db: &ConfigDb<R>,
         #[graphql(description = "If provided, only the logic block with the \
                                  specified name will be returned.")]
         sel_name: Option<String>,
@@ -340,7 +348,7 @@ impl Config {
                                  included in the results."
         )]
         sel_devices: Option<Vec<String>>,
-    ) -> result::Result<Vec<Arc<LogicBlock>>, FieldError> {
+    ) -> result::Result<Vec<Arc<LogicBlock<R>>>, FieldError> {
         Ok(db
             .2
             .iter()
@@ -357,19 +365,20 @@ impl Config {
 			     element array is returned. Otherwise `null` is \
 			     returned.")]
     fn driver_info(
-        #[graphql(context)] db: &ConfigDb,
+        #[graphql(context)] db: &ConfigDb<R>,
         #[graphql(description = "An optional argument which, when provided, \
 				 only returns driver information whose name \
 				 matches. If this argument isn't provided, \
 				 every drivers' information will be returned.")]
         name: Option<String>,
-    ) -> result::Result<Vec<DriverInfo>, FieldError> {
+    ) -> result::Result<Vec<DriverInfo<R>>, FieldError> {
         if let Some(name) = name {
             if let Some((n, s, d)) = db.0.find(&name) {
                 Ok(vec![DriverInfo {
                     name: n,
                     summary: s,
                     description: d,
+                    phant: std::marker::PhantomData,
                 }])
             } else {
                 Err(FieldError::new(
@@ -384,6 +393,7 @@ impl Config {
                         name: n,
                         summary: s,
                         description: d,
+                        phant: std::marker::PhantomData,
                     })
                     .collect();
 
@@ -404,7 +414,7 @@ impl Config {
 		       value of the agument."
     )]
     async fn device_info(
-        #[graphql(context)] db: &ConfigDb,
+        #[graphql(context)] db: &ConfigDb<R>,
         #[graphql(
             name = "pattern",
             description = "If this argument is provided, the query returns \
@@ -422,17 +432,17 @@ impl Config {
 			   or not."
         )]
         settable: Option<bool>,
-    ) -> result::Result<Vec<DeviceInfo>, FieldError> {
+    ) -> result::Result<Vec<DeviceInfo<R>>, FieldError> {
         let tx = db.1.clone();
         let filt = settable
             .map(|v| {
                 if v {
-                    Config::is_settable
+                    Config::<R>::is_settable
                 } else {
-                    Config::is_not_settable
+                    Config::<R>::is_not_settable
                 }
             })
-            .unwrap_or(Config::is_true);
+            .unwrap_or(Config::<R>::is_true);
 
         tx.get_device_info(pattern)
             .await
@@ -472,15 +482,15 @@ impl Config {
 // The `Control` mutation is used to group queries that attempt to
 // control devices by sending them settings.
 
-struct Control;
+struct Control<R: Reporter>(std::marker::PhantomData<R>);
 
-impl Control {
+impl<R: Reporter> Control<R> {
     // Sends a new value to a device.
 
     async fn perform_setting<
         T: Into<device::Value> + TryFrom<device::Value, Error = Error>,
     >(
-        db: &ConfigDb,
+        db: &ConfigDb<R>,
         device: &str,
         value: T,
     ) -> result::Result<T, FieldError> {
@@ -593,10 +603,10 @@ impl Control {
 }
 
 #[graphql_object(
-    context = ConfigDb,
+    context = ConfigDb<R>,
     description = "This group of queries perform modifications to devices."
 )]
-impl Control {
+impl<R: Reporter> Control<R> {
     #[graphql(description = "Submits `value` to be applied to the device \
 			     associated with the given `name`. If the data \
 			     is in a format the device doesn't support an \
@@ -605,7 +615,7 @@ impl Control {
 			     set. It is an error to have all fields `null` \
 			     or more than one field non-`null`.")]
     async fn set_device(
-        #[graphql(context)] db: &ConfigDb,
+        #[graphql(context)] db: &ConfigDb<R>,
         name: String,
         value: SettingData,
     ) -> FieldResult<Reading> {
@@ -626,7 +636,7 @@ impl Control {
                 f_color: None,
             } => Control::perform_setting(db, &name, v)
                 .await
-                .map(Control::int_to_reading(name)),
+                .map(Control::<R>::int_to_reading(name)),
 
             SettingData {
                 f_int: None,
@@ -636,7 +646,7 @@ impl Control {
                 f_color: None,
             } => Control::perform_setting(db, &name, v)
                 .await
-                .map(Control::flt_to_reading(name)),
+                .map(Control::<R>::flt_to_reading(name)),
 
             SettingData {
                 f_int: None,
@@ -646,7 +656,7 @@ impl Control {
                 f_color: None,
             } => Control::perform_setting(db, &name, v)
                 .await
-                .map(Control::bool_to_reading(name)),
+                .map(Control::<R>::bool_to_reading(name)),
 
             SettingData {
                 f_int: None,
@@ -656,7 +666,7 @@ impl Control {
                 f_color: None,
             } => Control::perform_setting(db, &name, v)
                 .await
-                .map(Control::str_to_reading(name)),
+                .map(Control::<R>::str_to_reading(name)),
 
             SettingData {
                 f_int: None,
@@ -669,13 +679,13 @@ impl Control {
                     if let (Ok(r), Ok(g), Ok(b)) =
                         (u8::try_from(r), u8::try_from(g), u8::try_from(b))
                     {
-                        Control::perform_setting(
+                        Control::<R>::perform_setting(
                             db,
                             &name,
                             palette::LinSrgba::<u8>::new(r, g, b, 255),
                         )
                         .await
-                        .map(Control::color_to_reading(name))
+                        .map(Control::<R>::color_to_reading(name))
                     } else {
                         Err(FieldError::new(
                             "color component is out of range",
@@ -696,7 +706,7 @@ impl Control {
                             palette::LinSrgba::<u8>::new(r, g, b, a),
                         )
                         .await
-                        .map(Control::color_to_reading(name))
+                        .map(Control::<R>::color_to_reading(name))
                     } else {
                         Err(FieldError::new(
                             "color component is out of range",
@@ -825,9 +835,9 @@ impl From<&device::Reading> for Reading {
     }
 }
 
-struct Subscription;
+struct Subscription<R: Reporter>(std::marker::PhantomData<R>);
 
-impl Subscription {
+impl<R: Reporter> Subscription<R> {
     fn xlat(name: String) -> impl Fn(device::Reading) -> FieldResult<Reading> {
         move |e: device::Reading| {
             let mut reading = Reading {
@@ -864,15 +874,15 @@ impl Subscription {
     }
 }
 
-#[graphql_subscription(context = ConfigDb)]
-impl Subscription {
+#[graphql_subscription(context = ConfigDb<R>)]
+impl<R: Reporter> Subscription<R> {
     #[graphql(description = "Sets up a connection to receive all updates to \
 			     a device. The GraphQL request must provide the \
 			     name of a device. This method returns a stream \
 			     which generates a reply each time a device's \
 			     value changes.")]
     async fn monitor_device(
-        #[graphql(context)] db: &ConfigDb,
+        #[graphql(context)] db: &ConfigDb<R>,
         device: String,
         range: Option<DateRange>,
     ) -> device::DataStream<FieldResult<Reading>> {
@@ -885,7 +895,8 @@ impl Subscription {
             let end = range.as_ref().and_then(|v| v.end);
 
             if let Ok(rx) = db.1.monitor_device(name, start, end).await {
-                let stream = StreamExt::map(rx, Subscription::xlat(device));
+                let stream =
+                    StreamExt::map(rx, Subscription::<R>::xlat(device));
 
                 Box::pin(stream) as device::DataStream<FieldResult<Reading>>
             } else {
@@ -907,10 +918,14 @@ impl Subscription {
     }
 }
 
-type Schema = RootNode<'static, Config, Control, Subscription>;
+type Schema<R> = RootNode<'static, Config<R>, Control<R>, Subscription<R>>;
 
-fn schema() -> Schema {
-    Schema::new(Config {}, Control {}, Subscription {})
+fn schema<R: Reporter + Clone>() -> Schema<R> {
+    Schema::new(
+        Config::<R>(std::marker::PhantomData),
+        Control::<R>(std::marker::PhantomData),
+        Subscription::<R>(std::marker::PhantomData),
+    )
 }
 
 // Define the URI paths used by the GraphQL interface.
@@ -930,7 +945,7 @@ mod paths {
     }
 }
 
-fn logic_to_gql(logic: &Logic) -> Arc<LogicBlock> {
+fn logic_to_gql<R: Reporter>(logic: &Logic) -> Arc<LogicBlock<R>> {
     LogicBlock {
         name: logic.name.clone().into(),
         description: logic
@@ -941,25 +956,28 @@ fn logic_to_gql(logic: &Logic) -> Arc<LogicBlock> {
         inputs: logic
             .inputs
             .iter()
-            .map(|v| LogicBlockVariable {
+            .map(|v| LogicBlockVariable::<R> {
                 name: v.0.clone(),
                 device: v.1.to_string(),
+                phant: std::marker::PhantomData,
             })
             .collect(),
         outputs: logic
             .outputs
             .iter()
-            .map(|v| LogicBlockVariable {
+            .map(|v| LogicBlockVariable::<R> {
                 name: v.0.clone(),
                 device: v.1.to_string(),
+                phant: std::marker::PhantomData,
             })
             .collect(),
         defs: logic
             .defs
             .iter()
-            .map(|v| LogicBlockExpression {
+            .map(|v| LogicBlockExpression::<R> {
                 name: v.0.clone(),
                 expr: v.1.clone(),
+                phant: std::marker::PhantomData,
             })
             .collect(),
         expr: logic.exprs.clone(),
@@ -969,12 +987,12 @@ fn logic_to_gql(logic: &Logic) -> Arc<LogicBlock> {
 
 // Build `warp::Filter`s that define the entire webspace.
 
-fn build_base_site(
-    db: crate::driver::DriverDb,
+fn build_base_site<R: Reporter + Clone>(
+    db: crate::driver::DriverDb<R>,
     cchan: client::RequestChan,
     db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    let context = ConfigDb(
+    let context = ConfigDb::<R>(
         db,
         cchan,
         db_logic.iter().map(logic_to_gql).collect::<Vec<_>>(),
@@ -1055,8 +1073,8 @@ fn build_base_site(
         )
 }
 
-fn build_site(
-    db: crate::driver::DriverDb,
+fn build_site<R: Reporter + Clone>(
+    db: crate::driver::DriverDb<R>,
     cchan: client::RequestChan,
     db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
@@ -1065,9 +1083,9 @@ fn build_site(
     build_base_site(db, cchan, db_logic).recover(handle_rejection)
 }
 
-fn build_secure_site(
+fn build_secure_site<R: Reporter + Clone>(
     cfg: &config::Security,
-    db: crate::driver::DriverDb,
+    db: crate::driver::DriverDb<R>,
     cchan: client::RequestChan,
     db_logic: &[Logic],
 ) -> impl Filter<Extract = (impl Reply,), Error = std::convert::Infallible> + Clone
@@ -1131,10 +1149,10 @@ fn cmp_fprints(a: &str, b: &str) -> bool {
 // configuration contains the `security` key, the server will require
 // TLS connections.
 
-fn build_server(
+fn build_server<R: Reporter + Clone>(
     cfg: &config::Config,
     db_logic: &[Logic],
-    db: crate::driver::DriverDb,
+    db: crate::driver::DriverDb<R>,
     cchan: client::RequestChan,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     if let Some(security) = &cfg.security {
@@ -1252,10 +1270,10 @@ fn build_mdns_payload(cfg: &config::Config) -> Result<Vec<String>, Error> {
     Ok(payload)
 }
 
-pub fn server(
+pub fn server<R: Reporter + Clone>(
     cfg: &config::Config,
     db_logic: &[Logic],
-    db: crate::driver::DriverDb,
+    db: crate::driver::DriverDb<R>,
     cchan: client::RequestChan,
 ) -> impl Future<Output = ()> {
     let (resp, task) = Responder::with_default_handle().unwrap();
@@ -1294,6 +1312,14 @@ pub fn server(
 #[cfg(test)]
 mod test {
     use super::{cmp_fprints, sanitize};
+    use drmem_api::{device, driver::Reporter};
+
+    #[derive(Clone)]
+    struct Report;
+
+    impl Reporter for Report {
+        async fn report_value(&mut self, _value: device::Value) {}
+    }
 
     #[test]
     fn test_sanitizer() {
@@ -1330,7 +1356,8 @@ mod test {
         use tokio::sync::mpsc;
 
         let (tx, _) = mpsc::channel(100);
-        let filter = build_site(DriverDb::create(), RequestChan::new(tx), &[]);
+        let filter =
+            build_site(DriverDb::<Report>::create(), RequestChan::new(tx), &[]);
 
         #[cfg(not(feature = "graphiql"))]
         {
@@ -1391,8 +1418,11 @@ mod test {
 
         {
             let (tx, _) = mpsc::channel(100);
-            let filter =
-                build_site(DriverDb::create(), RequestChan::new(tx), &[]);
+            let filter = build_site(
+                DriverDb::<Report>::create(),
+                RequestChan::new(tx),
+                &[],
+            );
             let client =
                 warp::test::ws().path("/drmem/s").handshake(filter).await;
 
@@ -1419,7 +1449,7 @@ mod test {
         };
         let filter = build_secure_site(
             &cfg,
-            DriverDb::create(),
+            DriverDb::<Report>::create(),
             RequestChan::new(tx),
             &[],
         );
@@ -1519,7 +1549,7 @@ mod test {
             let (tx, _) = mpsc::channel(100);
             let filter = build_secure_site(
                 &cfg,
-                DriverDb::create(),
+                DriverDb::<Report>::create(),
                 RequestChan::new(tx),
                 &[],
             );
@@ -1533,7 +1563,7 @@ mod test {
             let (tx, _) = mpsc::channel(100);
             let filter = build_secure_site(
                 &cfg,
-                DriverDb::create(),
+                DriverDb::<Report>::create(),
                 RequestChan::new(tx),
                 &[],
             );
@@ -1550,7 +1580,7 @@ mod test {
             let (tx, _) = mpsc::channel(100);
             let filter = build_secure_site(
                 &cfg,
-                DriverDb::create(),
+                DriverDb::<Report>::create(),
                 RequestChan::new(tx),
                 &[],
             );

@@ -1,5 +1,5 @@
 use drmem_api::{
-    driver::{self, Registrator, ResettableState, API},
+    driver::{self, Registrator, Reporter, ResettableState, API},
     Result,
 };
 use futures::future::Future;
@@ -17,22 +17,26 @@ mod timer;
 pub type Fut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub type MgrTask = Fut<Result<Infallible>>;
 
-pub type Launcher = fn(
+pub type Launcher<R> = fn(
     driver::DriverConfig,
-    driver::RequestChan,
+    driver::RequestChan<R>,
     Option<usize>,
     barrier: Arc<Barrier>,
 ) -> MgrTask;
 
-type DriverInfo = (&'static str, &'static str, Launcher);
+type DriverInfo<R> = (&'static str, &'static str, Launcher<R>);
 
 // This is the main loop of the driver manager. It only returns if the
 // driver panics.
 
-async fn mgr_body<T>(mut devices: T::HardwareType, cfg: T::Config) -> Infallible
+async fn mgr_body<T, R>(
+    mut devices: T::HardwareType,
+    cfg: T::Config,
+) -> Infallible
 where
-    T: API + Send + 'static,
+    T: API<R> + Send + 'static,
     <T::Config as TryFrom<driver::DriverConfig>>::Error: std::fmt::Display,
+    R: Reporter,
 {
     const START_DELAY: u64 = 5;
     const MAX_DELAY: u64 = 600;
@@ -89,18 +93,19 @@ where
 // (T::HardwareType), so one function wouldn't be able to handle every
 // type.
 
-fn manage_instance<T>(
+fn manage_instance<T, R>(
     cfg: driver::DriverConfig,
-    mut req_chan: driver::RequestChan,
+    mut req_chan: driver::RequestChan<R>,
     max_history: Option<usize>,
     barrier: Arc<Barrier>,
 ) -> MgrTask
 where
-    T: API + Send + 'static,
+    T: API<R> + Send + 'static,
     <T::Config as TryFrom<driver::DriverConfig>>::Error:
         std::fmt::Display + Send,
-    drmem_api::Error: From<<<T as API>::Config as TryFrom<driver::DriverConfig>>::Error>
+    drmem_api::Error: From<<<T as API<R>>::Config as TryFrom<driver::DriverConfig>>::Error>
         + Send,
+    R: Reporter,
 {
     Box::pin(async move {
         let cfg = match T::Config::try_from(cfg) {
@@ -126,16 +131,16 @@ where
 
         // Create a future that manages the instance.
 
-        Ok(mgr_body::<T>(devices?, cfg).await)
+        Ok(mgr_body::<T, R>(devices?, cfg).await)
     })
 }
 
 #[derive(Clone)]
-pub struct DriverDb(Arc<HashMap<driver::Name, DriverInfo>>);
+pub struct DriverDb<R: Reporter>(Arc<HashMap<driver::Name, DriverInfo<R>>>);
 
-impl DriverDb {
-    pub fn create() -> DriverDb {
-        let mut table: HashMap<driver::Name, DriverInfo> = HashMap::new();
+impl<R: Reporter> DriverDb<R> {
+    pub fn create() -> DriverDb<R> {
+        let mut table: HashMap<driver::Name, DriverInfo<R>> = HashMap::new();
 
         {
             use memory::Instance;
@@ -145,7 +150,7 @@ impl DriverDb {
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
+                    manage_instance::<Instance, R>,
                 ),
             );
         }
@@ -158,7 +163,7 @@ impl DriverDb {
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
+                    manage_instance::<Instance, R>,
                 ),
             );
         }
@@ -171,7 +176,7 @@ impl DriverDb {
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
+                    manage_instance::<Instance, R>,
                 ),
             );
         }
@@ -184,7 +189,7 @@ impl DriverDb {
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
+                    manage_instance::<Instance, R>,
                 ),
             );
         }
@@ -197,7 +202,7 @@ impl DriverDb {
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
+                    manage_instance::<Instance, R>,
                 ),
             );
         }
@@ -213,7 +218,7 @@ impl DriverDb {
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
+                    manage_instance::<Instance, R>,
                 ),
             );
         }
@@ -229,7 +234,7 @@ impl DriverDb {
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
+                    manage_instance::<Instance, R>,
                 ),
             );
         }
@@ -245,7 +250,7 @@ impl DriverDb {
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
+                    manage_instance::<Instance, R>,
                 ),
             );
         }
@@ -261,7 +266,7 @@ impl DriverDb {
                 (
                     Instance::SUMMARY,
                     Instance::DESCRIPTION,
-                    manage_instance::<Instance>,
+                    manage_instance::<Instance, R>,
                 ),
             );
         }
@@ -271,7 +276,7 @@ impl DriverDb {
 
     /// Searches the map for a driver with the specified name. If
     /// present, the driver's information is returned.
-    pub fn get_driver(&self, key: &str) -> Option<&DriverInfo> {
+    pub fn get_driver(&self, key: &str) -> Option<&DriverInfo<R>> {
         self.0.get(key)
     }
 

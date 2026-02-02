@@ -1,5 +1,5 @@
 use drmem_api::{
-    driver::{self, classes},
+    driver::{self, classes, Reporter},
     Error, Result,
 };
 use std::convert::{Infallible, TryFrom};
@@ -202,10 +202,10 @@ impl Instance {
     // correct device channel. It also does some sanity checks on the
     // values.
 
-    async fn handle(
+    async fn handle<R: Reporter>(
         &mut self,
         obs: &wu::Observation,
-        devices: &mut <Self as driver::API>::HardwareType,
+        devices: &mut <Self as driver::API<R>>::HardwareType,
     ) {
         // Retreive all the parameters whose units can change between
         // English and Metric.
@@ -340,9 +340,9 @@ fn xlat_units(u: &classes::WeatherUnits) -> wu::Unit {
     }
 }
 
-impl driver::API for Instance {
+impl<R: Reporter> driver::API<R> for Instance {
     type Config = config::Params;
-    type HardwareType = device::Set;
+    type HardwareType = device::Set<R>;
 
     async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         match wu::create_client(Duration::from_secs(5)) {

@@ -22,7 +22,10 @@ impl State {
     }
 
     /// Handles incoming requests and returns a reply.
-    async fn handle_driver_request(&mut self, req: driver::Request) {
+    async fn handle_driver_request(
+        &mut self,
+        req: driver::Request<<Instance as Store>::Reporter>,
+    ) {
         match req {
             driver::Request::AddReadonlyDevice {
                 ref driver_name,
@@ -131,7 +134,9 @@ impl State {
     /// `task::spawn`.
     async fn run(
         mut self,
-        mut rx_drv_req: mpsc::Receiver<driver::Request>,
+        mut rx_drv_req: mpsc::Receiver<
+            driver::Request<<Instance as Store>::Reporter>,
+        >,
         mut rx_clnt_req: mpsc::Receiver<client::Request>,
     ) -> Result<Infallible> {
         info!("starting");
@@ -164,7 +169,7 @@ impl State {
 pub async fn start(
     cfg: &super::config::Config,
 ) -> Result<(
-    mpsc::Sender<driver::Request>,
+    mpsc::Sender<driver::Request<<Instance as Store>::Reporter>>,
     client::RequestChan,
     JoinHandle<Result<Infallible>>,
 )> {

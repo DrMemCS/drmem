@@ -13,7 +13,7 @@ use crate::backends::Store;
 use chrono::*;
 use drmem_api::{
     client, device,
-    driver::{self, ReportReading, RxDeviceSetting, TxDeviceSetting},
+    driver::{self, Reporter, RxDeviceSetting, TxDeviceSetting},
     Error, Result,
 };
 use std::collections::{hash_map, HashMap};
@@ -36,6 +36,7 @@ type ReadingState =
 pub mod config;
 mod glob;
 
+#[derive(Clone)]
 struct DeviceInfo {
     owner: driver::Name,
     units: Option<String>,
@@ -62,20 +63,14 @@ impl DeviceInfo {
     }
 }
 
-pub struct SimpleStore(HashMap<device::Name, DeviceInfo>);
-
-pub async fn open(_cfg: &config::Config) -> Result<SimpleStore> {
-    Ok(SimpleStore(HashMap::new()))
+#[derive(Clone)]
+pub struct Report {
+    di: DeviceInfo,
+    name: device::Name,
 }
 
-// Builds the `ReportReading` function. Drivers will call specialized
-// instances of this function to record the latest value of a device.
-
-fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
-    let reading = di.reading.clone();
-    let name = name.to_string();
-
-    Box::new(move |v| {
+impl Reporter for Report {
+    async fn report_value(&mut self, value: device::Value) -> () {
         // Determine the timestamp *before* we take the mutex. The
         // timing shouldn't pay the price of waiting for the mutex so
         // we grab it right away.
@@ -89,7 +84,7 @@ fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
         // are short and infallible, so the error message shouldn't
         // ever get displayed.
 
-        if let Ok(mut data) = reading.lock() {
+        if let Ok(mut data) = self.di.reading.lock() {
             // At this point, we have access to the previous
             // timestamp. If the new timestamp is *before* the
             // previous, then we fudge the timestamp to be 1 𝜇s later
@@ -116,20 +111,27 @@ fn mk_report_func(di: &DeviceInfo, name: &device::Name) -> ReportReading {
                 }
             }
 
-            let reading = device::Reading { ts, value: v };
+            let reading = device::Reading { ts, value };
             let _ = data.0.send(reading.clone());
 
             // Update the device's state.
 
             data.1 = Some(reading);
         } else {
-            error!("couldn't set current value of {}", &name)
+            error!("couldn't set current value of {}", &self.name)
         }
-        Box::pin(async {})
-    })
+    }
+}
+
+pub struct SimpleStore(HashMap<device::Name, DeviceInfo>);
+
+pub async fn open(_cfg: &config::Config) -> Result<SimpleStore> {
+    Ok(SimpleStore(HashMap::new()))
 }
 
 impl Store for SimpleStore {
+    type Reporter = Report;
+
     /// Handle read-only devices registration. This function creates
     /// an association between the device name and its associated
     /// resources. Since the driver is registering a read-only device,
@@ -140,7 +142,7 @@ impl Store for SimpleStore {
         name: &'a device::Name,
         units: Option<&'a String>,
         _max_history: Option<usize>,
-    ) -> Result<ReportReading> {
+    ) -> Result<Self::Reporter> {
         // Check to see if the device name already exists.
 
         match self.0.entry((*name).clone()) {
@@ -158,7 +160,10 @@ impl Store for SimpleStore {
                 // Create and return the closure that the driver will
                 // use to report updates.
 
-                Ok(mk_report_func(di, name))
+                Ok(Report {
+                    di: di.clone(),
+                    name: name.clone(),
+                })
             }
 
             // The device already exists. If it was created from a
@@ -168,9 +173,10 @@ impl Store for SimpleStore {
                 let dev_info = e.get();
 
                 if dev_info.owner.as_ref() == driver {
-                    let func = mk_report_func(dev_info, name);
-
-                    Ok(func)
+                    Ok(Report {
+                        di: dev_info.clone(),
+                        name: name.clone(),
+                    })
                 } else {
                     Err(Error::InUse)
                 }
@@ -187,7 +193,7 @@ impl Store for SimpleStore {
         name: &'a device::Name,
         units: Option<&'a String>,
         _max_history: Option<usize>,
-    ) -> Result<(ReportReading, RxDeviceSetting, Option<device::Value>)> {
+    ) -> Result<(Self::Reporter, RxDeviceSetting, Option<device::Value>)> {
         // Check to see if the device name already exists.
 
         match self.0.entry((*name).clone()) {
@@ -209,7 +215,14 @@ impl Store for SimpleStore {
                 // Create and return the closure that the driver will
                 // use to report updates.
 
-                Ok((mk_report_func(di, name), rx_sets, None))
+                Ok((
+                    Report {
+                        di: di.clone(),
+                        name: name.clone(),
+                    },
+                    rx_sets,
+                    None,
+                ))
             }
 
             // The device already exists. If it was created from a
@@ -225,7 +238,10 @@ impl Store for SimpleStore {
 
                     dev_info.tx_setting = Some(tx_sets);
 
-                    let func = mk_report_func(dev_info, name);
+                    let func = Report {
+                        di: dev_info.clone(),
+                        name: name.clone(),
+                    };
                     let guard = dev_info.reading.lock();
 
                     Ok((
@@ -455,9 +471,10 @@ impl Store for SimpleStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{mk_report_func, DeviceInfo, SimpleStore};
+    use super::{DeviceInfo, Report, SimpleStore};
     use crate::backends::Store;
     use drmem_api::device;
+    use drmem_api::driver::Reporter;
     use std::{collections::HashMap, time};
     use tokio::sync::{mpsc::error::TryRecvError, oneshot};
     use tokio::time::interval;
@@ -475,7 +492,7 @@ mod tests {
         let mut db = SimpleStore(HashMap::new());
         let name: device::Name = "test:device".try_into().unwrap();
 
-        if let Ok(f) = db
+        if let Ok(mut f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -485,7 +502,7 @@ mod tests {
             {
                 let data = vec![1, 2, 3];
 
-                f(device::Value::Int(data[0])).await;
+                f.report_value(device::Value::Int(data[0])).await;
 
                 let s = db
                     .monitor_device(name.clone(), None, None)
@@ -496,7 +513,7 @@ mod tests {
                 tokio::pin!(s);
 
                 for ii in &data[1..] {
-                    f(device::Value::Int(*ii)).await;
+                    f.report_value(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -520,8 +537,8 @@ mod tests {
             {
                 let data = vec![1, 2, 3, 4];
 
-                f(device::Value::Int(data[0])).await;
-                f(device::Value::Int(data[1])).await;
+                f.report_value(device::Value::Int(data[0])).await;
+                f.report_value(device::Value::Int(data[1])).await;
 
                 let s = db
                     .monitor_device(name.clone(), None, None)
@@ -532,7 +549,7 @@ mod tests {
                 tokio::pin!(s);
 
                 for ii in &data[2..] {
-                    f(device::Value::Int(*ii)).await;
+                    f.report_value(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -559,7 +576,7 @@ mod tests {
         let mut db = SimpleStore(HashMap::new());
         let name: device::Name = "test:device".try_into().unwrap();
 
-        if let Ok(f) = db
+        if let Ok(mut f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -584,7 +601,7 @@ mod tests {
                 assert!(s.try_next().await.is_err());
 
                 for ii in data {
-                    f(device::Value::Int(ii)).await;
+                    f.report_value(device::Value::Int(ii)).await;
                 }
 
                 assert_eq!(
@@ -608,7 +625,7 @@ mod tests {
             {
                 let data = vec![1, 2, 3];
 
-                f(device::Value::Int(data[0])).await;
+                f.report_value(device::Value::Int(data[0])).await;
 
                 let s = db
                     .monitor_device(
@@ -623,7 +640,7 @@ mod tests {
                 tokio::pin!(s);
 
                 for ii in &data[1..] {
-                    f(device::Value::Int(*ii)).await;
+                    f.report_value(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -646,7 +663,7 @@ mod tests {
         let mut db = SimpleStore(HashMap::new());
         let name: device::Name = "test:device".try_into().unwrap();
 
-        if let Ok(f) = db
+        if let Ok(mut f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -656,7 +673,7 @@ mod tests {
             {
                 let data = vec![1, 2, 3];
 
-                f(device::Value::Int(data[0])).await;
+                f.report_value(device::Value::Int(data[0])).await;
 
                 let s = db
                     .monitor_device(
@@ -671,7 +688,7 @@ mod tests {
                 tokio::pin!(s);
 
                 for ii in &data[1..] {
-                    f(device::Value::Int(*ii)).await;
+                    f.report_value(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -690,7 +707,7 @@ mod tests {
         let mut db = SimpleStore(HashMap::new());
         let name: device::Name = "test:device".try_into().unwrap();
 
-        if let Ok(f) = db
+        if let Ok(mut f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -725,7 +742,7 @@ mod tests {
 
                 for ii in data {
                     interval.tick().await;
-                    f(device::Value::Int(ii)).await;
+                    f.report_value(device::Value::Int(ii)).await;
                 }
 
                 assert_eq!(s.try_next().await.unwrap(), None);
@@ -737,7 +754,7 @@ mod tests {
             {
                 let data = vec![1, 2, 3, 4, 5];
 
-                f(device::Value::Int(data[0])).await;
+                f.report_value(device::Value::Int(data[0])).await;
                 let mut interval = interval(time::Duration::from_millis(100));
 
                 let now = time::SystemTime::now();
@@ -759,7 +776,7 @@ mod tests {
 
                 for ii in &data[1..] {
                     interval.tick().await;
-                    f(device::Value::Int(*ii)).await;
+                    f.report_value(device::Value::Int(*ii)).await;
                 }
 
                 assert_eq!(
@@ -804,7 +821,7 @@ mod tests {
 
                 for ii in data {
                     interval.tick().await;
-                    f(device::Value::Int(ii)).await;
+                    f.report_value(device::Value::Int(ii)).await;
                 }
 
                 assert_eq!(
@@ -853,7 +870,7 @@ mod tests {
 
                 for ii in data {
                     interval.tick().await;
-                    f(device::Value::Int(ii)).await;
+                    f.report_value(device::Value::Int(ii)).await;
                 }
 
                 assert_eq!(
@@ -879,7 +896,7 @@ mod tests {
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
 
-        if let Ok(f) = db
+        if let Ok(mut f) = db
             .register_read_only_device("test", &name, None, None)
             .await
         {
@@ -890,7 +907,7 @@ mod tests {
 
             // Report a value.
 
-            f(device::Value::Int(1)).await;
+            f.report_value(device::Value::Int(1)).await;
 
             // Create a receiving handle for device updates.
 
@@ -914,7 +931,7 @@ mod tests {
             // Assert that re-registering this device with the same
             // driver name is successful.
 
-            if let Ok(f) = db
+            if let Ok(mut f) = db
                 .register_read_only_device("test", &name, None, None)
                 .await
             {
@@ -922,7 +939,7 @@ mod tests {
                 // disrupted by sending a value and receiving it from
                 // the receive handle we opened before re-registering.
 
-                f(device::Value::Int(2)).await;
+                f.report_value(device::Value::Int(2)).await;
                 assert_eq!(rx.try_recv().unwrap().value, device::Value::Int(2));
             } else {
                 panic!("error registering read-only device from same driver")
@@ -940,7 +957,7 @@ mod tests {
         // Register a device named "junk" and associate it with the
         // driver named "test". We don't define units for this device.
 
-        if let Ok((f, mut set_chan, None)) = db
+        if let Ok((mut f, mut set_chan, None)) = db
             .register_read_write_device("test", &name, None, None)
             .await
         {
@@ -971,7 +988,7 @@ mod tests {
 
             // Report a value.
 
-            f(device::Value::Int(1)).await;
+            f.report_value(device::Value::Int(1)).await;
 
             // Create a receiving handle for device updates.
 
@@ -1000,12 +1017,12 @@ mod tests {
             // Assert that re-registering this device with the same
             // driver name is successful.
 
-            if let Ok((f, _, Some(device::Value::Int(1)))) = db
+            if let Ok((mut f, _, Some(device::Value::Int(1)))) = db
                 .register_read_write_device("test", &name, None, None)
                 .await
             {
                 assert_eq!(
-                    Err(TryRecvError::Disconnected),
+                    Err(TryRecvError::Empty),
                     set_chan.try_recv().map(|_| ())
                 );
 
@@ -1013,7 +1030,7 @@ mod tests {
                 // disrupted by sending a value and receiving it from
                 // the receive handle we opened before re-registering.
 
-                f(device::Value::Int(2)).await;
+                f.report_value(device::Value::Int(2)).await;
                 assert_eq!(rx.try_recv().unwrap().value, device::Value::Int(2));
             } else {
                 panic!("error registering read-only device from same driver")
@@ -1027,10 +1044,13 @@ mod tests {
     async fn test_closure() {
         let di = DeviceInfo::create(String::from("test"), None, None);
         let name: device::Name = "misc:junk".try_into().unwrap();
-        let f = mk_report_func(&di, &name);
+        let mut f = Report {
+            di: di.clone(),
+            name: name.clone(),
+        };
 
         assert_eq!(di.reading.lock().unwrap().1, None);
-        f(device::Value::Int(1)).await;
+        f.report_value(device::Value::Int(1)).await;
         assert_eq!(
             di.reading.lock().unwrap().1.as_ref().unwrap().value,
             device::Value::Int(1)
@@ -1040,7 +1060,7 @@ mod tests {
             let ts1 = di.reading.lock().unwrap().1.as_ref().unwrap().ts;
             let mut rx = di.reading.lock().unwrap().0.subscribe();
 
-            f(device::Value::Int(2)).await;
+            f.report_value(device::Value::Int(2)).await;
             assert_eq!(rx.try_recv().unwrap().value, device::Value::Int(2));
             assert_eq!(
                 di.reading.lock().unwrap().1.as_ref().unwrap().value,
@@ -1049,7 +1069,7 @@ mod tests {
             assert!(ts1 < di.reading.lock().unwrap().1.as_ref().unwrap().ts);
         }
 
-        f(device::Value::Int(3)).await;
+        f.report_value(device::Value::Int(3)).await;
         assert_eq!(
             di.reading.lock().unwrap().1.as_ref().unwrap().value,
             device::Value::Int(3)
@@ -1059,7 +1079,7 @@ mod tests {
             let mut rx1 = di.reading.lock().unwrap().0.subscribe();
             let mut rx2 = di.reading.lock().unwrap().0.subscribe();
 
-            f(device::Value::Int(4)).await;
+            f.report_value(device::Value::Int(4)).await;
             assert_eq!(rx1.try_recv().unwrap().value, device::Value::Int(4));
             assert_eq!(rx2.try_recv().unwrap().value, device::Value::Int(4));
             assert_eq!(

@@ -1,17 +1,17 @@
 use drmem_api::{
-    driver::{classes, Registrator, RequestChan, ResettableState},
+    driver::{classes, Registrator, Reporter, RequestChan, ResettableState},
     Result,
 };
 
 use crate::config;
 
-pub struct Set(pub classes::Weather);
+pub struct Set<R: Reporter>(pub classes::Weather<R>);
 
-impl Registrator for Set {
+impl<R: Reporter> Registrator<R> for Set<R> {
     type Config = config::Params;
 
     async fn register_devices(
-        drc: &mut RequestChan,
+        drc: &mut RequestChan<R>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -26,7 +26,7 @@ impl Registrator for Set {
     }
 }
 
-impl ResettableState for Set {
+impl<R: Reporter> ResettableState for Set<R> {
     fn reset_state(&mut self) {
         self.0.reset_state()
     }

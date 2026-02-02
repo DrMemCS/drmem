@@ -1,4 +1,4 @@
-use crate::{device, driver::ReportReading, Error, Result};
+use crate::{device, driver::Reporter, Error, Result};
 use std::{future::Future, marker::PhantomData, pin::Pin};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
@@ -73,23 +73,24 @@ where
     ))
 }
 
-pub struct ReadWriteDevice<T: device::ReadWriteCompat> {
-    report_chan: ReportReading,
+pub struct ReadWriteDevice<T: device::ReadWriteCompat, R: Reporter> {
+    reporter: R,
     set_stream: SettingStream<T>,
     prev_val: Option<T>,
 }
 
-impl<T> ReadWriteDevice<T>
+impl<T, R> ReadWriteDevice<T, R>
 where
     T: device::ReadWriteCompat,
+    R: Reporter,
 {
     pub fn new(
-        report_chan: ReportReading,
+        reporter: R,
         setting_chan: RxDeviceSetting,
         prev_val: Option<T>,
     ) -> Self {
         ReadWriteDevice {
-            report_chan,
+            reporter,
             set_stream: create_setting_stream(setting_chan),
             prev_val,
         }
@@ -100,9 +101,9 @@ where
     pub fn report_update(
         &mut self,
         value: T,
-    ) -> impl Future<Output = ()> + use<'_, T> {
+    ) -> impl Future<Output = ()> + use<'_, T, R> {
         self.prev_val = Some(value.clone());
-        (self.report_chan)(value.into())
+        self.reporter.report_value(value.into())
     }
 
     /// Gets the last value of the device. If DrMem is built with
@@ -114,13 +115,16 @@ where
 
     pub fn next_setting(
         &mut self,
-    ) -> impl Future<Output = Option<SettingTransaction<T>>> + use<'_, T> {
+    ) -> impl Future<Output = Option<SettingTransaction<T>>> + use<'_, T, R>
+    {
         self.set_stream.next()
     }
 }
 
-impl<T> super::ResettableState for ReadWriteDevice<T> where
-    T: device::ReadWriteCompat
+impl<T, R> super::ResettableState for ReadWriteDevice<T, R>
+where
+    T: device::ReadWriteCompat,
+    R: Reporter,
 {
 }
 

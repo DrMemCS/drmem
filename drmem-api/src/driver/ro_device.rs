@@ -1,23 +1,24 @@
-use crate::{device, driver::ReportReading};
+use crate::{device, driver::Reporter};
 use std::future::Future;
 use std::marker::PhantomData;
 
 /// Represents a read-only device that uses a specified type for its
 /// reading. Any type that can be converted to a `device::Value` is
 /// acceptable.
-pub struct ReadOnlyDevice<T: device::ReadCompat> {
-    report_chan: ReportReading,
+pub struct ReadOnlyDevice<T: device::ReadCompat, R: Reporter> {
+    reporter: R,
     phantom: PhantomData<T>,
 }
 
-impl<T> ReadOnlyDevice<T>
+impl<T, R> ReadOnlyDevice<T, R>
 where
     T: device::ReadCompat,
+    R: Reporter,
 {
     /// Returns a new `ReadOnlyDevice` type.
-    pub fn new(report_chan: ReportReading) -> Self {
+    pub fn new(reporter: R) -> Self {
         ReadOnlyDevice {
-            report_chan,
+            reporter,
             phantom: PhantomData,
         }
     }
@@ -27,7 +28,7 @@ where
     pub fn report_update(
         &mut self,
         value: T,
-    ) -> impl Future<Output = ()> + use<'_, T> {
-        (self.report_chan)(value.into())
+    ) -> impl Future<Output = ()> + use<'_, T, R> {
+        self.reporter.report_value(value.into())
     }
 }

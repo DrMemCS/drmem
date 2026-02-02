@@ -1,5 +1,8 @@
 use super::{config, device};
-use drmem_api::{driver, Result};
+use drmem_api::{
+    driver::{self, Reporter},
+    Result,
+};
 use std::convert::Infallible;
 
 pub struct Instance;
@@ -17,9 +20,9 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
+impl<R: Reporter> driver::API<R> for Instance {
     type Config = config::Params;
-    type HardwareType = device::Set;
+    type HardwareType = device::Set<R>;
 
     async fn create_instance(_cfg: &Self::Config) -> Result<Box<Self>> {
         Ok(Box::new(Instance::new()))
@@ -39,16 +42,30 @@ mod tests {
     use super::device::TypeChecker;
     use drmem_api::{
         device,
-        driver::{ReadWriteDevice, TxDeviceSetting},
+        driver::{ReadWriteDevice, Reporter, TxDeviceSetting},
     };
     use tokio::sync::mpsc;
+
+    struct Report(mpsc::Sender<device::Value>);
+
+    impl Report {
+        fn new(tx: mpsc::Sender<device::Value>) -> Report {
+            Report(tx)
+        }
+    }
+
+    impl Reporter for Report {
+        async fn report_value(&mut self, value: device::Value) {
+            self.0.try_send(value).expect("couldn't report value")
+        }
+    }
 
     // Builds a type that acts like a settable device.
 
     fn build_device() -> (
         TxDeviceSetting,
         mpsc::Receiver<device::Value>,
-        (ReadWriteDevice<device::Value>, TypeChecker),
+        (ReadWriteDevice<device::Value, Report>, TypeChecker),
     ) {
         let (tx_sets, rx_sets) = mpsc::channel(20);
         let (tx_reports, rx_reports) = mpsc::channel(20);
@@ -57,11 +74,8 @@ mod tests {
             tx_sets,
             rx_reports,
             (
-                ReadWriteDevice::<device::Value>::new(
-                    Box::new(move |v| {
-                        tx_reports.try_send(v).expect("couldn't report value");
-                        Box::pin(async {})
-                    }),
+                ReadWriteDevice::<device::Value, Report>::new(
+                    Report::new(tx_reports),
                     rx_sets,
                     None,
                 ),
@@ -82,7 +96,7 @@ mod tests {
         // forever.
 
         {
-            let mut dev = Set { set: vec![] };
+            let mut dev = Set::<Report> { set: vec![] };
             let fut = std::pin::pin!(dev.get_next());
             let waker = noop_waker();
             let mut context = Context::from_waker(&waker);

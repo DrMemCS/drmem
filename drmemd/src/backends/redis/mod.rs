@@ -2,7 +2,7 @@ use crate::backends::Store;
 use chrono::*;
 use drmem_api::{
     client, device,
-    driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
+    driver::{Reporter, RxDeviceSetting, TxDeviceSetting},
     Error, Result,
 };
 use futures::{
@@ -10,13 +10,10 @@ use futures::{
     Future,
 };
 use redis::{
-    aio,
+    aio::{self, MultiplexedConnection},
     streams::{StreamId, StreamInfoStreamReply},
 };
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::pin::Pin;
-use std::time;
+use std::{collections::HashMap, convert::TryInto, pin::Pin, sync::Arc, time};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{self, Stream, StreamExt};
 use tracing::{debug, error, info, info_span, warn, Instrument};
@@ -425,6 +422,70 @@ impl Stream for ReadingStream {
     }
 }
 
+#[derive(Clone)]
+pub struct Report {
+    name: Arc<str>,
+    hist_key: Arc<str>,
+    conn: MultiplexedConnection,
+    max_history: Option<usize>,
+}
+
+impl Report {
+    pub fn new(
+        name: &str,
+        conn: MultiplexedConnection,
+        max_history: Option<usize>,
+    ) -> Self {
+        Report {
+            name: name.into(),
+            hist_key: RedisStore::hist_key(name).into(),
+            conn,
+            max_history,
+        }
+    }
+
+    // Generates a redis command pipeline that adds a value to a
+    // device's history.
+
+    fn report_new_value_cmd(key: &str, val: &device::Value) -> redis::Cmd {
+        let data = [("value", to_redis(val))];
+
+        redis::Cmd::xadd(key, "*", &data)
+    }
+
+    fn report_bounded_new_value_cmd(
+        key: &str,
+        val: &device::Value,
+        mh: usize,
+    ) -> redis::Cmd {
+        let opts = redis::streams::StreamMaxlen::Approx(mh);
+        let data = [("value", to_redis(val))];
+
+        redis::Cmd::xadd_maxlen(key, opts, "*", &data)
+    }
+}
+
+impl Reporter for Report {
+    async fn report_value(&mut self, value: device::Value) {
+        if let Some(mh) = self.max_history {
+            if let Err(e) =
+                Self::report_bounded_new_value_cmd(&self.hist_key, &value, mh)
+                    .query_async::<()>(&mut self.conn)
+                    .await
+            {
+                warn!("couldn't save {} data to redis ... {}", &self.name, e)
+            }
+        } else {
+            if let Err(e) = Self::report_new_value_cmd(&self.hist_key, &value)
+                .query_async::<()>(&mut self.conn)
+                .await
+            {
+                warn!("couldn't save {} data to redis ... {}", &self.name, e)
+            }
+        }
+    }
+}
+
 /// Defines a context that uses redis for the back-end storage.
 pub struct RedisStore {
     /// This connection is used for interacting with the database.
@@ -523,7 +584,7 @@ impl RedisStore {
     // Returns the key that returns time-series information for the
     // device.
 
-    fn hist_key(name: &str) -> String {
+    pub fn hist_key(name: &str) -> String {
         format!("{name}#hist")
     }
 
@@ -620,26 +681,6 @@ impl RedisStore {
         let hist_key = Self::hist_key(name);
 
         redis::Cmd::xinfo_stream(hist_key)
-    }
-
-    // Generates a redis command pipeline that adds a value to a
-    // device's history.
-
-    fn report_new_value_cmd(key: &str, val: &device::Value) -> redis::Cmd {
-        let data = [("value", to_redis(val))];
-
-        redis::Cmd::xadd(key, "*", &data)
-    }
-
-    fn report_bounded_new_value_cmd(
-        key: &str,
-        val: &device::Value,
-        mh: usize,
-    ) -> redis::Cmd {
-        let opts = redis::streams::StreamMaxlen::Approx(mh);
-        let data = [("value", to_redis(val))];
-
-        redis::Cmd::xadd_maxlen(key, opts, "*", &data)
     }
 
     fn hash_to_info(
@@ -868,54 +909,11 @@ impl RedisStore {
             .await
             .map_err(xlat_err)
     }
-
-    // Creates a closure for a driver to report a device's changing
-    // values.
-
-    fn mk_report_func(
-        &self,
-        name: &str,
-        max_history: Option<usize>,
-    ) -> ReportReading {
-        let db_con = self.db_con.clone();
-        let name = String::from(name);
-
-        if let Some(mh) = max_history {
-            Box::new(move |v| {
-                let mut db_con = db_con.clone();
-                let hist_key = Self::hist_key(&name);
-                let name = name.clone();
-
-                Box::pin(async move {
-                    if let Err(e) =
-                        Self::report_bounded_new_value_cmd(&hist_key, &v, mh)
-                            .query_async::<()>(&mut db_con)
-                            .await
-                    {
-                        warn!("couldn't save {} data to redis ... {}", &name, e)
-                    }
-                })
-            })
-        } else {
-            Box::new(move |v| {
-                let mut db_con = db_con.clone();
-                let hist_key = Self::hist_key(&name);
-                let name = name.clone();
-
-                Box::pin(async move {
-                    if let Err(e) = Self::report_new_value_cmd(&hist_key, &v)
-                        .query_async::<()>(&mut db_con)
-                        .await
-                    {
-                        warn!("couldn't save {} data to redis ... {}", &name, e)
-                    }
-                })
-            })
-        }
-    }
 }
 
 impl Store for RedisStore {
+    type Reporter = Report;
+
     /// Registers a device in the redis backend.
     fn register_read_only_device<'a>(
         &'a mut self,
@@ -923,7 +921,7 @@ impl Store for RedisStore {
         name: &'a device::Name,
         units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<ReportReading>> + Send + 'a {
+    ) -> impl Future<Output = Result<Self::Reporter>> + Send + 'a {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
@@ -934,7 +932,7 @@ impl Store for RedisStore {
 
                 info!("'{}' has been successfully created", &name);
             }
-            Ok(self.mk_report_func(&name, max_history))
+            Ok(Report::new(&name, self.db_con.clone(), max_history))
         }
     }
 
@@ -946,7 +944,7 @@ impl Store for RedisStore {
         max_history: Option<usize>,
     ) -> impl Future<
         Output = Result<(
-            ReportReading,
+            Self::Reporter,
             RxDeviceSetting,
             Option<device::Value>,
         )>,
@@ -970,7 +968,7 @@ impl Store for RedisStore {
             }
 
             Ok((
-                self.mk_report_func(&sname, max_history),
+                Report::new(&sname, self.db_con.clone(), max_history),
                 rx,
                 self.last_value(&sname).await.map(|v| v.value),
             ))
@@ -1565,7 +1563,7 @@ $9\r\njunk#hist\r\n"
     #[test]
     fn test_report_value_cmd() {
         assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &(true.into()))
+            &Report::report_new_value_cmd("key", &(true.into()))
                 .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
@@ -1575,7 +1573,7 @@ $5\r\nvalue\r
 $2\r\nBT\r\n"
         );
         assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &(0x00010203i32.into()))
+            &Report::report_new_value_cmd("key", &(0x00010203i32.into()))
                 .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
@@ -1585,7 +1583,7 @@ $5\r\nvalue\r
 $5\r\nI\x00\x01\x02\x03\r\n"
         );
         assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &(0x12345678i32.into()))
+            &Report::report_new_value_cmd("key", &(0x12345678i32.into()))
                 .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
@@ -1595,7 +1593,7 @@ $5\r\nvalue\r
 $5\r\nI\x12\x34\x56\x78\r\n"
         );
         assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &(1.0.into()))
+            &Report::report_new_value_cmd("key", &(1.0.into()))
                 .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
@@ -1605,7 +1603,7 @@ $5\r\nvalue\r
 $9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
         );
         assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &("hello".into()))
+            &Report::report_new_value_cmd("key", &("hello".into()))
                 .get_packed_command(),
             b"*5\r
 $4\r\nXADD\r
@@ -1616,7 +1614,7 @@ $10\r\nS\x00\x00\x00\x05hello\r\n"
         );
 
         assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd("key", &(true.into()), 0)
+            &Report::report_bounded_new_value_cmd("key", &(true.into()), 0)
                 .get_packed_command(),
             b"*8\r
 $4\r\nXADD\r
@@ -1629,7 +1627,7 @@ $5\r\nvalue\r
 $2\r\nBT\r\n"
         );
         assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd(
+            &Report::report_bounded_new_value_cmd(
                 "key",
                 &(0x00010203i32.into()),
                 1
@@ -1646,7 +1644,7 @@ $5\r\nvalue\r
 $5\r\nI\x00\x01\x02\x03\r\n"
         );
         assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd(
+            &Report::report_bounded_new_value_cmd(
                 "key",
                 &(0x12345678i32.into()),
                 2
@@ -1663,7 +1661,7 @@ $5\r\nvalue\r
 $5\r\nI\x12\x34\x56\x78\r\n"
         );
         assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd("key", &(1.0.into()), 3)
+            &Report::report_bounded_new_value_cmd("key", &(1.0.into()), 3)
                 .get_packed_command(),
             b"*8\r
 $4\r\nXADD\r
@@ -1676,12 +1674,8 @@ $5\r\nvalue\r
 $9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
         );
         assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd(
-                "key",
-                &("hello".into()),
-                4
-            )
-            .get_packed_command(),
+            &Report::report_bounded_new_value_cmd("key", &("hello".into()), 4)
+                .get_packed_command(),
             b"*8\r
 $4\r\nXADD\r
 $3\r\nkey\r

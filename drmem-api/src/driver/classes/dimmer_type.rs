@@ -18,28 +18,28 @@
 
 use crate::driver::{
     overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
-    Registrator, RequestChan, Result,
+    Registrator, Reporter, RequestChan, Result,
 };
 use tokio::time::Duration;
 
 /// Defines the common API used by Dimmers.
-pub struct Dimmer {
+pub struct Dimmer<R: Reporter> {
     /// This device returns `true` when the driver has a problem
     /// communicating with the hardware.
-    pub error: ReadOnlyDevice<bool>,
+    pub error: ReadOnlyDevice<bool, R>,
     /// Controls the brightness setting of the dimmer. Off is 0.0 and
     /// full-on is 100.0.
-    pub brightness: OverridableDevice<f64>,
+    pub brightness: OverridableDevice<f64, R>,
     /// A product might include an indicator. If the hardware does,
     /// this device can turn it on and off.
-    pub indicator: OverridableDevice<bool>,
+    pub indicator: OverridableDevice<bool, R>,
 }
 
-impl Registrator for Dimmer {
+impl<R: Reporter> Registrator<R> for Dimmer<R> {
     type Config = Option<Duration>;
 
     async fn register_devices(
-        drc: &mut RequestChan,
+        drc: &mut RequestChan<R>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -60,4 +60,4 @@ impl Registrator for Dimmer {
     }
 }
 
-impl crate::driver::ResettableState for Dimmer {}
+impl<R: Reporter> crate::driver::ResettableState for Dimmer<R> {}
