@@ -8,6 +8,7 @@ use crate::types::{
 use std::{
     convert::{Infallible, TryFrom},
     future::Future,
+    pin::Pin,
     sync::Arc,
 };
 use tokio::{
@@ -28,11 +29,18 @@ mod rw_device;
 
 pub use config::DriverConfig;
 pub use overridable_device::OverridableDevice;
-pub use ro_device::{ReadOnlyDevice, ReportReading};
+pub use ro_device::ReadOnlyDevice;
 pub use rw_device::{
     ReadWriteDevice, RxDeviceSetting, SettingRequest, SettingResponder,
     TxDeviceSetting,
 };
+
+/// A function that drivers use to report updated values of a device.
+pub type ReportReading = Box<
+    dyn Fn(device::Value) -> Pin<Box<dyn Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Defines the requests that can be sent to core. Drivers don't use
 /// this type directly. They are indirectly used by `RequestChan`.
