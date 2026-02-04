@@ -915,64 +915,53 @@ impl Store for RedisStore {
     type Reporter = Report;
 
     /// Registers a device in the redis backend.
-    fn register_read_only_device<'a>(
+    async fn register_read_only_device<'a>(
         &'a mut self,
         driver_name: &'a str,
         name: &'a device::Name,
         units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<Self::Reporter>> + Send + 'a {
+    ) -> Result<Self::Reporter> {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
 
-        async move {
-            if self.validate_device(&name).await.is_err() {
-                self.init_device(&name, driver_name, units).await?;
+        if self.validate_device(&name).await.is_err() {
+            self.init_device(&name, driver_name, units).await?;
 
-                info!("'{}' has been successfully created", &name);
-            }
-            Ok(Report::new(&name, self.db_con.clone(), max_history))
+            info!("'{}' has been successfully created", &name);
         }
+        Ok(Report::new(&name, self.db_con.clone(), max_history))
     }
 
-    fn register_read_write_device<'a>(
+    async fn register_read_write_device<'a>(
         &'a mut self,
         driver_name: &'a str,
         name: &'a device::Name,
         units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> impl Future<
-        Output = Result<(
-            Self::Reporter,
-            RxDeviceSetting,
-            Option<device::Value>,
-        )>,
-    > + Send
-           + 'a {
+    ) -> Result<(Self::Reporter, RxDeviceSetting, Option<device::Value>)> {
         let sname = name.to_string();
 
         debug!("registering '{}' as read-write", &sname);
 
-        async move {
-            if self.validate_device(&sname).await.is_err() {
-                self.init_device(&sname, driver_name, units).await?;
+        if self.validate_device(&sname).await.is_err() {
+            self.init_device(&sname, driver_name, units).await?;
 
-                info!("'{}' has been successfully created", &sname);
-            }
-
-            let (tx, rx) = mpsc::channel(20);
-
-            if self.table.insert(name.clone(), tx).is_some() {
-                warn!("{} already had a setting channel", &name);
-            }
-
-            Ok((
-                Report::new(&sname, self.db_con.clone(), max_history),
-                rx,
-                self.last_value(&sname).await.map(|v| v.value),
-            ))
+            info!("'{}' has been successfully created", &sname);
         }
+
+        let (tx, rx) = mpsc::channel(20);
+
+        if self.table.insert(name.clone(), tx).is_some() {
+            warn!("{} already had a setting channel", &name);
+        }
+
+        Ok((
+            Report::new(&sname, self.db_con.clone(), max_history),
+            rx,
+            self.last_value(&sname).await.map(|v| v.value),
+        ))
     }
 
     // Implement the request to pull device information. Any task with
