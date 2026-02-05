@@ -982,12 +982,48 @@ fn eval_as_if_expr<'a>(
     }
 }
 
+fn is_zero(v: &device::Value) -> bool {
+    match v {
+        device::Value::Int(i) => *i == 0,
+        device::Value::Flt(f) => *f == 0.0,
+        _ => false,
+    }
+}
+
+fn is_one(v: &device::Value) -> bool {
+    match v {
+        device::Value::Int(i) => *i == 1,
+        device::Value::Flt(f) => *f == 1.0,
+        _ => false,
+    }
+}
+
+fn fold_binary<F>(constructor: F, a: Box<Expr>, b: Box<Expr>) -> Expr
+where
+    F: FnOnce(Box<Expr>, Box<Expr>) -> Expr,
+{
+    let a_opt = optimize(*a);
+    let b_opt = optimize(*b);
+
+    if let (Expr::Lit(_), Expr::Lit(_)) = (&a_opt, &b_opt) {
+        let dummy_time = tod::Info::default();
+        let result = constructor(Box::new(a_opt), Box::new(b_opt));
+
+        if let Some(val) = eval(&result, &[], &dummy_time, None) {
+            return Expr::Lit(val.into_owned());
+        } else {
+            return result;
+        }
+    }
+    constructor(Box::new(a_opt), Box::new(b_opt))
+}
+
 // This function takes an expression and tries to reduce it.
 
 pub fn optimize(e: Expr) -> Expr {
-    match &e {
+    match e {
         // Look for optimizations with expressions starting with NOT.
-        Expr::Not(ne) => match &**ne {
+        Expr::Not(ref ne) => match &**ne {
             // If the sub-expression is also a NOT expression. If so,
             // we throw them both away.
             Expr::Not(e) => optimize(*e.clone()),
@@ -1000,38 +1036,91 @@ pub fn optimize(e: Expr) -> Expr {
             _ => e,
         },
 
-        Expr::And(a, b) => match (optimize(*a.clone()), optimize(*b.clone())) {
-            (v @ Expr::Lit(device::Value::Bool(false)), _)
-            | (_, v @ Expr::Lit(device::Value::Bool(false))) => v,
-            (Expr::Lit(device::Value::Bool(true)), e)
-            | (e, Expr::Lit(device::Value::Bool(true))) => e,
-            _ => e,
-        },
-
-        Expr::Or(a, b) => match (optimize(*a.clone()), optimize(*b.clone())) {
-            (v @ Expr::Lit(device::Value::Bool(true)), _)
-            | (_, v @ Expr::Lit(device::Value::Bool(true))) => v,
-            (Expr::Lit(device::Value::Bool(false)), e)
-            | (e, Expr::Lit(device::Value::Bool(false))) => e,
-            _ => e,
-        },
-
-        Expr::If(a, b, c) => {
-            let condition = optimize(*a.clone());
-
-            match condition {
-                Expr::Nothing => Expr::Nothing,
-                Expr::Lit(device::Value::Bool(true)) => optimize(*b.clone()),
-                Expr::Lit(device::Value::Bool(false)) => {
-                    c.clone().map(|v| optimize(*v)).unwrap_or(Expr::Nothing)
-                }
-                _ => Expr::If(
-                    Box::new(condition),
-                    Box::new(optimize(*b.clone())),
-                    c.clone().map(|v| Box::new(optimize(*v))),
-                ),
+        Expr::And(ref a, ref b) => {
+            match (optimize(*a.clone()), optimize(*b.clone())) {
+                (v @ Expr::Lit(device::Value::Bool(false)), _)
+                | (_, v @ Expr::Lit(device::Value::Bool(false))) => v,
+                (Expr::Lit(device::Value::Bool(true)), e)
+                | (e, Expr::Lit(device::Value::Bool(true))) => e,
+                _ => e,
             }
         }
+
+        Expr::Or(ref a, ref b) => {
+            match (optimize(*a.clone()), optimize(*b.clone())) {
+                (v @ Expr::Lit(device::Value::Bool(true)), _)
+                | (_, v @ Expr::Lit(device::Value::Bool(true))) => v,
+                (Expr::Lit(device::Value::Bool(false)), e)
+                | (e, Expr::Lit(device::Value::Bool(false))) => e,
+                _ => e,
+            }
+        }
+
+        Expr::If(a, b, c) => match optimize(*a) {
+            Expr::Nothing => Expr::Nothing,
+            Expr::Lit(device::Value::Bool(true)) => optimize(*b),
+            Expr::Lit(device::Value::Bool(false)) => {
+                c.map(|v| optimize(*v)).unwrap_or(Expr::Nothing)
+            }
+            condition => Expr::If(
+                Box::new(condition),
+                Box::new(optimize(*b)),
+                c.map(|v| Box::new(optimize(*v))),
+            ),
+        },
+
+        Expr::Add(a, b) => match (optimize(*a), optimize(*b)) {
+            (Expr::Lit(v), b) if is_zero(&v) => b,
+            (a, Expr::Lit(v)) if is_zero(&v) => a,
+            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
+                fold_binary(Expr::Add, Box::new(a), Box::new(b))
+            }
+            (a, b) => Expr::Add(Box::new(a), Box::new(b)),
+        },
+
+        Expr::Sub(a, b) => match (optimize(*a), optimize(*b)) {
+            (a, Expr::Lit(v)) if is_zero(&v) => a,
+            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
+                fold_binary(Expr::Sub, Box::new(a), Box::new(b))
+            }
+            (a, b) => Expr::Sub(Box::new(a), Box::new(b)),
+        },
+
+        Expr::Mul(a, b) => match (optimize(*a), optimize(*b)) {
+            (Expr::Lit(v), _) if is_zero(&v) => Expr::Lit(v),
+            (_, Expr::Lit(v)) if is_zero(&v) => Expr::Lit(v),
+            (Expr::Lit(v), b) if is_one(&v) => b,
+            (a, Expr::Lit(v)) if is_one(&v) => a,
+            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
+                fold_binary(Expr::Mul, Box::new(a), Box::new(b))
+            }
+            (a, b) => Expr::Mul(Box::new(a), Box::new(b)),
+        },
+
+        Expr::Div(a, b) => match (optimize(*a), optimize(*b)) {
+            (Expr::Lit(v), _) if is_zero(&v) => Expr::Lit(v),
+            (_, Expr::Lit(v)) if is_zero(&v) => Expr::Nothing,
+            (a, Expr::Lit(v)) if is_one(&v) => a,
+            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
+                fold_binary(Expr::Div, Box::new(a), Box::new(b))
+            }
+            (a, b) => Expr::Div(Box::new(a), Box::new(b)),
+        },
+
+        Expr::Rem(a, b) => match (optimize(*a), optimize(*b)) {
+            (Expr::Lit(v), _) if is_zero(&v) => Expr::Lit(v),
+            (_, Expr::Lit(v)) if is_zero(&v) => Expr::Nothing,
+            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
+                fold_binary(Expr::Rem, Box::new(a), Box::new(b))
+            }
+            (a, b) => Expr::Rem(Box::new(a), Box::new(b)),
+        },
+
+        Expr::Eq(a, b) => fold_binary(Expr::Eq, a, b),
+
+        Expr::Lt(a, b) => fold_binary(Expr::Lt, a, b),
+
+        Expr::LtEq(a, b) => fold_binary(Expr::LtEq, a, b),
 
         _ => e,
     }
@@ -2778,6 +2867,157 @@ mod tests {
                 Some(Box::new(Expr::Lit(device::Value::Flt(2.0))))
             )),
             Expr::Nothing
+        );
+    }
+
+    #[test]
+    fn test_literal_optimizer() {
+        assert_eq!(
+            optimize(Expr::Add(
+                Box::new(Expr::Lit(device::Value::Flt(2.0))),
+                Box::new(Expr::Lit(device::Value::Flt(1.0)))
+            )),
+            Expr::Lit(device::Value::Flt(3.0))
+        );
+        assert_eq!(
+            optimize(Expr::Add(
+                Box::new(Expr::Lit(device::Value::Flt(0.0))),
+                Box::new(Expr::Var(0))
+            )),
+            Expr::Var(0)
+        );
+        assert_eq!(
+            optimize(Expr::Add(
+                Box::new(Expr::Var(0)),
+                Box::new(Expr::Lit(device::Value::Flt(0.0)))
+            )),
+            Expr::Var(0)
+        );
+
+        assert_eq!(
+            optimize(Expr::Sub(
+                Box::new(Expr::Lit(device::Value::Int(10))),
+                Box::new(Expr::Lit(device::Value::Int(6)))
+            )),
+            Expr::Lit(device::Value::Int(4))
+        );
+        assert_eq!(
+            optimize(Expr::Sub(
+                Box::new(Expr::Var(0)),
+                Box::new(Expr::Lit(device::Value::Int(0)))
+            )),
+            Expr::Var(0)
+        );
+
+        assert_eq!(
+            optimize(Expr::Mul(
+                Box::new(Expr::Lit(device::Value::Int(10))),
+                Box::new(Expr::Lit(device::Value::Int(6)))
+            )),
+            Expr::Lit(device::Value::Int(60))
+        );
+        assert_eq!(
+            optimize(Expr::Mul(
+                Box::new(Expr::Var(0)),
+                Box::new(Expr::Lit(device::Value::Int(0)))
+            )),
+            Expr::Lit(device::Value::Int(0))
+        );
+        assert_eq!(
+            optimize(Expr::Mul(
+                Box::new(Expr::Lit(device::Value::Int(0))),
+                Box::new(Expr::Var(0))
+            )),
+            Expr::Lit(device::Value::Int(0))
+        );
+        assert_eq!(
+            optimize(Expr::Mul(
+                Box::new(Expr::Var(0)),
+                Box::new(Expr::Lit(device::Value::Int(1)))
+            )),
+            Expr::Var(0)
+        );
+        assert_eq!(
+            optimize(Expr::Mul(
+                Box::new(Expr::Lit(device::Value::Int(1))),
+                Box::new(Expr::Var(0))
+            )),
+            Expr::Var(0)
+        );
+
+        assert_eq!(
+            optimize(Expr::Div(
+                Box::new(Expr::Lit(device::Value::Int(12))),
+                Box::new(Expr::Lit(device::Value::Int(6)))
+            )),
+            Expr::Lit(device::Value::Int(2))
+        );
+        assert_eq!(
+            optimize(Expr::Div(
+                Box::new(Expr::Var(0)),
+                Box::new(Expr::Lit(device::Value::Int(0)))
+            )),
+            Expr::Nothing
+        );
+        assert_eq!(
+            optimize(Expr::Div(
+                Box::new(Expr::Lit(device::Value::Int(0))),
+                Box::new(Expr::Var(0))
+            )),
+            Expr::Lit(device::Value::Int(0))
+        );
+        assert_eq!(
+            optimize(Expr::Div(
+                Box::new(Expr::Var(0)),
+                Box::new(Expr::Lit(device::Value::Int(1)))
+            )),
+            Expr::Var(0)
+        );
+
+        assert_eq!(
+            optimize(Expr::Rem(
+                Box::new(Expr::Lit(device::Value::Int(13))),
+                Box::new(Expr::Lit(device::Value::Int(6)))
+            )),
+            Expr::Lit(device::Value::Int(1))
+        );
+
+        assert_eq!(
+            optimize(Expr::Lt(
+                Box::new(Expr::Lit(device::Value::Int(6))),
+                Box::new(Expr::Lit(device::Value::Int(12)))
+            )),
+            Expr::Lit(device::Value::Bool(true))
+        );
+
+        assert_eq!(
+            optimize(Expr::Eq(
+                Box::new(Expr::Lit(device::Value::Int(6))),
+                Box::new(Expr::Lit(device::Value::Int(12)))
+            )),
+            Expr::Lit(device::Value::Bool(false))
+        );
+
+        assert_eq!(
+            optimize(Expr::LtEq(
+                Box::new(Expr::Lit(device::Value::Int(6))),
+                Box::new(Expr::Lit(device::Value::Int(12)))
+            )),
+            Expr::Lit(device::Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::LtEq(
+                Box::new(Expr::Lit(device::Value::Int(12))),
+                Box::new(Expr::Lit(device::Value::Int(12)))
+            )),
+            Expr::Lit(device::Value::Bool(true))
+        );
+        assert_eq!(
+            optimize(Expr::LtEq(
+                Box::new(Expr::Lit(device::Value::Int(13))),
+                Box::new(Expr::Lit(device::Value::Int(12)))
+            )),
+            Expr::Lit(device::Value::Bool(false))
         );
     }
 
