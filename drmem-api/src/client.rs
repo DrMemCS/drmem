@@ -34,11 +34,11 @@
 
 use crate::{
     driver,
-    types::{device, Error},
+    types::{device, ipc::Transaction, Error},
     Result,
 };
 use chrono::*;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 /// Holds information about a device. A back-end is free to store this
 /// information in any way it sees fit. However, it is returned for
@@ -63,29 +63,18 @@ pub struct DevInfoReply {
 // Defines the requests that can be sent to core.
 #[doc(hidden)]
 pub enum Request {
-    QueryDeviceInfo {
-        pattern: Option<String>,
-        rpy_chan: oneshot::Sender<Result<Vec<DevInfoReply>>>,
-    },
+    QueryDeviceInfo(Transaction<Option<String>, Vec<DevInfoReply>>),
 
-    SetDevice {
-        name: device::Name,
-        value: device::Value,
-        rpy_chan: oneshot::Sender<Result<device::Value>>,
-    },
+    SetDevice(Transaction<(device::Name, device::Value), device::Value>),
 
-    GetSettingChan {
-        name: device::Name,
-        _own: bool,
-        rpy_chan: oneshot::Sender<Result<driver::TxDeviceSetting>>,
-    },
+    GetSettingChan(Transaction<(device::Name, bool), driver::TxDeviceSetting>),
 
-    MonitorDevice {
-        name: device::Name,
-        start: Option<DateTime<Utc>>,
-        end: Option<DateTime<Utc>>,
-        rpy_chan: oneshot::Sender<Result<device::DataStream<device::Reading>>>,
-    },
+    MonitorDevice(
+        Transaction<
+            (device::Name, Option<DateTime<Utc>>, Option<DateTime<Utc>>),
+            device::DataStream<device::Reading>,
+        >,
+    ),
 }
 
 /// A handle which is used to communicate with the core of DrMem.
@@ -113,22 +102,9 @@ impl RequestChan {
         start: Option<DateTime<Utc>>,
         end: Option<DateTime<Utc>>,
     ) -> Result<device::DataStream<device::Reading>> {
-        // Create our reply channel and build the request message.
+        let (trans, rx) = Transaction::new((name, start, end));
 
-        let (tx, rx) = oneshot::channel();
-        let msg = Request::MonitorDevice {
-            name,
-            rpy_chan: tx,
-            start,
-            end,
-        };
-
-        // Send the message.
-
-        self.req_chan.send(msg).await?;
-
-        // Wait for a reply.
-
+        self.req_chan.send(Request::MonitorDevice(trans)).await?;
         rx.await?
     }
 
@@ -151,23 +127,9 @@ impl RequestChan {
         name: device::Name,
         value: T,
     ) -> Result<T> {
-        // Create the reply channel and the request message that will
-        // be sent.
+        let (trans, rx) = Transaction::new((name, value.into()));
 
-        let (tx, rx) = oneshot::channel();
-        let msg = Request::SetDevice {
-            name,
-            value: value.into(),
-            rpy_chan: tx,
-        };
-
-        // Send the request to the driver.
-
-        self.req_chan.send(msg).await?;
-
-        // Wait for the reply and try to convert the set value back
-        // into the type that was used.
-
+        self.req_chan.send(Request::SetDevice(trans)).await?;
         rx.await?.and_then(T::try_from)
     }
 
@@ -176,23 +138,9 @@ impl RequestChan {
         name: device::Name,
         own: bool,
     ) -> Result<driver::TxDeviceSetting> {
-        // Create the reply channel and the request message that will
-        // be sent.
+        let (trans, rx) = Transaction::new((name, own));
 
-        let (tx, rx) = oneshot::channel();
-        let msg = Request::GetSettingChan {
-            name,
-            _own: own,
-            rpy_chan: tx,
-        };
-
-        // Send the request to the driver.
-
-        self.req_chan.send(msg).await?;
-
-        // Wait for the reply and try to convert the set value back
-        // into the type that was used.
-
+        self.req_chan.send(Request::GetSettingChan(trans)).await?;
         rx.await?
     }
 
@@ -202,17 +150,9 @@ impl RequestChan {
         &self,
         pattern: Option<String>,
     ) -> Result<Vec<DevInfoReply>> {
-        let (rpy_chan, rx) = oneshot::channel();
+        let (trans, rx) = Transaction::new(pattern);
 
-        // Send the request to the service (i.e. the backend) that has
-        // the device information.
-
-        self.req_chan
-            .send(Request::QueryDeviceInfo { pattern, rpy_chan })
-            .await?;
-
-        // Return the reply from the request.
-
+        self.req_chan.send(Request::QueryDeviceInfo(trans)).await?;
         rx.await.map_err(|e| e.into()).and_then(|v| v)
     }
 }

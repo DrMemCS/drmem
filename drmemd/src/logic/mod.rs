@@ -629,11 +629,10 @@ mod test {
 
                     if let Some(message) = c_recv.recv().await {
                         match message {
-                            Request::GetSettingChan {
-                                name, rpy_chan, ..
-                            } => {
-                                let name = name.to_string();
-                                let _ = rpy_chan.send(
+                            Request::GetSettingChan(trans) => {
+                                let name = trans.req.0.to_string();
+
+                                trans.reply(
                                     if let Some(tx) =
                                         self.outputs.remove(name.as_str())
                                     {
@@ -641,40 +640,33 @@ mod test {
                                     } else {
                                         Err(Error::NotFound)
                                     },
-                                );
+                                )
                             }
-                            Request::QueryDeviceInfo { rpy_chan, .. } => {
-                                let _ = rpy_chan.send(Err(
-                                    Error::ProtocolError("bad request".into()),
-                                ));
-                            }
-                            Request::SetDevice { rpy_chan, .. } => {
-                                let _ = rpy_chan.send(Err(
-                                    Error::ProtocolError("bad request".into()),
-                                ));
-                            }
-                            Request::MonitorDevice {
-                                name, rpy_chan, ..
-                            } => {
-                                let name = name.to_string();
-                                let _ = rpy_chan.send(
-                                    if let Some(rx) =
-					self.inputs.remove(name.as_str())
-                                    {
-					let stream =
-                                            Box::pin(ReceiverStream::new(rx).map(
-						|v| device::Reading {
-                                                    ts: std::time::SystemTime::now(
-                                                    ),
-                                                    value: v,
-						},
-                                            ));
 
-					Ok(stream as device::DataStream<device::Reading,>)
+                            Request::QueryDeviceInfo(trans) => trans.reply(
+                                Err(Error::ProtocolError("bad request".into())),
+                            ),
+
+                            Request::SetDevice(trans) => trans.reply(Err(
+                                Error::ProtocolError("bad request".into()),
+                            )),
+
+                            Request::MonitorDevice(trans) => {
+                                let name = trans.req.0.to_string();
+
+                                trans.reply(
+                                    if let Some(rx) = self.inputs.remove(name.as_str()) {
+					                    let stream =
+                                            Box::pin(ReceiverStream::new(rx).map(|v| device::Reading {
+                                                    ts: std::time::SystemTime::now(),
+                                                    value: v,
+						                    }));
+
+					                    Ok(stream as device::DataStream<device::Reading,>)
                                     } else {
-					Err(Error::NotFound)
+					                    Err(Error::NotFound)
                                     }
-				);
+				                )
                             }
                         }
                     }

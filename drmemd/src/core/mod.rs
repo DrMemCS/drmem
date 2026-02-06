@@ -77,54 +77,37 @@ impl State {
 
     async fn handle_client_request(&mut self, req: client::Request) {
         match req {
-            client::Request::QueryDeviceInfo { pattern, rpy_chan } => {
+            client::Request::QueryDeviceInfo(trans) => {
                 let result =
-                    self.backend.get_device_info(pattern.as_deref()).await;
+                    self.backend.get_device_info(trans.req.as_deref()).await;
 
-                if let Err(ref e) = result {
-                    info!("get_device_info() returned '{}'", e);
-                }
-
-                if rpy_chan.send(result).is_err() {
-                    warn!("client exited before a reply could be sent")
-                }
+                trans.reply(result)
             }
 
-            client::Request::SetDevice {
-                name,
-                value,
-                rpy_chan,
-            } => {
-                let fut = self.backend.set_device(name, value);
+            client::Request::SetDevice(trans) => {
+                let fut = self
+                    .backend
+                    .set_device(trans.req.0.clone(), trans.req.1.clone());
 
-                if rpy_chan.send(fut.await).is_err() {
-                    warn!("client exited before a reply could be sent")
-                }
+                trans.reply(fut.await)
             }
 
-            client::Request::GetSettingChan {
-                name,
-                _own,
-                rpy_chan,
-            } => {
-                let fut = self.backend.get_setting_chan(name, _own);
+            client::Request::GetSettingChan(trans) => {
+                let fut = self
+                    .backend
+                    .get_setting_chan(trans.req.0.clone(), trans.req.1);
 
-                if rpy_chan.send(fut.await).is_err() {
-                    warn!("client exited before a reply could be sent")
-                }
+                trans.reply(fut.await)
             }
 
-            client::Request::MonitorDevice {
-                name,
-                rpy_chan,
-                start,
-                end,
-            } => {
-                let fut = self.backend.monitor_device(name, start, end);
+            client::Request::MonitorDevice(trans) => {
+                let fut = self.backend.monitor_device(
+                    trans.req.0.clone(),
+                    trans.req.1,
+                    trans.req.2,
+                );
 
-                if rpy_chan.send(fut.await).is_err() {
-                    warn!("client exited before a reply could be sent")
-                }
+                trans.reply(fut.await)
             }
         }
     }
