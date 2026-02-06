@@ -1,21 +1,21 @@
 use drmem_api::{
     device,
-    driver::{self, ResettableState},
+    driver::{self, Reporter, ResettableState},
     Result,
 };
 
 use super::config;
 
-pub struct Set {
-    pub d_output: driver::ReadOnlyDevice<device::Value>,
-    pub d_enable: driver::ReadWriteDevice<bool>,
+pub struct Set<R: Reporter> {
+    pub d_output: driver::ReadOnlyDevice<device::Value, R>,
+    pub d_enable: driver::ReadWriteDevice<bool, R>,
 }
 
-impl driver::Registrator for Set {
+impl<R: Reporter> driver::Registrator<R> for Set<R> {
     type Config = config::Params;
 
     async fn register_devices(
-        core: &mut driver::RequestChan,
+        core: &mut driver::RequestChan<R>,
         _cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -38,4 +38,4 @@ impl driver::Registrator for Set {
     }
 }
 
-impl ResettableState for Set {}
+impl<R: Reporter> ResettableState for Set<R> {}

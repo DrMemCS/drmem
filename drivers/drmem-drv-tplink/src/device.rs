@@ -1,5 +1,5 @@
 use drmem_api::{
-    driver::{classes, Registrator, RequestChan, ResettableState},
+    driver::{classes, Registrator, Reporter, RequestChan, ResettableState},
     Result,
 };
 use tokio::time::Duration;
@@ -9,15 +9,15 @@ use crate::config;
 // An instance of a driver can be a switch, dimmer, or outlet device.
 // This type specifies the device channels for the given types. The
 // driver instance will have one of these variants for its device set.
-pub enum Set {
-    Switch(classes::Switch),
-    Dimmer(classes::Dimmer),
+pub enum Set<R: Reporter> {
+    Switch(classes::Switch<R>),
+    Dimmer(classes::Dimmer<R>),
 }
 
 // A set of devices must be resettable (in case the device gets
 // rebooted.) This implementation simply resets the devices in the set
 // used by the driver instance.
-impl ResettableState for Set {
+impl<R: Reporter> ResettableState for Set<R> {
     fn reset_state(&mut self) {
         match self {
             Set::Switch(dev) => {
@@ -32,12 +32,12 @@ impl ResettableState for Set {
     }
 }
 
-impl Registrator for Set {
+impl<R: Reporter> Registrator<R> for Set<R> {
     type Config = config::Params;
 
     // Defines the registration interface for the device set.
     async fn register_devices<'a>(
-        drc: &'a mut RequestChan,
+        drc: &'a mut RequestChan<R>,
         cfg: &'a Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {

@@ -1,4 +1,8 @@
-use drmem_api::{device::Value, driver, Result};
+use drmem_api::{
+    device::Value,
+    driver::{self, Reporter},
+    Result,
+};
 use std::{convert::Infallible, ops::RangeInclusive};
 
 use super::{config, device};
@@ -66,9 +70,9 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
+impl<R: Reporter> driver::API<R> for Instance {
     type Config = config::Params;
-    type HardwareType = device::Set;
+    type HardwareType = device::Set<R>;
 
     async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         Instance::new(cfg).map(Box::new)

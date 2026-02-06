@@ -1,4 +1,4 @@
-use crate::driver::{self, Registrator, RequestChan, Result};
+use crate::driver::{self, Registrator, Reporter, RequestChan, Result};
 
 #[derive(serde::Deserialize, Clone)]
 pub enum WeatherUnits {
@@ -11,31 +11,31 @@ pub struct WeatherConfig {
     pub units: WeatherUnits,
 }
 
-pub struct Weather {
+pub struct Weather<R: Reporter> {
     pub units: WeatherUnits,
 
-    pub dewpt: driver::ReadOnlyDevice<f64>,
-    pub htidx: driver::ReadOnlyDevice<f64>,
-    pub humidity: driver::ReadOnlyDevice<f64>,
-    pub prec_rate: driver::ReadOnlyDevice<f64>,
-    pub prec_total: driver::ReadOnlyDevice<f64>,
-    pub prec_last_total: driver::ReadOnlyDevice<f64>,
-    pub pressure: driver::ReadOnlyDevice<f64>,
-    pub solrad: driver::ReadOnlyDevice<f64>,
-    pub error: driver::ReadOnlyDevice<bool>,
-    pub temp: driver::ReadOnlyDevice<f64>,
-    pub uv: driver::ReadOnlyDevice<f64>,
-    pub wndchl: driver::ReadOnlyDevice<f64>,
-    pub wnddir: driver::ReadOnlyDevice<f64>,
-    pub wndgst: driver::ReadOnlyDevice<f64>,
-    pub wndspd: driver::ReadOnlyDevice<f64>,
+    pub dewpt: driver::ReadOnlyDevice<f64, R>,
+    pub htidx: driver::ReadOnlyDevice<f64, R>,
+    pub humidity: driver::ReadOnlyDevice<f64, R>,
+    pub prec_rate: driver::ReadOnlyDevice<f64, R>,
+    pub prec_total: driver::ReadOnlyDevice<f64, R>,
+    pub prec_last_total: driver::ReadOnlyDevice<f64, R>,
+    pub pressure: driver::ReadOnlyDevice<f64, R>,
+    pub solrad: driver::ReadOnlyDevice<f64, R>,
+    pub error: driver::ReadOnlyDevice<bool, R>,
+    pub temp: driver::ReadOnlyDevice<f64, R>,
+    pub uv: driver::ReadOnlyDevice<f64, R>,
+    pub wndchl: driver::ReadOnlyDevice<f64, R>,
+    pub wnddir: driver::ReadOnlyDevice<f64, R>,
+    pub wndgst: driver::ReadOnlyDevice<f64, R>,
+    pub wndspd: driver::ReadOnlyDevice<f64, R>,
 }
 
-impl Registrator for Weather {
+impl<R: Reporter> Registrator<R> for Weather<R> {
     type Config = WeatherConfig;
 
     async fn register_devices(
-        drc: &mut RequestChan,
+        drc: &mut RequestChan<R>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -149,4 +149,4 @@ impl Registrator for Weather {
     }
 }
 
-impl crate::driver::ResettableState for Weather {}
+impl<R: Reporter> crate::driver::ResettableState for Weather<R> {}

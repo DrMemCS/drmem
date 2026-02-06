@@ -79,7 +79,9 @@ async fn wrap_task(
 
 async fn run() -> Result<()> {
     if let Some(cfg) = init_app().await {
-        let drv_tbl = driver::DriverDb::create();
+        let drv_tbl = driver::DriverDb::<
+            <backends::Instance as backends::Store>::Reporter,
+        >::create();
 
         // Start the core task. It returns a handle to a channel with
         // which to make requests. It also returns the task handle.

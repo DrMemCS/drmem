@@ -1,4 +1,7 @@
-use drmem_api::{driver, Error, Result};
+use drmem_api::{
+    driver::{self, Reporter},
+    Error, Result,
+};
 use std::convert::Infallible;
 use std::{net::SocketAddr, str};
 use tokio::net::UdpSocket;
@@ -322,9 +325,9 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
+impl<R: Reporter> driver::API<R> for Instance {
     type Config = config::Params;
-    type HardwareType = device::Set;
+    type HardwareType = device::Set<R>;
 
     async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
         let loc_if = "0.0.0.0:0".parse::<SocketAddr>().unwrap();

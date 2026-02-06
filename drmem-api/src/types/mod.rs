@@ -6,6 +6,7 @@ use std::convert::Infallible;
 use tokio::sync::{mpsc, oneshot};
 
 pub mod device;
+pub mod ipc;
 
 /// Enumerates all the errors that can be reported in DrMem. Authors
 /// for new drivers or storage backends should try to map their errors

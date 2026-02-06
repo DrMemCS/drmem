@@ -6,6 +6,8 @@ use futures::Future;
 // storage for -- and access to -- the state of each driver's devices.
 
 pub trait Store {
+    type Reporter: driver::Reporter;
+
     // Called when a read-only device is to be registered with the
     // back-end.
     //
@@ -34,7 +36,7 @@ pub trait Store {
         name: &'a device::Name,
         units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<driver::ReportReading>> + Send + 'a;
+    ) -> impl Future<Output = Result<Self::Reporter>> + Send + 'a;
 
     // Called when a read-write device is to be registered with the
     // back-end.
@@ -67,7 +69,7 @@ pub trait Store {
         max_history: Option<usize>,
     ) -> impl Future<
         Output = Result<(
-            driver::ReportReading,
+            Self::Reporter,
             driver::RxDeviceSetting,
             Option<device::Value>,
         )>,

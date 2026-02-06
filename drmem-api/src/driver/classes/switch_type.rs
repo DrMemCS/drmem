@@ -18,28 +18,28 @@
 
 use crate::driver::{
     overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
-    Registrator, RequestChan, Result,
+    Registrator, Reporter, RequestChan, Result,
 };
 use tokio::time::Duration;
 
 /// Defines the common API used by Switches.
-pub struct Switch {
+pub struct Switch<R: Reporter> {
     /// This device returns `true` when the driver has a problem
     /// communicating with the hardware.
-    pub error: ReadOnlyDevice<bool>,
+    pub error: ReadOnlyDevice<bool, R>,
     /// Indicates the state of the switch. Writing `true` or `false`
     /// turns the switch on and off, respectively.
-    pub state: OverridableDevice<bool>,
+    pub state: OverridableDevice<bool, R>,
     /// A product might include an indicator. If the hardware does,
     /// this device can turn it on and off.
-    pub indicator: OverridableDevice<bool>,
+    pub indicator: OverridableDevice<bool, R>,
 }
 
-impl Registrator for Switch {
+impl<R: Reporter> Registrator<R> for Switch<R> {
     type Config = Option<Duration>;
 
     async fn register_devices(
-        drc: &mut RequestChan,
+        drc: &mut RequestChan<R>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -55,4 +55,4 @@ impl Registrator for Switch {
     }
 }
 
-impl crate::driver::ResettableState for Switch {}
+impl<R: Reporter> crate::driver::ResettableState for Switch<R> {}

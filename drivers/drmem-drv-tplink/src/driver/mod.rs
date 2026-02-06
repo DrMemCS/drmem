@@ -30,7 +30,7 @@
 //   Received:  {"system":{"set_bright":{"err_code":-2,"err_msg":"member not support"}}}
 
 use drmem_api::{
-    driver::{self, classes},
+    driver::{self, classes, Reporter},
     Error, Result,
 };
 use futures::FutureExt;
@@ -76,9 +76,9 @@ impl Instance {
     // All replies have a 4-byte length header so we know how much
     // data to read.
 
-    async fn read_reply<R>(&mut self, s: &mut R) -> Result<tplink::Reply>
+    async fn read_reply<Rpy>(&mut self, s: &mut Rpy) -> Result<tplink::Reply>
     where
-        R: AsyncReadExt + std::marker::Unpin,
+        Rpy: AsyncReadExt + std::marker::Unpin,
     {
         if let Ok(sz) = s.read_u32().await {
             let sz = sz as usize;
@@ -432,7 +432,11 @@ impl Instance {
     // previosuly reported error state. If not, it saves the current
     // state and sends the updated value to the backend.
 
-    async fn sync_error_state(&mut self, dev: &mut device::Set, value: bool) {
+    async fn sync_error_state<R: Reporter>(
+        &mut self,
+        dev: &mut device::Set<R>,
+        value: bool,
+    ) {
         if self.reported_error != Some(value) {
             self.reported_error = Some(value);
             match dev {
@@ -446,7 +450,10 @@ impl Instance {
         }
     }
 
-    async fn pause_as_dimmer(&mut self, dev: &mut classes::Dimmer) {
+    async fn pause_as_dimmer<R: Reporter>(
+        &mut self,
+        dev: &mut classes::Dimmer<R>,
+    ) {
         let classes::Dimmer {
             brightness: ref mut d_b,
             indicator: ref mut d_i,
@@ -476,7 +483,10 @@ impl Instance {
         }
     }
 
-    async fn pause_as_switch(&mut self, dev: &mut classes::Switch) {
+    async fn pause_as_switch<R: Reporter>(
+        &mut self,
+        dev: &mut classes::Switch<R>,
+    ) {
         let classes::Switch {
             state: ref mut d_r,
             indicator: ref mut d_i,
@@ -506,10 +516,10 @@ impl Instance {
         }
     }
 
-    async fn manage_connect_as_switch(
+    async fn manage_connect_as_switch<R: Reporter>(
         &mut self,
         task: JoinHandle<Result<TcpStream>>,
-        dev: &mut classes::Switch,
+        dev: &mut classes::Switch<R>,
     ) -> Result<TcpStream> {
         let classes::Switch {
             state: ref mut d_r,
@@ -547,10 +557,10 @@ impl Instance {
         }
     }
 
-    async fn manage_connect_as_dimmer(
+    async fn manage_connect_as_dimmer<R: Reporter>(
         &mut self,
         task: JoinHandle<Result<TcpStream>>,
-        dev: &mut classes::Dimmer,
+        dev: &mut classes::Dimmer<R>,
     ) -> Result<TcpStream> {
         let classes::Dimmer {
             brightness: ref mut d_b,
@@ -588,10 +598,10 @@ impl Instance {
         }
     }
 
-    async fn manage_switch(
+    async fn manage_switch<R: Reporter>(
         &mut self,
         s: &mut TcpStream,
-        dev: &mut classes::Switch,
+        dev: &mut classes::Switch<R>,
     ) -> bool {
         // Get mutable references to the setting channels.
 
@@ -662,10 +672,10 @@ impl Instance {
         true
     }
 
-    async fn manage_dimmer(
+    async fn manage_dimmer<R: Reporter>(
         &mut self,
         s: &mut TcpStream,
-        dev: &mut classes::Dimmer,
+        dev: &mut classes::Dimmer<R>,
     ) -> bool {
         // Get mutable references to the setting channels.
 
@@ -733,10 +743,10 @@ impl Instance {
         true
     }
 
-    async fn main_loop(
+    async fn main_loop<R: Reporter>(
         &mut self,
         mut s: TcpStream,
-        devices: &mut <Instance as driver::API>::HardwareType,
+        devices: &mut <Instance as driver::API<R>>::HardwareType,
     ) {
         self.sync_error_state(&mut *devices, false).await;
         loop {
@@ -755,9 +765,9 @@ impl Instance {
     }
 }
 
-impl driver::API for Instance {
+impl<R: Reporter> driver::API<R> for Instance {
     type Config = config::Params;
-    type HardwareType = device::Set;
+    type HardwareType = device::Set<R>;
 
     // This driver doesn't store any data in its instance; it's all
     // stored in local variables in the `.run()` method.

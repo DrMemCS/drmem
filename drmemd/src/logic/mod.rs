@@ -1,8 +1,6 @@
 use drmem_api::{client, device, driver, Result};
 use futures::future::{join_all, pending};
-use std::collections::HashMap;
-use std::convert::Infallible;
-use std::sync::Arc;
+use std::{borrow::Cow, collections::HashMap, convert::Infallible, sync::Arc};
 use tokio::{
     sync::{broadcast, oneshot, Barrier},
     task::JoinHandle,
@@ -478,6 +476,7 @@ impl Node {
                 .for_each(|compile::Program(expr, idx)| {
                     self.inputs[*idx] =
                         compile::eval(expr, &self.inputs, &time, solar.as_ref())
+                            .map(Cow::into_owned)
                 });
 
             // Calculate each of the final expressions. If there are
@@ -487,7 +486,7 @@ impl Node {
             join_all(self.exprs.iter_mut().filter_map(
                 |(compile::Program(expr, _), out)| {
                     compile::eval(expr, &self.inputs, &time, solar.as_ref())
-                        .map(|v| out.send(v))
+                        .map(|v| out.send(v.into_owned()))
                 },
             ))
             .await;
@@ -630,11 +629,10 @@ mod test {
 
                     if let Some(message) = c_recv.recv().await {
                         match message {
-                            Request::GetSettingChan {
-                                name, rpy_chan, ..
-                            } => {
-                                let name = name.to_string();
-                                let _ = rpy_chan.send(
+                            Request::GetSettingChan(trans) => {
+                                let name = trans.req.0.to_string();
+
+                                trans.reply(
                                     if let Some(tx) =
                                         self.outputs.remove(name.as_str())
                                     {
@@ -642,40 +640,33 @@ mod test {
                                     } else {
                                         Err(Error::NotFound)
                                     },
-                                );
+                                )
                             }
-                            Request::QueryDeviceInfo { rpy_chan, .. } => {
-                                let _ = rpy_chan.send(Err(
-                                    Error::ProtocolError("bad request".into()),
-                                ));
-                            }
-                            Request::SetDevice { rpy_chan, .. } => {
-                                let _ = rpy_chan.send(Err(
-                                    Error::ProtocolError("bad request".into()),
-                                ));
-                            }
-                            Request::MonitorDevice {
-                                name, rpy_chan, ..
-                            } => {
-                                let name = name.to_string();
-                                let _ = rpy_chan.send(
-                                    if let Some(rx) =
-					self.inputs.remove(name.as_str())
-                                    {
-					let stream =
-                                            Box::pin(ReceiverStream::new(rx).map(
-						|v| device::Reading {
-                                                    ts: std::time::SystemTime::now(
-                                                    ),
-                                                    value: v,
-						},
-                                            ));
 
-					Ok(stream as device::DataStream<device::Reading,>)
+                            Request::QueryDeviceInfo(trans) => trans.reply(
+                                Err(Error::ProtocolError("bad request".into())),
+                            ),
+
+                            Request::SetDevice(trans) => trans.reply(Err(
+                                Error::ProtocolError("bad request".into()),
+                            )),
+
+                            Request::MonitorDevice(trans) => {
+                                let name = trans.req.0.to_string();
+
+                                trans.reply(
+                                    if let Some(rx) = self.inputs.remove(name.as_str()) {
+					                    let stream =
+                                            Box::pin(ReceiverStream::new(rx).map(|v| device::Reading {
+                                                    ts: std::time::SystemTime::now(),
+                                                    value: v,
+						                    }));
+
+					                    Ok(stream as device::DataStream<device::Reading,>)
                                     } else {
-					Err(Error::NotFound)
+					                    Err(Error::NotFound)
                                     }
-				);
+				                )
                             }
                         }
                     }

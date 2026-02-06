@@ -2,7 +2,7 @@ use crate::backends::Store;
 use chrono::*;
 use drmem_api::{
     client, device,
-    driver::{ReportReading, RxDeviceSetting, TxDeviceSetting},
+    driver::{Reporter, RxDeviceSetting, TxDeviceSetting},
     Error, Result,
 };
 use futures::{
@@ -10,13 +10,10 @@ use futures::{
     Future,
 };
 use redis::{
-    aio,
+    aio::{self, MultiplexedConnection},
     streams::{StreamId, StreamInfoStreamReply},
 };
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::pin::Pin;
-use std::time;
+use std::{collections::HashMap, convert::TryInto, pin::Pin, sync::Arc, time};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{self, Stream, StreamExt};
 use tracing::{debug, error, info, info_span, warn, Instrument};
@@ -24,6 +21,7 @@ use tracing::{debug, error, info, info_span, warn, Instrument};
 type AioMplexConnection = aio::MultiplexedConnection;
 type SettingTable = HashMap<device::Name, TxDeviceSetting>;
 
+mod cmd;
 pub mod config;
 
 // Translates a Redis error into a DrMem error. The translation is
@@ -60,53 +58,6 @@ fn xlat_err(e: redis::RedisError) -> Error {
         | redis::ErrorKind::Ask => Error::NotFound,
 
         _ => Error::BackendError(format!("{}", &e)),
-    }
-}
-
-// Encodes a `device::Value` into a binary which gets stored in
-// redis. This encoding lets us store type information in redis so
-// there's no rounding errors or misinterpretation of the data.
-
-fn to_redis(val: &device::Value) -> Vec<u8> {
-    match val {
-        device::Value::Bool(false) => vec![b'B', b'F'],
-        device::Value::Bool(true) => vec![b'B', b'T'],
-
-        // Integers start with an 'I' followed by 4 bytes.
-        device::Value::Int(v) => {
-            let mut buf: Vec<u8> = Vec::with_capacity(9);
-
-            buf.push(b'I');
-            buf.extend_from_slice(&v.to_be_bytes());
-            buf
-        }
-
-        // Floating point values start with a 'D' and are followed by
-        // 8 bytes.
-        device::Value::Flt(v) => {
-            let mut buf: Vec<u8> = Vec::with_capacity(9);
-
-            buf.push(b'D');
-            buf.extend_from_slice(&v.to_be_bytes());
-            buf
-        }
-
-        // Strings start with an 'S', followed by a 4-byte length
-        // field, and then followed by the string content.
-        device::Value::Str(s) => {
-            let s = s.as_bytes();
-            let mut buf: Vec<u8> = Vec::with_capacity(5 + s.len());
-
-            buf.push(b'S');
-            buf.extend_from_slice(&(s.len() as u32).to_be_bytes());
-            buf.extend_from_slice(s);
-            buf
-        }
-
-        // Colors start with a 'C', followed by 4 u8 values,
-        // representing red, green, blue, and alpha intensities,
-        // respectively.
-        device::Value::Color(v) => vec![b'C', v.red, v.green, v.blue, v.alpha],
     }
 }
 
@@ -425,6 +376,53 @@ impl Stream for ReadingStream {
     }
 }
 
+#[derive(Clone)]
+pub struct Report {
+    name: Arc<str>,
+    conn: MultiplexedConnection,
+    max_history: Option<usize>,
+    cmd: cmd::Builder,
+}
+
+impl Report {
+    pub fn new(
+        name: &str,
+        conn: MultiplexedConnection,
+        max_history: Option<usize>,
+    ) -> Self {
+        Report {
+            name: name.into(),
+            conn,
+            max_history,
+            cmd: cmd::Builder::new(RedisStore::hist_key(name).into()),
+        }
+    }
+}
+
+impl Reporter for Report {
+    async fn report_value(&mut self, value: device::Value) {
+        if let Some(mh) = self.max_history {
+            if let Err(e) = self
+                .cmd
+                .report_bounded_new_value_cmd(&value, mh)
+                .query_async::<()>(&mut self.conn)
+                .await
+            {
+                warn!("couldn't save {} data to redis ... {}", &self.name, e)
+            }
+        } else {
+            if let Err(e) = self
+                .cmd
+                .report_new_value_cmd(&value)
+                .query_async::<()>(&mut self.conn)
+                .await
+            {
+                warn!("couldn't save {} data to redis ... {}", &self.name, e)
+            }
+        }
+    }
+}
+
 /// Defines a context that uses redis for the back-end storage.
 pub struct RedisStore {
     /// This connection is used for interacting with the database.
@@ -523,7 +521,7 @@ impl RedisStore {
     // Returns the key that returns time-series information for the
     // device.
 
-    fn hist_key(name: &str) -> String {
+    pub fn hist_key(name: &str) -> String {
         format!("{name}#hist")
     }
 
@@ -620,26 +618,6 @@ impl RedisStore {
         let hist_key = Self::hist_key(name);
 
         redis::Cmd::xinfo_stream(hist_key)
-    }
-
-    // Generates a redis command pipeline that adds a value to a
-    // device's history.
-
-    fn report_new_value_cmd(key: &str, val: &device::Value) -> redis::Cmd {
-        let data = [("value", to_redis(val))];
-
-        redis::Cmd::xadd(key, "*", &data)
-    }
-
-    fn report_bounded_new_value_cmd(
-        key: &str,
-        val: &device::Value,
-        mh: usize,
-    ) -> redis::Cmd {
-        let opts = redis::streams::StreamMaxlen::Approx(mh);
-        let data = [("value", to_redis(val))];
-
-        redis::Cmd::xadd_maxlen(key, opts, "*", &data)
     }
 
     fn hash_to_info(
@@ -868,113 +846,59 @@ impl RedisStore {
             .await
             .map_err(xlat_err)
     }
-
-    // Creates a closure for a driver to report a device's changing
-    // values.
-
-    fn mk_report_func(
-        &self,
-        name: &str,
-        max_history: Option<usize>,
-    ) -> ReportReading {
-        let db_con = self.db_con.clone();
-        let name = String::from(name);
-
-        if let Some(mh) = max_history {
-            Box::new(move |v| {
-                let mut db_con = db_con.clone();
-                let hist_key = Self::hist_key(&name);
-                let name = name.clone();
-
-                Box::pin(async move {
-                    if let Err(e) =
-                        Self::report_bounded_new_value_cmd(&hist_key, &v, mh)
-                            .query_async::<()>(&mut db_con)
-                            .await
-                    {
-                        warn!("couldn't save {} data to redis ... {}", &name, e)
-                    }
-                })
-            })
-        } else {
-            Box::new(move |v| {
-                let mut db_con = db_con.clone();
-                let hist_key = Self::hist_key(&name);
-                let name = name.clone();
-
-                Box::pin(async move {
-                    if let Err(e) = Self::report_new_value_cmd(&hist_key, &v)
-                        .query_async::<()>(&mut db_con)
-                        .await
-                    {
-                        warn!("couldn't save {} data to redis ... {}", &name, e)
-                    }
-                })
-            })
-        }
-    }
 }
 
 impl Store for RedisStore {
+    type Reporter = Report;
+
     /// Registers a device in the redis backend.
-    fn register_read_only_device<'a>(
+    async fn register_read_only_device<'a>(
         &'a mut self,
         driver_name: &'a str,
         name: &'a device::Name,
         units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> impl Future<Output = Result<ReportReading>> + Send + 'a {
+    ) -> Result<Self::Reporter> {
         let name = name.to_string();
 
         debug!("registering '{}' as read-only", &name);
 
-        async move {
-            if self.validate_device(&name).await.is_err() {
-                self.init_device(&name, driver_name, units).await?;
+        if self.validate_device(&name).await.is_err() {
+            self.init_device(&name, driver_name, units).await?;
 
-                info!("'{}' has been successfully created", &name);
-            }
-            Ok(self.mk_report_func(&name, max_history))
+            info!("'{}' has been successfully created", &name);
         }
+        Ok(Report::new(&name, self.db_con.clone(), max_history))
     }
 
-    fn register_read_write_device<'a>(
+    async fn register_read_write_device<'a>(
         &'a mut self,
         driver_name: &'a str,
         name: &'a device::Name,
         units: Option<&'a String>,
         max_history: Option<usize>,
-    ) -> impl Future<
-        Output = Result<(
-            ReportReading,
-            RxDeviceSetting,
-            Option<device::Value>,
-        )>,
-    > + Send
-           + 'a {
+    ) -> Result<(Self::Reporter, RxDeviceSetting, Option<device::Value>)> {
         let sname = name.to_string();
 
         debug!("registering '{}' as read-write", &sname);
 
-        async move {
-            if self.validate_device(&sname).await.is_err() {
-                self.init_device(&sname, driver_name, units).await?;
+        if self.validate_device(&sname).await.is_err() {
+            self.init_device(&sname, driver_name, units).await?;
 
-                info!("'{}' has been successfully created", &sname);
-            }
-
-            let (tx, rx) = mpsc::channel(20);
-
-            if self.table.insert(name.clone(), tx).is_some() {
-                warn!("{} already had a setting channel", &name);
-            }
-
-            Ok((
-                self.mk_report_func(&sname, max_history),
-                rx,
-                self.last_value(&sname).await.map(|v| v.value),
-            ))
+            info!("'{}' has been successfully created", &sname);
         }
+
+        let (tx, rx) = mpsc::channel(20);
+
+        if self.table.insert(name.clone(), tx).is_some() {
+            warn!("{} already had a setting channel", &name);
+        }
+
+        Ok((
+            Report::new(&sname, self.db_con.clone(), max_history),
+            rx,
+            self.last_value(&sname).await.map(|v| v.value),
+        ))
     }
 
     // Implement the request to pull device information. Any task with
@@ -1197,14 +1121,6 @@ mod tests {
         );
     }
 
-    // Test correct encoding of device::Value::Bool values.
-
-    #[test]
-    fn test_bool_encoder() {
-        assert_eq!(vec![b'B', b'F'], to_redis(&device::Value::Bool(false)));
-        assert_eq!(vec![b'B', b'T'], to_redis(&device::Value::Bool(true)));
-    }
-
     const INT_TEST_CASES: &[(i32, &[u8])] = &[
         (0, &[b'I', 0x00, 0x00, 0x00, 0x00]),
         (1, &[b'I', 0x00, 0x00, 0x00, 0x01]),
@@ -1213,15 +1129,6 @@ mod tests {
         (-0x80000000, &[b'I', 0x80, 0x00, 0x00, 0x00]),
         (0x01234567, &[b'I', 0x01, 0x23, 0x45, 0x67]),
     ];
-
-    // Test correct encoding of device::Value::Int values.
-
-    #[test]
-    fn test_int_encoder() {
-        for (v, rv) in INT_TEST_CASES {
-            assert_eq!(*rv, to_redis(&device::Value::Int(*v)));
-        }
-    }
 
     // Test correct decoding of device::Value::Int values.
 
@@ -1261,15 +1168,6 @@ mod tests {
         ),
         (9007199254740992.0, &[b'D', 67, 64, 0, 0, 0, 0, 0, 0]),
     ];
-
-    // Test correct encoding of device::Value::Flt values.
-
-    #[test]
-    fn test_float_encoder() {
-        for (v, rv) in FLT_TEST_CASES {
-            assert_eq!(*rv, to_redis(&device::Value::Flt(*v)));
-        }
-    }
 
     // Test correct decoding of device::Value::Flt values.
 
@@ -1321,18 +1219,6 @@ mod tests {
     ];
 
     #[test]
-    fn test_color_encoder() {
-        for ((r, g, b, a), rv) in COLOR_TEST_CASES {
-            assert_eq!(
-                &rv[..],
-                to_redis(&device::Value::Color(palette::LinSrgba::new(
-                    *r, *g, *b, *a
-                )))
-            );
-        }
-    }
-
-    #[test]
     fn test_color_decoder() {
         for ((r, g, b, a), rv) in COLOR_TEST_CASES {
             assert_eq!(
@@ -1346,15 +1232,6 @@ mod tests {
         ("", &[b'S', 0u8, 0u8, 0u8, 0u8]),
         ("ABC", &[b'S', 0u8, 0u8, 0u8, 3u8, b'A', b'B', b'C']),
     ];
-
-    // Test correct encoding of device::Value::Str values.
-
-    #[test]
-    fn test_string_encoder() {
-        for (v, rv) in STR_TEST_CASES {
-            assert_eq!(*rv, to_redis(&device::Value::Str((*v).into())));
-        }
-    }
 
     // Test correct decoding of device::Value::Str values.
 
@@ -1563,138 +1440,6 @@ $9\r\njunk#hist\r\n"
     }
 
     #[test]
-    fn test_report_value_cmd() {
-        assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &(true.into()))
-                .get_packed_command(),
-            b"*5\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$1\r\n*\r
-$5\r\nvalue\r
-$2\r\nBT\r\n"
-        );
-        assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &(0x00010203i32.into()))
-                .get_packed_command(),
-            b"*5\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$1\r\n*\r
-$5\r\nvalue\r
-$5\r\nI\x00\x01\x02\x03\r\n"
-        );
-        assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &(0x12345678i32.into()))
-                .get_packed_command(),
-            b"*5\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$1\r\n*\r
-$5\r\nvalue\r
-$5\r\nI\x12\x34\x56\x78\r\n"
-        );
-        assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &(1.0.into()))
-                .get_packed_command(),
-            b"*5\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$1\r\n*\r
-$5\r\nvalue\r
-$9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
-        );
-        assert_eq!(
-            &RedisStore::report_new_value_cmd("key", &("hello".into()))
-                .get_packed_command(),
-            b"*5\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$1\r\n*\r
-$5\r\nvalue\r
-$10\r\nS\x00\x00\x00\x05hello\r\n"
-        );
-
-        assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd("key", &(true.into()), 0)
-                .get_packed_command(),
-            b"*8\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$6\r\nMAXLEN\r
-$1\r\n~\r
-$1\r\n0\r
-$1\r\n*\r
-$5\r\nvalue\r
-$2\r\nBT\r\n"
-        );
-        assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd(
-                "key",
-                &(0x00010203i32.into()),
-                1
-            )
-            .get_packed_command(),
-            b"*8\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$6\r\nMAXLEN\r
-$1\r\n~\r
-$1\r\n1\r
-$1\r\n*\r
-$5\r\nvalue\r
-$5\r\nI\x00\x01\x02\x03\r\n"
-        );
-        assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd(
-                "key",
-                &(0x12345678i32.into()),
-                2
-            )
-            .get_packed_command(),
-            b"*8\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$6\r\nMAXLEN\r
-$1\r\n~\r
-$1\r\n2\r
-$1\r\n*\r
-$5\r\nvalue\r
-$5\r\nI\x12\x34\x56\x78\r\n"
-        );
-        assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd("key", &(1.0.into()), 3)
-                .get_packed_command(),
-            b"*8\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$6\r\nMAXLEN\r
-$1\r\n~\r
-$1\r\n3\r
-$1\r\n*\r
-$5\r\nvalue\r
-$9\r\nD\x3f\xf0\x00\x00\x00\x00\x00\x00\r\n"
-        );
-        assert_eq!(
-            &RedisStore::report_bounded_new_value_cmd(
-                "key",
-                &("hello".into()),
-                4
-            )
-            .get_packed_command(),
-            b"*8\r
-$4\r\nXADD\r
-$3\r\nkey\r
-$6\r\nMAXLEN\r
-$1\r\n~\r
-$1\r\n4\r
-$1\r\n*\r
-$5\r\nvalue\r
-$10\r\nS\x00\x00\x00\x05hello\r\n"
-        );
-    }
-
-    #[test]
     fn test_init_dev() {
         assert_eq!(
             String::from_utf8_lossy(
@@ -1768,6 +1513,8 @@ $4\r\nEXEC\r\n"
 
     #[test]
     fn test_streamid_to_reading() {
+        let mut buf = vec![];
+
         // Look for various failure modes.
 
         assert!(RedisStore::stream_id_to_reading(&StreamId {
@@ -1799,9 +1546,13 @@ $4\r\nEXEC\r\n"
                 id: "1000-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::BulkString(to_redis(&device::Value::Bool(
-                        true
-                    )))
+                    redis::Value::BulkString(
+                        cmd::Builder::to_redis(
+                            &device::Value::Bool(true),
+                            &mut buf
+                        )
+                        .to_vec()
+                    )
                 )])
             }),
             Ok(device::Reading {
@@ -1814,9 +1565,13 @@ $4\r\nEXEC\r\n"
                 id: "1500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::BulkString(to_redis(&device::Value::Int(
-                        123
-                    )))
+                    redis::Value::BulkString(
+                        cmd::Builder::to_redis(
+                            &device::Value::Int(123),
+                            &mut buf
+                        )
+                        .to_vec()
+                    )
                 )])
             }),
             Ok(device::Reading {
@@ -1829,9 +1584,13 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::BulkString(to_redis(&device::Value::Int(
-                        -321
-                    )))
+                    redis::Value::BulkString(
+                        cmd::Builder::to_redis(
+                            &device::Value::Int(-321),
+                            &mut buf
+                        )
+                        .to_vec()
+                    )
                 )])
             }),
             Ok(device::Reading {
@@ -1844,9 +1603,13 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::BulkString(to_redis(&device::Value::Flt(
-                        1.0
-                    )))
+                    redis::Value::BulkString(
+                        cmd::Builder::to_redis(
+                            &device::Value::Flt(1.0),
+                            &mut buf
+                        )
+                        .to_vec()
+                    )
                 )])
             }),
             Ok(device::Reading {
@@ -1859,9 +1622,13 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::BulkString(to_redis(&device::Value::Flt(
-                        -1.0
-                    )))
+                    redis::Value::BulkString(
+                        cmd::Builder::to_redis(
+                            &device::Value::Flt(-1.0),
+                            &mut buf
+                        )
+                        .to_vec()
+                    )
                 )])
             }),
             Ok(device::Reading {
@@ -1874,9 +1641,13 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::BulkString(to_redis(&device::Value::Flt(
-                        1.0e100
-                    )))
+                    redis::Value::BulkString(
+                        cmd::Builder::to_redis(
+                            &device::Value::Flt(1.0e100),
+                            &mut buf
+                        )
+                        .to_vec()
+                    )
                 )])
             }),
             Ok(device::Reading {
@@ -1889,9 +1660,13 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::BulkString(to_redis(&device::Value::Flt(
-                        1.0e-100
-                    )))
+                    redis::Value::BulkString(
+                        cmd::Builder::to_redis(
+                            &device::Value::Flt(1.0e-100),
+                            &mut buf
+                        )
+                        .to_vec()
+                    )
                 )])
             }),
             Ok(device::Reading {
@@ -1904,9 +1679,13 @@ $4\r\nEXEC\r\n"
                 id: "2500-0".into(),
                 map: HashMap::from([(
                     "value".into(),
-                    redis::Value::BulkString(to_redis(&device::Value::Str(
-                        "Hello".into()
-                    )))
+                    redis::Value::BulkString(
+                        cmd::Builder::to_redis(
+                            &device::Value::Str("Hello".into()),
+                            &mut buf
+                        )
+                        .to_vec()
+                    )
                 )])
             }),
             Ok(device::Reading {
