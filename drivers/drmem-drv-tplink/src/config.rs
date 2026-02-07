@@ -2,9 +2,13 @@ use drmem_api::{driver::DriverConfig, Error};
 use std::net::SocketAddrV4;
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DevCfgType {
+    #[serde(alias = "Switch", alias = "SWITCH")]
     Switch,
+    #[serde(alias = "Outlet", alias = "OUTLET")]
     Outlet,
+    #[serde(alias = "Dimmer", alias = "DIMMER")]
     Dimmer,
 }
 
