@@ -21,7 +21,7 @@ pub type Launcher<R> = fn(
     driver::DriverConfig,
     driver::RequestChan<R>,
     Option<usize>,
-    barrier: Arc<Barrier>,
+    Arc<Barrier>,
 ) -> MgrTask;
 
 type DriverInfo<R> = (&'static str, &'static str, Launcher<R>);
@@ -110,9 +110,10 @@ where
     Box::pin(async move {
         let cfg = match T::Config::try_from(cfg) {
             Ok(cfg) => Ok(cfg),
-            err @ Err(_) => {
+            Err(e) => {
+                error!("config error -- {}", &e);
                 barrier.wait().await;
-                err
+                Err(e)
             }
         }?;
 
