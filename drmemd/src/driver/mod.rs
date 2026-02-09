@@ -8,6 +8,7 @@ use std::{convert::Infallible, pin::Pin, sync::Arc};
 use tokio::sync::Barrier;
 use tracing::{error, field, info, info_span, warn, Instrument};
 
+mod counter;
 mod cycle;
 mod latch;
 mod map;
@@ -197,6 +198,19 @@ impl<R: Reporter> DriverDb<R> {
 
         {
             use cycle::Instance;
+
+            table.insert(
+                Instance::NAME.into(),
+                (
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    manage_instance::<Instance, R>,
+                ),
+            );
+        }
+
+        {
+            use counter::Instance;
 
             table.insert(
                 Instance::NAME.into(),
