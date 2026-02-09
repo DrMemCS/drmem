@@ -89,7 +89,7 @@ impl<R: Reporter> driver::API<R> for Instance {
                 }
                 Some((b, reply)) = devices.d_reset.next_setting() => {
                     // Record all settings.
-                    
+
                     devices.d_reset.report_update(b).await;
 
                     // Reset and report the new count.
