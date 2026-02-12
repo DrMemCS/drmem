@@ -1,6 +1,6 @@
 use super::config;
 use drmem_api::{
-    device::Value,
+    device::{Path, Value},
     driver::{self, Reporter, ResettableState},
     Error, Result,
 };
@@ -99,6 +99,7 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
 
     async fn register_devices(
         core: &mut driver::RequestChan<R>,
+        subpath: Option<&Path>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -109,7 +110,7 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
             // the backend.
 
             let mut entry: (driver::ReadWriteDevice<Value, R>, TypeChecker) = (
-                core.add_rw_device(e.name.clone(), None, max_history)
+                core.add_rw_device(e.name.clone(), subpath, None, max_history)
                     .await?,
                 get_validator(&e.initial),
             );

@@ -16,9 +16,12 @@
 //! }
 //! ```
 
-use crate::driver::{
-    OverridableDevice, ReadOnlyDevice, Registrator, Reporter, RequestChan,
-    Result,
+use crate::{
+    device::Path,
+    driver::{
+        OverridableDevice, ReadOnlyDevice, Registrator, Reporter, RequestChan,
+        Result,
+    },
 };
 use tokio::time::Duration;
 
@@ -38,21 +41,31 @@ impl<R: Reporter> Registrator<R> for ColorBulb<R> {
 
     async fn register_devices(
         drc: &mut RequestChan<R>,
+        subpath: Option<&Path>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         Ok(ColorBulb {
-            error: drc.add_ro_device("error", None, max_history).await?,
+            error: drc
+                .add_ro_device("error", subpath, None, max_history)
+                .await?,
             brightness: drc
                 .add_overridable_device(
                     "brightness",
+                    subpath,
                     Some("%"),
                     *cfg,
                     max_history,
                 )
                 .await?,
             color: drc
-                .add_overridable_device("color", None, *cfg, max_history)
+                .add_overridable_device(
+                    "color",
+                    subpath,
+                    None,
+                    *cfg,
+                    max_history,
+                )
                 .await?,
         })
     }

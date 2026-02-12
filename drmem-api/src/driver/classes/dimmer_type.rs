@@ -16,9 +16,12 @@
 //! }
 //! ```
 
-use crate::driver::{
-    overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
-    Registrator, Reporter, RequestChan, Result,
+use crate::{
+    device::Path,
+    driver::{
+        overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
+        Registrator, Reporter, RequestChan, Result,
+    },
 };
 use tokio::time::Duration;
 
@@ -77,21 +80,31 @@ impl<R: Reporter> Registrator<R> for Dimmer<R> {
 
     async fn register_devices(
         drc: &mut RequestChan<R>,
+        subpath: Option<&Path>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         Ok(Dimmer {
-            error: drc.add_ro_device("error", None, max_history).await?,
+            error: drc
+                .add_ro_device("error", subpath, None, max_history)
+                .await?,
             brightness: drc
                 .add_overridable_device(
                     "brightness",
+                    subpath,
                     Some("%"),
                     *cfg,
                     max_history,
                 )
                 .await?,
             indicator: drc
-                .add_overridable_device("indicator", None, *cfg, max_history)
+                .add_overridable_device(
+                    "indicator",
+                    subpath,
+                    None,
+                    *cfg,
+                    max_history,
+                )
                 .await?,
         })
     }
