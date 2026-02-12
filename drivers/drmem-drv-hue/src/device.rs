@@ -1,6 +1,7 @@
 use super::config;
 use drmem_api::{
     Result,
+    device::Path,
     driver::{Registrator, Reporter, ResettableState, classes},
 };
 use std::{collections::HashMap, sync::Arc};
@@ -33,13 +34,19 @@ impl<R: Reporter> Set<R> {
             cfg.id.clone(),
             match cfg.r#type {
                 config::DevCfgType::Switch => DeviceSet::Switch(
-                    classes::Switch::register_devices(drc, &tmo, max_history)
-                        .await?,
+                    classes::Switch::register_devices(
+                        drc,
+                        Some(cfg.subpath.as_ref()),
+                        &tmo,
+                        max_history,
+                    )
+                    .await?,
                 ),
                 config::DevCfgType::Dimmer | config::DevCfgType::Bulb => {
                     DeviceSet::Bulb(
                         classes::Dimmer::register_devices(
                             drc,
+                            Some(cfg.subpath.as_ref()),
                             &tmo,
                             max_history,
                         )
@@ -49,6 +56,7 @@ impl<R: Reporter> Set<R> {
                 config::DevCfgType::ColorBulb => DeviceSet::ColorBulb(
                     classes::ColorBulb::register_devices(
                         drc,
+                        Some(cfg.subpath.as_ref()),
                         &tmo,
                         max_history,
                     )
@@ -57,6 +65,7 @@ impl<R: Reporter> Set<R> {
                 config::DevCfgType::Group => DeviceSet::Group(
                     classes::ColorBulb::register_devices(
                         drc,
+                        Some(cfg.subpath.as_ref()),
                         &tmo,
                         max_history,
                     )
@@ -70,9 +79,10 @@ impl<R: Reporter> Set<R> {
 impl<R: Reporter> Registrator<R> for Set<R> {
     type Config = config::Params;
 
-    async fn register_devices<'a>(
-        drc: &'a mut drmem_api::driver::RequestChan<R>,
-        cfg: &'a Self::Config,
+    async fn register_devices(
+        drc: &mut drmem_api::driver::RequestChan<R>,
+        _subpath: Option<&Path>,
+        cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         let mut map = HashMap::new();

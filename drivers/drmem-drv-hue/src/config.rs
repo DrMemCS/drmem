@@ -1,7 +1,8 @@
-use drmem_api::{Error, driver::DriverConfig};
+use drmem_api::{Error, device::Path, driver::DriverConfig};
 use std::sync::Arc;
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DevCfgType {
     Switch,
     Dimmer,
@@ -12,6 +13,7 @@ pub enum DevCfgType {
 
 #[derive(serde::Deserialize)]
 pub struct DeviceConfig {
+    pub subpath: Arc<Path>,
     pub id: Arc<str>,
     pub r#type: DevCfgType,
     pub override_timeout: Option<u64>,

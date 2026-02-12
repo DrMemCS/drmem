@@ -14,7 +14,7 @@ tokio.default-features = false
 tracing.workspace = true
 
 reqwest.workspace = true
-reqwest.default-features = true
+reqwest.default-features = false
 reqwest.features = ["http2", "stream", "rustls", "json"]
 
 futures.workspace = true

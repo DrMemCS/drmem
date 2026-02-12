@@ -46,10 +46,19 @@ pub struct XyCoordinates {
 pub struct ResourceData {
     pub id: String,
     #[serde(rename = "type")]
-    pub res_type: String, // 'light', 'button', 'motion', etc.
+    pub res_type: String,
+    pub status: Option<String>,
 
     // Optional fields for light updates
     pub on: Option<On>,
     pub dimming: Option<Dimming>,
     pub color: Option<Color>,
+}
+
+impl ResourceData {
+    pub fn merge(&mut self, other: ResourceData) {
+        self.on = other.on.or(self.on.take());
+        self.dimming = other.dimming.or(self.dimming.take());
+        self.color = other.color.or(self.color.take());
+    }
 }

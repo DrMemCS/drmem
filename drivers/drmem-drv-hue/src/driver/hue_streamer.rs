@@ -2,128 +2,192 @@ use super::payload;
 use drmem_api::{Error, Result};
 use futures_util::StreamExt;
 use reqwest::{
-    self, Response,
+    self, Client, Response,
     header::{HeaderMap, HeaderValue},
 };
 use std::{convert::Infallible, sync::Arc};
-use tokio::task::JoinHandle;
-use tracing::{Instrument, error, info, info_span};
+use tokio::{sync::mpsc, task::JoinHandle, time::Duration};
+use tracing::{Instrument, error, info_span, warn};
 
-// Builds the reqwest::Client that will make stream connection to the Hue hub.
+const RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 
-fn build_client(
-    host: Arc<str>,
-    app_key: Arc<str>,
-) -> Result<impl Future<Output = std::result::Result<Response, reqwest::Error>>>
-{
-    let url = format!("https://{}/eventstream/clip/v2", host);
+// This local module creates a "coalescing" combinator so that related,
+// consecutive items in the iterator can be merged.
 
-    // Hue Hubs use self-signed certificates. Disable certificate validation
-    // to connect.
+mod coalesce {
+    use super::payload;
 
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| {
-            Error::OperationError(format!("error building hue stream -- {}", e))
-        })?;
+    pub struct Iter<I: Iterator<Item = payload::ResourceData>> {
+        pub inner: std::iter::Peekable<I>,
+    }
 
-    // Add our application's ID. This is obtained by pressing the button on the Hue
-    // hub and responding to the annoucement.
+    impl<I: Iterator<Item = payload::ResourceData>> Iterator for Iter<I> {
+        type Item = payload::ResourceData;
 
-    let mut headers = HeaderMap::new();
+        fn next(&mut self) -> Option<Self::Item> {
+            // Start with the first available item
 
-    headers.insert(
-        "hue-application-key",
-        HeaderValue::from_str(&app_key).map_err(|e| {
-            Error::OperationError(format!("error adding HTTP header -- {}", e))
-        })?,
-    );
-    headers.insert("Accept", HeaderValue::from_static("text/event-stream"));
+            let mut acc = self.inner.next()?;
 
-    Ok(client.get(url).headers(headers).send())
-}
+            // While the next item exists and has the same ID, merge it
 
-// Host: 192.168.1.110
-// App Id: pwENI2weqIJMe4eKlajSry9qgR14VENEvrJKcofR
-
-async fn server(host: Arc<str>, app_key: Arc<str>) -> Result<Infallible> {
-    // This function should never exit.
-
-    loop {
-        let mut client = build_client(host.clone(), app_key.clone())?
-            .await
-            .map_err(|e| {
-                Error::OperationError(format!(
-                    "error setting up hue stream -- {}",
-                    e
-                ))
-            })?
-            .bytes_stream();
-
-        // Iterate over the stream as chunks of data arrive
-        while let Some(item) = client.next().await {
-            let chunk = match item {
-                Ok(item) => item,
-                Err(e) => {
-                    error!("{}", e);
+            while let Some(next_item) = self.inner.peek() {
+                if next_item.id == acc.id {
+                    acc.merge(self.inner.next().unwrap());
+                } else {
                     break;
                 }
-            };
-            let text = String::from_utf8_lossy(&chunk);
-
-            // SSE data usually starts with "data: "
-            for line in text.lines() {
-                if line.starts_with("data: ") {
-                    let json_str = &line[6..];
-                    // Inside the stream loop...
-                    if let Ok(events) =
-                        serde_json::from_str::<Vec<payload::HueEvent>>(json_str)
-                    {
-                        for event in events {
-                            for resource in event.data {
-                                if resource.res_type == "light" {
-                                    info!(
-                                        "Update for Light ID: {}",
-                                        resource.id
-                                    );
-
-                                    if let Some(on) = resource.on {
-                                        info!(
-                                            "  - Power: {}",
-                                            if on.on { "ON" } else { "OFF" }
-                                        );
-                                    }
-
-                                    if let Some(dim) = resource.dimming {
-                                        info!(
-                                            "  - Brightness: {}%",
-                                            dim.brightness
-                                        );
-                                    }
-
-                                    if let Some(col) = resource.color {
-                                        info!(
-                                            "  - Color XY: [{}, {}]",
-                                            col.xy.x, col.xy.y
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
+
+            Some(acc)
         }
     }
 }
 
-pub async fn start(
+// Builds the reqwest::Client that will make stream connection to the Hue
+// hub.
+
+async fn create_stream(client: Client, host: Arc<str>) -> Result<Response> {
+    let url = format!("https://{}/eventstream/clip/v2", host);
+    let mut headers = HeaderMap::new();
+
+    headers.insert("Accept", HeaderValue::from_static("text/event-stream"));
+
+    let req = client.get(url).headers(headers);
+
+    Ok(req.send().await.map_err(|e| {
+        let err_msg = format!("error getting event stream -- {}", e);
+
+        error!("{}", &err_msg);
+        Error::OperationError(err_msg)
+    })?)
+}
+
+fn process_chunk(mut buffer: String, chunk: &[u8]) -> (String, Option<String>) {
+    buffer.push_str(&String::from_utf8_lossy(chunk));
+
+    if let Some(pos) = buffer.find("\n\n") {
+        let text = buffer[..pos].to_string();
+
+        buffer.drain(..pos + 2);
+        (buffer, Some(text))
+    } else {
+        (buffer, None)
+    }
+}
+
+fn parse_events(text: String) -> Vec<payload::ResourceData> {
+    coalesce::Iter {
+        inner: text
+            .lines()
+            .filter(|line| line.starts_with("data: "))
+            .filter_map(|json_str| {
+                serde_json::from_str::<Vec<payload::HueEvent>>(&json_str[6..])
+                    .map_err(|v| {
+                        error!("couldn't parse {} -- {}", &json_str[6..], &v);
+                        v
+                    })
+                    .ok()
+            })
+            .flat_map(|events| events.into_iter())
+            .flat_map(|event| event.data.into_iter())
+            .peekable(),
+    }
+    .collect()
+}
+
+// Main body of the streamer task.
+
+async fn server(
     host: Arc<str>,
-    app_key: Arc<str>,
+    client: Client,
+    report: mpsc::Sender<payload::ResourceData>,
+) -> Result<Infallible> {
+    let mut retry_interval = RETRY_INTERVAL;
+
+    loop {
+        // Connect to the bridge, specifying that we want to receive an event
+        // stream. If we can't connect, go to the end of the loop, wait for a
+        // few seconds, and try again.
+
+        if let Ok(mut stream) = create_stream(client.clone(), host.clone())
+            .await
+            .map(|resp| resp.bytes_stream())
+        {
+            // Reset the retry interval on a successful connection.
+
+            retry_interval = RETRY_INTERVAL;
+
+            // Create a buffer to hold the incoming data. The Hue bridge sends
+            // data in chunks that don't necessarily align with the JSON
+            // packets, so we need to accumulate the chunks until we have a
+            // complete packet to parse.
+
+            let mut buffer = String::new();
+
+            while let Some(data) = stream.next().await {
+                match data {
+                    Ok(chunk) => {
+                        // Process the chunk and extract any complete JSON packets
+                        // that we can parse.
+
+                        let (new_buffer, maybe_text) =
+                            process_chunk(buffer, &chunk);
+
+                        buffer = new_buffer;
+                        if let Some(text) = maybe_text {
+                            let resources = parse_events(text);
+
+                            for resource in resources.into_iter() {
+                                if let Err(e) = report.send(resource).await {
+                                    let msg = format!(
+                                        "hue driver closed event channel -- {}",
+                                        e
+                                    );
+
+                                    error!("{}", &msg);
+                                    return Err(Error::MissingPeer(msg));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("error reading from stream -- {}", e);
+                        break;
+                    }
+                }
+            }
+
+            std::mem::drop(stream);
+
+            warn!(
+                "lost stream connection to Hue bridge ... retrying in {} seconds",
+                retry_interval.as_secs()
+            );
+        } else {
+            warn!(
+                "can't connect to Hue bridge ... retrying in {} seconds",
+                retry_interval.as_secs()
+            );
+        }
+        tokio::time::sleep(retry_interval).await;
+
+        // Double the retry interval for the next attempt, up to a maximum.
+
+        retry_interval = retry_interval
+            .checked_mul(2)
+            .unwrap_or(MAX_RETRY_INTERVAL)
+            .min(MAX_RETRY_INTERVAL);
+    }
+}
+
+pub fn start(
+    host: Arc<str>,
+    client: Client,
+    report: mpsc::Sender<payload::ResourceData>,
 ) -> JoinHandle<Result<Infallible>> {
     tokio::spawn(
-        server(host.clone(), app_key)
-            .instrument(info_span!("hue_streamer", hub = host.to_string())),
+        server(host.clone(), client, report).instrument(info_span!("events")),
     )
 }

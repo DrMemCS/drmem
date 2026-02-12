@@ -8,7 +8,8 @@ use reqwest::{
     header::{HeaderMap, HeaderValue},
 };
 use std::{convert::Infallible, sync::Arc};
-use tokio::time::Duration;
+use tokio::{sync::mpsc, task::JoinHandle, time::Duration};
+use tracing::{Span, info};
 
 mod hue_streamer;
 mod payload;
@@ -16,6 +17,8 @@ mod payload;
 pub struct Instance {
     client: Client,
     host: Arc<str>,
+    updates: mpsc::Receiver<payload::ResourceData>,
+    update_task: JoinHandle<Result<Infallible>>,
 }
 
 impl Instance {
@@ -50,12 +53,12 @@ impl Instance {
         // Build the client with our desired defaults.
 
         let client = Client::builder()
+            .danger_accept_invalid_certs(true)
             .user_agent(APP_USER_AGENT)
             .default_headers(hdr_map)
-            .danger_accept_invalid_certs(true)
-            .timeout(Duration::from_millis(500))
-            .http2_prior_knowledge()
+            .use_rustls_tls()
             .tcp_keepalive_interval(Duration::from_secs(30))
+            .connect_timeout(Duration::from_millis(500))
             .build()
             .map_err(|e| {
                 Error::OperationError(format!(
@@ -64,9 +67,15 @@ impl Instance {
                 ))
             })?;
 
+        let (tx, rx) = mpsc::channel(100);
+        let update_task =
+            hue_streamer::start(cfg.host.clone(), client.clone(), tx);
+
         Ok(Instance {
             host: cfg.host.clone(),
             client,
+            updates: rx,
+            update_task,
         })
     }
 }
@@ -76,13 +85,24 @@ impl<R: Reporter> API<R> for Instance {
     type HardwareType = device::Set<R>;
 
     async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
+        Span::current().record("cfg", &*cfg.host);
         Self::new::<R>(cfg).map(Box::new)
     }
 
     async fn run<'a>(
         &'a mut self,
-        devices: &'a mut Self::HardwareType,
+        _devices: &'a mut Self::HardwareType,
     ) -> Infallible {
-        todo!()
+        loop {
+            tokio::select! {
+                Some(update) = self.updates.recv() => {
+                    info!("hue update: {:?}", update)
+                }
+
+                Err(e) = &mut self.update_task => {
+                    panic!("Hue stream task failed -- {}", e)
+                }
+            }
+        }
     }
 }
