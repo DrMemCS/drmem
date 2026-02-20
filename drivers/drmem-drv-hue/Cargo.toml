@@ -8,6 +8,8 @@ serde.workspace = true
 serde.default-features = false
 serde.features = ["derive"]
 
+palette.workspace = true
+
 tokio.workspace = true
 tokio.default-features = false
 

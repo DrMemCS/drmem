@@ -450,6 +450,7 @@ dependencies = [
  "drmem-api",
  "futures",
  "futures-util",
+ "palette",
  "reqwest 0.13.1",
  "serde",
  "serde_json",

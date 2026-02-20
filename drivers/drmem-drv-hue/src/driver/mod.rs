@@ -3,6 +3,7 @@ use drmem_api::{
     Error, Result,
     driver::{API, Reporter},
 };
+use palette::{IntoColor, LinSrgb, LinSrgba, Yxy};
 use reqwest::{
     Client,
     header::{HeaderMap, HeaderValue},
@@ -89,14 +90,81 @@ impl<R: Reporter> API<R> for Instance {
         Self::new::<R>(cfg).map(Box::new)
     }
 
+    // Main run loop for the Hue driver.
+
     async fn run<'a>(
         &'a mut self,
-        _devices: &'a mut Self::HardwareType,
+        devices: &'a mut Self::HardwareType,
     ) -> Infallible {
         loop {
             tokio::select! {
                 Some(update) = self.updates.recv() => {
-                    info!("hue update: {:?}", update)
+                    info!("hue update: {:?}", &update);
+
+                    // Look up the device ID in the hardware map. If it doesn't
+                    // exist, ignore the update. If it does, report the new
+                    // state to the appropriate setting(s).
+
+                    if let Some(dev_set) = devices.map.get_mut(update.id.as_str()) {
+                        info!("found {} for update", &update.id);
+                        match dev_set {
+                            device::DeviceSet::Switch(switch) => {
+                                if let Some(on) = update.on {
+                                    info!("reporting switch update: {}", on.on);
+                                    switch.state.report_update(on.on).await;
+                                }
+                            }
+
+                            device::DeviceSet::Bulb(dimmer) => {
+                                if let Some(on) = update.on {
+                                    if !on.on {
+                                        info!("turning off bulb");
+                                        dimmer.brightness.report_update(0.0).await;
+                                    } else if let Some(dim) = update.dimming {
+                                        info!("reporting dimmer update: {}", dim.brightness);
+                                        dimmer.brightness.report_update(dim.brightness as f64).await;
+                                    } else {
+                                        info!("turning on bulb");
+                                        dimmer.brightness.report_update(100.0).await;
+                                    }
+                                } else if let Some(dim) = update.dimming {
+                                    info!("reporting dimmer update: {}", dim.brightness);
+                                    dimmer.brightness.report_update(dim.brightness as f64).await;
+                                }
+                            }
+
+                            device::DeviceSet::ColorBulb(color_bulb) | device::DeviceSet::Group(color_bulb) => {
+                                // Handle brightness updates
+                                if let Some(on) = &update.on {
+                                    if !on.on {
+                                        info!("turning off color bulb");
+                                        color_bulb.brightness.report_update(0.0).await;
+                                    } else if let Some(dim) = &update.dimming {
+                                        info!("reporting color bulb brightness update: {}", dim.brightness);
+                                        color_bulb.brightness.report_update(dim.brightness as f64).await;
+                                    }
+                                } else if let Some(dim) = &update.dimming {
+                                    info!("reporting color bulb brightness update: {}", dim.brightness);
+                                    color_bulb.brightness.report_update(dim.brightness as f64).await;
+                                }
+
+                                // Handle color updates using palette's CIE XY conversion
+                                if let Some(color) = &update.color {
+                                    let yxy = Yxy::new(color.xy.x, color.xy.y, 1.0);
+                                    let rgb: LinSrgb = yxy.into_color();
+
+                                    let rgba = LinSrgba::new(
+                                        (rgb.red.clamp(0.0, 1.0) * 255.0) as u8,
+                                        (rgb.green.clamp(0.0, 1.0) * 255.0) as u8,
+                                        (rgb.blue.clamp(0.0, 1.0) * 255.0) as u8,
+                                        255,
+                                    );
+                                    info!("reporting color bulb color update: {:?}", rgba);
+                                    color_bulb.color.report_update(rgba).await;
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Err(e) = &mut self.update_task => {
