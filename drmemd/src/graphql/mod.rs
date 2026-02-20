@@ -1028,7 +1028,7 @@ fn build_base_site<R: Reporter + Clone>(
                 let ctxt = context.clone();
                 let root_node = schema();
 
-                ws.on_upgrade(move |websocket| {
+                let reply = ws.on_upgrade(move |websocket| {
                     async move {
                         let _ = serve_graphql_ws(
                             websocket,
@@ -1044,7 +1044,13 @@ fn build_base_site<R: Reporter + Clone>(
                             .unwrap_or_else(|| String::from("*unknown*"))
                             .as_str()
                     ))
-                })
+                });
+
+                warp::reply::with_header(
+                    reply,
+                    "Sec-Websocket-Protocol",
+                    "graphql-ws",
+                )
             },
         );
 
@@ -1067,6 +1073,7 @@ fn build_base_site<R: Reporter + Clone>(
                 .allow_headers(vec![
                     "content-type",
                     "Access-Control-Allow-Origin",
+                    "x-drmem-client-id",
                 ])
                 .allow_methods(vec!["OPTIONS", "GET", "POST"])
                 .max_age(Duration::from_secs(3_600)),
