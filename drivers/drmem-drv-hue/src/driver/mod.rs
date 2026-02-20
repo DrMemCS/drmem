@@ -10,7 +10,7 @@ use reqwest::{
 };
 use std::{convert::Infallible, sync::Arc};
 use tokio::{sync::mpsc, task::JoinHandle, time::Duration};
-use tracing::{Span, info};
+use tracing::{Level, Span, error, instrument};
 
 mod hue_streamer;
 mod payload;
@@ -80,6 +80,44 @@ impl Instance {
         })
     }
 
+    async fn sync_initial_state<R: Reporter>(
+        &self,
+        devices: &mut device::Set<R>,
+    ) -> Result<()> {
+        for rtype in &["light", "grouped_light"] {
+            let url =
+                format!("https://{}/clip/v2/resource/{}", self.host, rtype);
+
+            let resp = self.client
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| Error::OperationError(format!("request failed: {e}")))?
+                .error_for_status() // Catch 401, 403, 404, etc.
+                .map_err(|e| Error::OperationError(format!("HTTP error: {e}")))?;
+
+            // Fetch as text first to allow for debug logging on failure
+
+            let body = resp.text().await.map_err(|e| {
+                Error::OperationError(format!("failed to read body: {e}"))
+            })?;
+
+            let payload: payload::HueResponse = serde_json::from_str(&body)
+                .map_err(|e| {
+                    error!("Hue JSON mismatch: {}. Body: {}", e, body);
+                    Error::OperationError(format!("JSON decode error: {e}"))
+                })?;
+
+            for update in payload.data {
+                if let Some(dev_set) = devices.map.get_mut(update.id.as_ref()) {
+                    Self::report_update(dev_set, update).await;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[instrument(level = Level::INFO, name = "report", skip(dev_set, update), fields(id = update.id.as_ref()))]
     async fn report_update<R: Reporter>(
         dev_set: &mut device::DeviceSet<R>,
         update: payload::ResourceData,
@@ -131,8 +169,11 @@ impl Instance {
                 }
 
                 // Handle color updates using palette's CIE XY conversion
-                if let Some(color) = &update.color {
-                    let yxy = Yxy::new(color.xy.x, color.xy.y, 1.0);
+
+                if let Some(color) =
+                    &update.color.as_ref().and_then(|c| c.xy.as_ref())
+                {
+                    let yxy = Yxy::new(color.x, color.y, 1.0);
                     let rgb: LinSrgb = yxy.into_color();
 
                     let rgba = LinSrgba::new(
@@ -153,7 +194,7 @@ impl<R: Reporter> API<R> for Instance {
     type HardwareType = device::Set<R>;
 
     async fn create_instance(cfg: &Self::Config) -> Result<Box<Self>> {
-        Span::current().record("cfg", &*cfg.host);
+        Span::current().record("cfg", cfg.host.as_ref());
         Self::new::<R>(cfg).map(Box::new)
     }
 
@@ -163,16 +204,19 @@ impl<R: Reporter> API<R> for Instance {
         &'a mut self,
         devices: &'a mut Self::HardwareType,
     ) -> Infallible {
+        if let Err(e) = self.sync_initial_state(devices).await {
+            panic!("failed to sync initial hue state: {e}");
+        }
+
         loop {
             tokio::select! {
                 Some(update) = self.updates.recv() => {
-                    info!("hue update: {:?}", &update);
 
                     // Look up the device ID in the hardware map. If it doesn't
                     // exist, ignore the update. If it does, report the new
                     // state to the appropriate setting(s).
 
-                    if let Some(dev_set) = devices.map.get_mut(update.id.as_str()) {
+                    if let Some(dev_set) = devices.map.get_mut(update.id.as_ref()) {
                         Self::report_update(dev_set, update).await;
                     }
                 }

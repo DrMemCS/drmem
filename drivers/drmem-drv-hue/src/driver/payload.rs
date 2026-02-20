@@ -1,4 +1,18 @@
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+#[derive(Debug, Deserialize)]
+pub struct HueResponse {
+    // Errors returned by the bridge, if any.
+    pub errors: Vec<HueError>,
+    // The list of resources returned by the API call.
+    pub data: Vec<ResourceData>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HueError {
+    pub description: String,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct HueEvent {
@@ -33,7 +47,7 @@ pub struct Dimming {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Color {
-    pub xy: XyCoordinates,
+    pub xy: Option<XyCoordinates>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -44,7 +58,7 @@ pub struct XyCoordinates {
 
 #[derive(Debug, Deserialize)]
 pub struct ResourceData {
-    pub id: String,
+    pub id: Arc<str>,
     #[serde(rename = "type")]
     pub res_type: String,
     pub status: Option<String>,
