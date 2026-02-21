@@ -73,7 +73,8 @@ currently supported features:
 	  - Map device (maps ranges of integers to values)
     - Memory devices
 	  - Timer device
-  - 4 external drivers
+  - 5 external drivers
+    - Philips Hue (v2 bridge)
     - Weather Underground data
 	  - NTP daemon status
 	  - TP-Link support (tested with an HS440 Kasa light dimmer)

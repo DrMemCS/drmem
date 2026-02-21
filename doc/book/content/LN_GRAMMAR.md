@@ -12,6 +12,34 @@ An expression can have the following primitives:
 | #.### | 64-bit floating point (no +/-inf or NaN) |
 | "string" | Text |
 
+The logic block environment also tracks the time-of-day and solar
+position. The latitude and longitude parameters in `.drmem.toml` are
+used for the solar calculations. These parameters are available to
+expressions through specially named variables:
+
+| Variable | Description |
+|----------|-------------|
+| {local:second} | second (0-59) value of local time |
+| {local:minute} | minute (0-59) value of local time |
+| {local:hour} | hour (0-23) value of local time |
+| {local:day} | day of month (1-31) value of local time |
+| {local:month} | month (0-11) value of local time |
+| {local:year} | year value of local time |
+| {local:DOW} | day of week (0-6, 0 is Monday) value of local time |
+| {local:DOY} | day of year (0-365) value of local time |
+| {utc:second} | second (0-59) value of UTC time |
+| {utc:minute} | minute (0-59) value of UTC time |
+| {utc:hour} | hour (0-23) value of UTC time |
+| {utc:day} | day of month (1-31) value of UTC time |
+| {utc:month} | month (0-11) value of UTC time |
+| {utc:year} | year value of UTC time |
+| {utc:DOW} | day of week (0-6, 0 is Monday) value of UTC time |
+| {utc:DOY} | day of year (0-365) value of UTC time |
+| {solar:alt} | elevation of the sun (90 - -90 degrees.) Negative values mean the sun is below the horizon. |
+| {solar:az} | azimuth of the sun |
+| {solar:dec} | declination of the sun |
+| {solar:ra} | right ascension of the sun |
+
 Expressions have the following functions and operators:
 
 | Expression | Description |
