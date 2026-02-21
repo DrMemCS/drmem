@@ -1,4 +1,5 @@
 use drmem_api::{
+    device::Path,
     driver::{classes, Registrator, Reporter, RequestChan, ResettableState},
     Result,
 };
@@ -12,11 +13,13 @@ impl<R: Reporter> Registrator<R> for Set<R> {
 
     async fn register_devices(
         drc: &mut RequestChan<R>,
+        subpath: Option<&Path>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         Ok(Set(classes::Weather::register_devices(
             drc,
+            subpath,
             &classes::WeatherConfig {
                 units: cfg.units.clone(),
             },

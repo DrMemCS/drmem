@@ -1,4 +1,7 @@
-use crate::driver::{self, Registrator, Reporter, RequestChan, Result};
+use crate::{
+    device::Path,
+    driver::{self, Registrator, Reporter, RequestChan, Result},
+};
 
 #[derive(serde::Deserialize, Clone)]
 pub enum WeatherUnits {
@@ -36,6 +39,7 @@ impl<R: Reporter> Registrator<R> for Weather<R> {
 
     async fn register_devices(
         drc: &mut RequestChan<R>,
+        subpath: Option<&Path>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -51,17 +55,18 @@ impl<R: Reporter> Registrator<R> for Weather<R> {
         });
 
         let dewpt = drc
-            .add_ro_device("dewpoint", temp_unit, max_history)
+            .add_ro_device("dewpoint", subpath, temp_unit, max_history)
             .await?;
         let htidx = drc
-            .add_ro_device("heat-index", temp_unit, max_history)
+            .add_ro_device("heat-index", subpath, temp_unit, max_history)
             .await?;
         let humidity = drc
-            .add_ro_device("humidity", Some("%"), max_history)
+            .add_ro_device("humidity", subpath, Some("%"), max_history)
             .await?;
         let prec_rate = drc
             .add_ro_device(
                 "precip-rate",
+                subpath,
                 Some(if let WeatherUnits::English = cfg.units {
                     "in/hr"
                 } else {
@@ -74,6 +79,7 @@ impl<R: Reporter> Registrator<R> for Weather<R> {
         let prec_total = drc
             .add_ro_device(
                 "precip-total",
+                subpath,
                 Some(if let WeatherUnits::English = cfg.units {
                     "in"
                 } else {
@@ -86,6 +92,7 @@ impl<R: Reporter> Registrator<R> for Weather<R> {
         let prec_last_total = drc
             .add_ro_device(
                 "precip-last-total",
+                subpath,
                 Some(if let WeatherUnits::English = cfg.units {
                     "in"
                 } else {
@@ -98,6 +105,7 @@ impl<R: Reporter> Registrator<R> for Weather<R> {
         let pressure = drc
             .add_ro_device(
                 "pressure",
+                subpath,
                 Some(if let WeatherUnits::English = cfg.units {
                     "inHg"
                 } else {
@@ -108,24 +116,26 @@ impl<R: Reporter> Registrator<R> for Weather<R> {
             .await?;
 
         let solrad = drc
-            .add_ro_device("solar-rad", Some("W/m²"), max_history)
+            .add_ro_device("solar-rad", subpath, Some("W/m²"), max_history)
             .await?;
-        let error = drc.add_ro_device("error", None, max_history).await?;
+        let error = drc
+            .add_ro_device("error", subpath, None, max_history)
+            .await?;
         let temp = drc
-            .add_ro_device("temperature", temp_unit, max_history)
+            .add_ro_device("temperature", subpath, temp_unit, max_history)
             .await?;
-        let uv = drc.add_ro_device("uv", None, max_history).await?;
+        let uv = drc.add_ro_device("uv", subpath, None, max_history).await?;
         let wndchl = drc
-            .add_ro_device("wind-chill", temp_unit, max_history)
+            .add_ro_device("wind-chill", subpath, temp_unit, max_history)
             .await?;
         let wnddir = drc
-            .add_ro_device("wind-dir", Some("°"), max_history)
+            .add_ro_device("wind-dir", subpath, Some("°"), max_history)
             .await?;
         let wndgst = drc
-            .add_ro_device("wind-gust", speed_unit, max_history)
+            .add_ro_device("wind-gust", subpath, speed_unit, max_history)
             .await?;
         let wndspd = drc
-            .add_ro_device("wind-speed", speed_unit, max_history)
+            .add_ro_device("wind-speed", subpath, speed_unit, max_history)
             .await?;
 
         Ok(Weather {

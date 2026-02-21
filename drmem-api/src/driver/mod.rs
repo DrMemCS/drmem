@@ -2,7 +2,7 @@
 //! core of DrMem.
 
 use crate::types::{
-    device::{self, Base},
+    device::{self, Base, Path},
     Error,
 };
 use std::{
@@ -100,6 +100,25 @@ impl<R: Reporter> RequestChan<R> {
         }
     }
 
+    fn build_final_name<B>(
+        &self,
+        subpath: Option<&Path>,
+        name: B,
+    ) -> Result<device::Name>
+    where
+        B: TryInto<device::Base> + std::fmt::Display,
+    {
+        let name = match name.try_into() {
+            Ok(name) => name,
+            Err(_) => return Err(Error::ConfigError("bad base name".into())),
+        };
+
+        Ok(device::Name::build(
+            self.prefix.with_subpath(subpath.cloned().as_mut()),
+            name,
+        ))
+    }
+
     /// Registers a read-only device with the framework. `name` is the
     /// last section of the full device name. Typically a driver will
     /// register several devices, each representing a portion of the
@@ -116,21 +135,18 @@ impl<R: Reporter> RequestChan<R> {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates, it may as well shutdown.
-    pub async fn add_ro_device<T, N>(
+    pub async fn add_ro_device<T, B>(
         &self,
-        name: N,
+        name: B,
+        subpath: Option<&Path>,
         units: Option<&str>,
         max_history: Option<usize>,
     ) -> Result<ReadOnlyDevice<T, R>>
     where
         T: device::ReadCompat,
-        N: TryInto<Base>,
-        Error: From<<N as TryInto<Base>>::Error>,
+        B: TryInto<Base> + std::fmt::Display,
     {
-        let name = match name.try_into() {
-            Ok(name) => name,
-            Err(e) => return Err(e.into()),
-        };
+        let dev_name = self.build_final_name(subpath, name)?;
 
         // Create a location for the reply.
 
@@ -142,7 +158,7 @@ impl<R: Reporter> RequestChan<R> {
             .req_chan
             .send(Request::AddReadonlyDevice {
                 driver_name: self.driver_name.clone(),
-                dev_name: device::Name::build(self.prefix.clone(), name),
+                dev_name,
                 dev_units: units.map(String::from),
                 max_history,
                 rpy_chan: tx,
@@ -180,26 +196,24 @@ impl<R: Reporter> RequestChan<R> {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_rw_device<T, N>(
+    pub async fn add_rw_device<T, B>(
         &self,
-        name: N,
+        name: B,
+        subpath: Option<&Path>,
         units: Option<&str>,
         max_history: Option<usize>,
     ) -> Result<ReadWriteDevice<T, R>>
     where
         T: device::ReadWriteCompat,
-        N: TryInto<Base>,
-        Error: From<<N as TryInto<Base>>::Error>,
+        B: TryInto<Base> + std::fmt::Display,
     {
+        let dev_name = self.build_final_name(subpath, name)?;
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
             .send(Request::AddReadWriteDevice {
                 driver_name: self.driver_name.clone(),
-                dev_name: device::Name::build(
-                    self.prefix.clone(),
-                    name.try_into()?,
-                ),
+                dev_name,
                 dev_units: units.map(String::from),
                 max_history,
                 rpy_chan: tx,
@@ -245,27 +259,25 @@ impl<R: Reporter> RequestChan<R> {
     /// `InternalError`, then the core has exited and the
     /// `RequestChan` has been closed. Since the driver can't report
     /// any more updates or accept new settings, it may as well shutdown.
-    pub async fn add_overridable_device<T, N>(
+    pub async fn add_overridable_device<T, B>(
         &self,
-        name: N,
+        name: B,
+        subpath: Option<&Path>,
         units: Option<&str>,
         override_duration: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<OverridableDevice<T, R>>
     where
         T: device::ReadWriteCompat,
-        N: TryInto<Base>,
-        Error: From<<N as TryInto<Base>>::Error>,
+        B: TryInto<Base> + std::fmt::Display,
     {
+        let dev_name = self.build_final_name(subpath, name)?;
         let (tx, rx) = oneshot::channel();
         let result = self
             .req_chan
             .send(Request::AddReadWriteDevice {
                 driver_name: self.driver_name.clone(),
-                dev_name: device::Name::build(
-                    self.prefix.clone(),
-                    name.try_into()?,
-                ),
+                dev_name,
                 dev_units: units.map(String::from),
                 max_history,
                 rpy_chan: tx,
@@ -302,7 +314,10 @@ pub trait ResettableState {
 ///
 /// The only function in this trait is one to register the device(s)
 /// with core and return the set of handles.
-pub trait Registrator<R: Reporter>: ResettableState + Sized + Send {
+pub trait Registrator<R>: ResettableState + Sized + Send
+where
+    R: Reporter,
+{
     type Config: Send + Sync;
 
     /// Before a driver is run, the set of devices it uses needs to be
@@ -335,6 +350,7 @@ pub trait Registrator<R: Reporter>: ResettableState + Sized + Send {
     /// bound.
     fn register_devices<'a>(
         drc: &'a mut RequestChan<R>,
+        subpath: Option<&'a Path>,
         cfg: &'a Self::Config,
         max_history: Option<usize>,
     ) -> impl Future<Output = Result<Self>> + Send;

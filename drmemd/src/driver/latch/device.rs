@@ -1,5 +1,5 @@
 use drmem_api::{
-    device,
+    device::{self, Path},
     driver::{self, Reporter, ResettableState},
     Result,
 };
@@ -17,6 +17,7 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
 
     async fn register_devices(
         core: &mut driver::RequestChan<R>,
+        subpath: Option<&Path>,
         _cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -24,12 +25,17 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
         //
         // This first device is the output of the timer.
 
-        let d_output = core.add_ro_device("output", None, max_history).await?;
+        let d_output = core
+            .add_ro_device("output", subpath, None, max_history)
+            .await?;
 
-        let d_trigger =
-            core.add_rw_device("trigger", None, max_history).await?;
+        let d_trigger = core
+            .add_rw_device("trigger", subpath, None, max_history)
+            .await?;
 
-        let d_reset = core.add_rw_device("reset", None, max_history).await?;
+        let d_reset = core
+            .add_rw_device("reset", subpath, None, max_history)
+            .await?;
 
         Ok(Set {
             d_output,

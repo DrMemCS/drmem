@@ -1,4 +1,5 @@
 use drmem_api::{
+    device::Path,
     driver::{classes, Registrator, Reporter, RequestChan, ResettableState},
     Result,
 };
@@ -36,9 +37,10 @@ impl<R: Reporter> Registrator<R> for Set<R> {
     type Config = config::Params;
 
     // Defines the registration interface for the device set.
-    async fn register_devices<'a>(
-        drc: &'a mut RequestChan<R>,
-        cfg: &'a Self::Config,
+    async fn register_devices(
+        drc: &mut RequestChan<R>,
+        subpath: Option<&Path>,
+        cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         match cfg.r#type {
@@ -46,6 +48,7 @@ impl<R: Reporter> Registrator<R> for Set<R> {
                 Ok(Set::Switch(
                     classes::Switch::register_devices(
                         drc,
+                        subpath,
                         &cfg.override_timeout
                             .map(|v| Duration::from_secs(60 * v)),
                         max_history,
@@ -56,6 +59,7 @@ impl<R: Reporter> Registrator<R> for Set<R> {
             config::DevCfgType::Dimmer => Ok(Set::Dimmer(
                 classes::Dimmer::register_devices(
                     drc,
+                    subpath,
                     &cfg.override_timeout.map(|v| Duration::from_secs(60 * v)),
                     max_history,
                 )

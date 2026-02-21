@@ -1,5 +1,5 @@
 use drmem_api::{
-    device::Value,
+    device::{Path, Value},
     driver::{self, Reporter, ResettableState},
     Result,
 };
@@ -16,6 +16,7 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
 
     async fn register_devices(
         core: &mut driver::RequestChan<R>,
+        subpath: Option<&Path>,
         _cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -25,12 +26,16 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
         // timing, this device's value with be `!level`. While it's
         // timing, `level`.
 
-        let d_output = core.add_ro_device("output", None, max_history).await?;
+        let d_output = core
+            .add_ro_device("output", subpath, None, max_history)
+            .await?;
 
         // This device is settable. Any time it transitions from
         // `false` to `true`, the timer begins a timing cycle.
 
-        let d_enable = core.add_rw_device("enable", None, max_history).await?;
+        let d_enable = core
+            .add_rw_device("enable", subpath, None, max_history)
+            .await?;
 
         Ok(Set { d_output, d_enable })
     }

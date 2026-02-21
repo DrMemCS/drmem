@@ -86,6 +86,15 @@ impl Path {
             .collect::<Result<Vec<Segment>>>()
             .map(Path)
     }
+
+    pub fn with_subpath(&self, subpath: Option<&mut Self>) -> Path {
+        let mut result = self.0.clone();
+
+        if let Some(subpath) = subpath {
+            result.append(&mut subpath.0);
+        }
+        Path(result)
+    }
 }
 
 // This trait is defined so that the .TOML parser will use it to parse
@@ -106,6 +115,30 @@ impl TryFrom<&str> for Path {
 
     fn try_from(s: &str) -> Result<Self> {
         Path::create(s)
+    }
+}
+
+impl TryFrom<&String> for Path {
+    type Error = Error;
+
+    fn try_from(s: &String) -> Result<Self> {
+        Path::create(s)
+    }
+}
+
+impl TryFrom<&&str> for Path {
+    type Error = Error;
+
+    fn try_from(s: &&str) -> Result<Self> {
+        Path::create(*s)
+    }
+}
+
+impl TryFrom<&Path> for Path {
+    type Error = Error;
+
+    fn try_from(p: &Path) -> Result<Self> {
+        Ok(p.clone())
     }
 }
 

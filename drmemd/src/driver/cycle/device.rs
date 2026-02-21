@@ -1,5 +1,5 @@
 use drmem_api::{
-    device,
+    device::{Path, Value},
     driver::{self, Reporter, ResettableState},
     Result,
 };
@@ -7,7 +7,7 @@ use drmem_api::{
 use super::config;
 
 pub struct Set<R: Reporter> {
-    pub d_output: driver::ReadOnlyDevice<device::Value, R>,
+    pub d_output: driver::ReadOnlyDevice<Value, R>,
     pub d_enable: driver::ReadWriteDevice<bool, R>,
 }
 
@@ -16,6 +16,7 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
 
     async fn register_devices(
         core: &mut driver::RequestChan<R>,
+        subpath: Option<&Path>,
         _cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -25,14 +26,18 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
         // `false` and `true` at a rate determined by the `interval`
         // config option.
 
-        let d_output = core.add_ro_device("output", None, max_history).await?;
+        let d_output = core
+            .add_ro_device("output", subpath, None, max_history)
+            .await?;
 
         // This device is settable. Any time it transitions from
         // `false` to `true`, the output device begins a cycling.
         // When this device is set to `false`, the device stops
         // cycling.
 
-        let d_enable = core.add_rw_device("enable", None, max_history).await?;
+        let d_enable = core
+            .add_rw_device("enable", subpath, None, max_history)
+            .await?;
 
         Ok(Set { d_output, d_enable })
     }

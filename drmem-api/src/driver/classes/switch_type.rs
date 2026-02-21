@@ -16,11 +16,19 @@
 //! }
 //! ```
 
-use crate::driver::{
-    overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
-    Registrator, Reporter, RequestChan, Result,
+use crate::{
+    device::Path,
+    driver::{
+        overridable_device::OverridableDevice, ro_device::ReadOnlyDevice,
+        Registrator, Reporter, RequestChan, Result,
+    },
 };
 use tokio::time::Duration;
+
+pub struct SwitchProperty {
+    pub state: Option<bool>,
+    pub indicator: Option<bool>,
+}
 
 /// Defines the common API used by Switches.
 pub struct Switch<R: Reporter> {
@@ -35,21 +43,66 @@ pub struct Switch<R: Reporter> {
     pub indicator: OverridableDevice<bool, R>,
 }
 
+impl<R: Reporter> Switch<R> {
+    // Reports any new properties specified in the `prop` parameter.
+    pub async fn report_update(&mut self, prop: SwitchProperty) {
+        if let Some(v) = prop.state {
+            self.state.report_update(v).await
+        }
+
+        if let Some(v) = prop.indicator {
+            self.indicator.report_update(v).await
+        }
+    }
+
+    pub async fn next_setting(&mut self) -> SwitchProperty {
+        tokio::select! {
+            Some((value, resp)) = self.state.next_setting() => {
+                if let Some(resp) = resp {
+                    resp.ok(value);
+                }
+                SwitchProperty { state: Some(value), indicator: None }
+            }
+            Some((value, resp)) = self.indicator.next_setting() => {
+                if let Some(resp) = resp {
+                    resp.ok(value);
+                }
+                SwitchProperty { state: None, indicator: Some(value) }
+            }
+        }
+    }
+}
+
 impl<R: Reporter> Registrator<R> for Switch<R> {
     type Config = Option<Duration>;
 
     async fn register_devices(
         drc: &mut RequestChan<R>,
+        subpath: Option<&Path>,
         cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         Ok(Switch {
-            error: drc.add_ro_device("error", None, max_history).await?,
+            error: drc
+                .add_ro_device("error", subpath, None, max_history)
+                .await?,
             state: drc
-                .add_overridable_device("state", None, *cfg, max_history)
+                .add_overridable_device(
+                    "state",
+                    subpath,
+                    None,
+                    *cfg,
+                    max_history,
+                )
                 .await?,
             indicator: drc
-                .add_overridable_device("indicator", None, *cfg, max_history)
+                .add_overridable_device(
+                    "indicator",
+                    subpath,
+                    None,
+                    *cfg,
+                    max_history,
+                )
                 .await?,
         })
     }

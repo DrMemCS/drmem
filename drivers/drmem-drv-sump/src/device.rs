@@ -1,5 +1,6 @@
 use super::config;
 use drmem_api::{
+    device::Path,
     driver::{self, Reporter, ResettableState},
     Result,
 };
@@ -17,20 +18,26 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
 
     async fn register_devices(
         core: &mut driver::RequestChan<R>,
+        subpath: Option<&Path>,
         _: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
         // Define the devices managed by this driver.
 
-        let d_service =
-            core.add_ro_device("service", None, max_history).await?;
-        let d_state = core.add_ro_device("state", None, max_history).await?;
-        let d_duty = core.add_ro_device("duty", Some("%"), max_history).await?;
+        let d_service = core
+            .add_ro_device("service", subpath, None, max_history)
+            .await?;
+        let d_state = core
+            .add_ro_device("state", subpath, None, max_history)
+            .await?;
+        let d_duty = core
+            .add_ro_device("duty", subpath, Some("%"), max_history)
+            .await?;
         let d_inflow = core
-            .add_ro_device("in-flow", Some("gpm"), max_history)
+            .add_ro_device("in-flow", subpath, Some("gpm"), max_history)
             .await?;
         let d_duration = core
-            .add_ro_device("duration", Some("min"), max_history)
+            .add_ro_device("duration", subpath, Some("min"), max_history)
             .await?;
 
         Ok(Set {

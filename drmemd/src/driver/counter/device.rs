@@ -1,4 +1,5 @@
 use drmem_api::{
+    device::Path,
     driver::{self, Reporter, ResettableState},
     Result,
 };
@@ -16,6 +17,7 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
 
     async fn register_devices(
         core: &mut driver::RequestChan<R>,
+        subpath: Option<&Path>,
         _cfg: &Self::Config,
         max_history: Option<usize>,
     ) -> Result<Self> {
@@ -23,17 +25,22 @@ impl<R: Reporter> driver::Registrator<R> for Set<R> {
         //
         // This first device is the count value.
 
-        let d_count = core.add_ro_device("count", None, max_history).await?;
+        let d_count = core
+            .add_ro_device("count", subpath, None, max_history)
+            .await?;
 
         // Any time it transitions from `false` to `true`, the count increases
         // by one.
 
-        let d_increment =
-            core.add_rw_device("increment", None, max_history).await?;
+        let d_increment = core
+            .add_rw_device("increment", subpath, None, max_history)
+            .await?;
 
         // Any time it transitions from `false` to `true`, the count resets to 0.
 
-        let d_reset = core.add_rw_device("reset", None, max_history).await?;
+        let d_reset = core
+            .add_rw_device("reset", subpath, None, max_history)
+            .await?;
 
         Ok(Set {
             d_count,

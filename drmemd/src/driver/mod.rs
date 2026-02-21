@@ -1,4 +1,5 @@
 use drmem_api::{
+    device::Path,
     driver::{self, Registrator, Reporter, ResettableState, API},
     Result,
 };
@@ -120,10 +121,14 @@ where
 
         // Let the driver API register the necessary devices.
 
-        let devices =
-            T::HardwareType::register_devices(&mut req_chan, &cfg, max_history)
-                .instrument(info_span!("register", cfg = field::Empty))
-                .await;
+        let devices = T::HardwareType::register_devices(
+            &mut req_chan,
+            Option::<&Path>::None,
+            &cfg,
+            max_history,
+        )
+        .instrument(info_span!("register", cfg = field::Empty))
+        .await;
 
         // When we reached this location, all devices have been
         // registered (or not, if an error occurred). Sync to the
@@ -145,7 +150,20 @@ impl<R: Reporter> DriverDb<R> {
         let mut table: HashMap<driver::Name, DriverInfo<R>> = HashMap::new();
 
         {
-            use memory::Instance;
+            use counter::Instance;
+
+            table.insert(
+                Instance::NAME.into(),
+                (
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    manage_instance::<Instance, R>,
+                ),
+            );
+        }
+
+        {
+            use cycle::Instance;
 
             table.insert(
                 Instance::NAME.into(),
@@ -184,6 +202,19 @@ impl<R: Reporter> DriverDb<R> {
         }
 
         {
+            use memory::Instance;
+
+            table.insert(
+                Instance::NAME.into(),
+                (
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    manage_instance::<Instance, R>,
+                ),
+            );
+        }
+
+        {
             use timer::Instance;
 
             table.insert(
@@ -196,21 +227,11 @@ impl<R: Reporter> DriverDb<R> {
             );
         }
 
-        {
-            use cycle::Instance;
+        // Load the set-up for the TP-Link driver.
 
-            table.insert(
-                Instance::NAME.into(),
-                (
-                    Instance::SUMMARY,
-                    Instance::DESCRIPTION,
-                    manage_instance::<Instance, R>,
-                ),
-            );
-        }
-
+        #[cfg(feature = "drmem-drv-hue")]
         {
-            use counter::Instance;
+            use drmem_drv_hue::Instance;
 
             table.insert(
                 Instance::NAME.into(),
@@ -254,11 +275,11 @@ impl<R: Reporter> DriverDb<R> {
             );
         }
 
-        // Load the set-up for the Weather Underground driver.
+        // Load the set-up for the TP-Link driver.
 
-        #[cfg(feature = "drmem-drv-weather-wu")]
+        #[cfg(feature = "drmem-drv-tplink")]
         {
-            use drmem_drv_weather_wu::Instance;
+            use drmem_drv_tplink::Instance;
 
             table.insert(
                 Instance::NAME.into(),
@@ -270,11 +291,11 @@ impl<R: Reporter> DriverDb<R> {
             );
         }
 
-        // Load the set-up for the TP-Link driver.
+        // Load the set-up for the Weather Underground driver.
 
-        #[cfg(feature = "drmem-drv-tplink")]
+        #[cfg(feature = "drmem-drv-weather-wu")]
         {
-            use drmem_drv_tplink::Instance;
+            use drmem_drv_weather_wu::Instance;
 
             table.insert(
                 Instance::NAME.into(),
