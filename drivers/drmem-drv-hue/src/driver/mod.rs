@@ -33,6 +33,8 @@ impl Instance {
     // Creates a new instance of the driver state.
 
     pub fn new<R: Reporter>(cfg: &<Self as API<R>>::Config) -> Result<Self> {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         // Every request needs to have the App ID so this section of code
         // makes it one of the default headers.
 
