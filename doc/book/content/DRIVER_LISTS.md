@@ -15,17 +15,19 @@ will always be available. These tend to be simple, building-block
 types of drivers so they don't add too much bloat and they're very
 useful to have.
 
-| Name   | Description                                     |
-|--------|-------------------------------------------------|
-| cycle  | Generates a periodic true/false value           |
-| memory | Can be set to any supported value               |
-| timer  | Generates am active signal for a length of time |
+| Name   | Description                                         |
+|--------|-----------------------------------------------------|
+| cycle  | Generates a periodic true/false value               |
+| map    | Translates ranges of integers into values           |
+| latch  | Switches to an alternate state when an event occurs |
+| memory | Can be set to any supported value                   |
+| timer  | Generates am active signal for a length of time     |
 
 ## External Drivers
 
-| Name       | Vendor | Model | Description                           |
-|------------|--------|-------|---------------------------------------|
-| ntp        |        | ntpd  | Monitors NTP server status            |
-| sump       |        |       | Monitors sump pump using custom HW    |
-| tplink     | Kasa   | HS220 | WiFi connected dimmer switch          |
-| weather-wu |        |       | Aquires data from Weather Underground |
+| Name       | Vendor | Model | Description                            |
+|------------|--------|-------|----------------------------------------|
+| ntp        |        | ntpd  | Monitors NTP server status             |
+| sump       |        |       | Monitors sump pump using custom HW     |
+| tplink     | Kasa   | HS220 | WiFi connected dimmer switch           |
+| weather-wu |        |       | Acquires data from Weather Underground |
