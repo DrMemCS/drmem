@@ -13,7 +13,7 @@ use tokio::{sync::mpsc, task::JoinHandle, time::Duration};
 use tracing::{Level, Span, error, instrument};
 
 mod hue_streamer;
-mod payload;
+pub(crate) mod payload;
 
 pub struct Instance {
     client: Client,
@@ -117,6 +117,32 @@ impl Instance {
         Ok(())
     }
 
+    #[instrument(level = Level::INFO, name = "control", skip(self, rtype, cmd))]
+    async fn send_command(
+        &self,
+        id: &str,
+        rtype: &str,
+        cmd: payload::LightCommand,
+    ) {
+        let url =
+            format!("https://{}/clip/v2/resource/{}/{}", self.host, rtype, id);
+
+        match self.client.put(&url).json(&cmd).send().await {
+            Ok(resp) => {
+                if let Err(e) = resp.error_for_status() {
+                    tracing::error!(
+                        "Hue bridge rejected setting for {}: {}",
+                        id,
+                        e
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to communicate with Hue bridge: {}", e);
+            }
+        }
+    }
+
     #[instrument(level = Level::INFO, name = "report", skip(dev_set, update), fields(id = update.id.as_ref()))]
     async fn report_update<R: Reporter>(
         dev_set: &mut device::DeviceSet<R>,
@@ -218,6 +244,12 @@ impl<R: Reporter> API<R> for Instance {
 
                     if let Some(dev_set) = devices.map.get_mut(update.id.as_ref()) {
                         Self::report_update(dev_set, update).await;
+                    }
+                }
+
+                (id, rtype, opt_cmd) = devices.next_setting() => {
+                    if let Some(cmd) = opt_cmd {
+                        self.send_command(&id, rtype, cmd).await;
                     }
                 }
 

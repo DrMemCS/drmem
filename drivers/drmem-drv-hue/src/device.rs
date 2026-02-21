@@ -1,9 +1,10 @@
-use super::config;
+use super::{config, driver::payload};
 use drmem_api::{
     Result,
     device::Path,
     driver::{Registrator, Reporter, ResettableState, classes},
 };
+use palette::{IntoColor, LinSrgb, Yxy};
 use std::{collections::HashMap, sync::Arc};
 use tokio::time::Duration;
 
@@ -73,6 +74,153 @@ impl<R: Reporter> Set<R> {
                 ),
             },
         ))
+    }
+
+    pub async fn next_setting(
+        &mut self,
+    ) -> (Arc<str>, &'static str, Option<payload::LightCommand>) {
+        use std::future::poll_fn;
+        use std::task::Poll;
+
+        poll_fn(move |cx| {
+            for (id, dev) in self.map.iter_mut() {
+                let rtype = match dev {
+                    DeviceSet::Group(_) => "grouped_light",
+                    _ => "light",
+                };
+
+                match dev {
+                    DeviceSet::Switch(switch) => {
+                        if let Poll::Ready(Some((val, reply))) =
+                            std::pin::pin!(switch.state.next_setting()).poll(cx)
+                        {
+                            if let Some(r) = reply {
+                                r.ok(val);
+                            }
+                            return Poll::Ready((
+                                id.clone(),
+                                rtype,
+                                Some(payload::LightCommand {
+                                    on: Some(payload::On { on: val }),
+                                    dimming: None,
+                                    color: None,
+                                }),
+                            ));
+                        }
+                        if let Poll::Ready(Some((val, reply))) =
+                            std::pin::pin!(switch.indicator.next_setting())
+                                .poll(cx)
+                        {
+                            if let Some(r) = reply {
+                                r.ok(val);
+                            }
+                            return Poll::Ready((id.clone(), rtype, None));
+                        }
+                    }
+
+                    DeviceSet::Bulb(dimmer) => {
+                        if let Poll::Ready(Some((val, reply))) =
+                            std::pin::pin!(dimmer.brightness.next_setting())
+                                .poll(cx)
+                        {
+                            let val = val.clamp(0.0, 100.0);
+
+                            if let Some(r) = reply {
+                                r.ok(val);
+                            }
+                            let cmd = if val == 0.0 {
+                                payload::LightCommand {
+                                    on: Some(payload::On { on: false }),
+                                    dimming: None,
+                                    color: None,
+                                }
+                            } else {
+                                payload::LightCommand {
+                                    on: Some(payload::On { on: true }),
+                                    dimming: Some(payload::Dimming {
+                                        brightness: val as f32,
+                                    }),
+                                    color: None,
+                                }
+                            };
+                            return Poll::Ready((id.clone(), rtype, Some(cmd)));
+                        }
+                        if let Poll::Ready(Some((val, reply))) =
+                            std::pin::pin!(dimmer.indicator.next_setting())
+                                .poll(cx)
+                        {
+                            if let Some(r) = reply {
+                                r.ok(val);
+                            }
+                            return Poll::Ready((id.clone(), rtype, None));
+                        }
+                    }
+
+                    DeviceSet::ColorBulb(cb) | DeviceSet::Group(cb) => {
+                        if let Poll::Ready(Some((val, reply))) =
+                            std::pin::pin!(cb.brightness.next_setting())
+                                .poll(cx)
+                        {
+                            let val = val.clamp(0.0, 100.0);
+
+                            if let Some(r) = reply {
+                                r.ok(val);
+                            }
+
+                            let cmd = if val == 0.0 {
+                                payload::LightCommand {
+                                    on: Some(payload::On { on: false }),
+                                    dimming: None,
+                                    color: None,
+                                }
+                            } else {
+                                payload::LightCommand {
+                                    on: Some(payload::On { on: true }),
+                                    dimming: Some(payload::Dimming {
+                                        brightness: val as f32,
+                                    }),
+                                    color: None,
+                                }
+                            };
+
+                            return Poll::Ready((id.clone(), rtype, Some(cmd)));
+                        }
+
+                        if let Poll::Ready(Some((val, reply))) =
+                            std::pin::pin!(cb.color.next_setting()).poll(cx)
+                        {
+                            if let Some(r) = reply {
+                                r.ok(val.clone());
+                            }
+
+                            let rgb = LinSrgb::new(
+                                val.red as f32 / 255.0,
+                                val.green as f32 / 255.0,
+                                val.blue as f32 / 255.0,
+                            );
+                            let yxy: Yxy = rgb.into_color();
+
+                            return Poll::Ready((
+                                id.clone(),
+                                rtype,
+                                Some(payload::LightCommand {
+                                    on: Some(payload::On { on: true }),
+                                    dimming: None,
+                                    color: Some(payload::Color {
+                                        xy: Some(payload::XyCoordinates {
+                                            x: yxy.x,
+                                            y: yxy.y,
+                                        }),
+                                    }),
+                                }),
+                            ));
+                        }
+                    }
+                }
+            }
+            Poll::Pending
+        })
+        .await
     }
 }
 
