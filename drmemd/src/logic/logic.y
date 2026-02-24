@@ -21,6 +21,8 @@
 %epp KW_IF "if"
 %epp KW_THEN "then"
 %epp KW_ELSE "else"
+%epp KW_COALESCE "coalesce"
+%epp COMMA ","
 %epp ADD "+"
 %epp SUB "-"
 %epp MUL "*"
@@ -134,6 +136,7 @@ Expr -> Result<Expr>:
 Factor -> Result<Expr>:
       "B_NOT" Factor { Ok(Expr::Not(Box::new($2?))) }
     | "(" TopExpr ")" { $2 }
+    | "KW_COALESCE" "(" ExprList ")" { Ok(Expr::Coalesce($3?)) }
     | Conditional { $1 }
     | "TRUE" { Ok(Expr::Lit(device::Value::Bool(true))) }
     | "FALSE" { Ok(Expr::Lit(device::Value::Bool(false))) }
@@ -181,6 +184,15 @@ Factor -> Result<Expr>:
 	}
     }
     | Device { $1 }
+    ;
+
+ExprList -> Result<Vec<Expr>>:
+      TopExpr { Ok(vec![$1?]) }
+    | ExprList "COMMA" TopExpr {
+        let mut list = $1?;
+        list.push($3?);
+        Ok(list)
+    }
     ;
 
 Conditional -> Result<Expr>:

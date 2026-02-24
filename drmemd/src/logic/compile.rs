@@ -241,6 +241,7 @@ pub enum Expr {
     Or(Box<Expr>, Box<Expr>),
 
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
+    Coalesce(Vec<Expr>),
 
     // NotEq, Gt, and GtEq are parsed and converted into one of the
     // following three representations (the NotEq is a combination Not
@@ -264,7 +265,8 @@ impl Expr {
             | Expr::Var(_)
             | Expr::TimeVal(..)
             | Expr::SolarVal(..)
-            | Expr::Nothing => 10,
+            | Expr::Nothing
+            | Expr::Coalesce(_) => 10,
             Expr::Not(_) => 9,
             Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 5,
             Expr::Add(_, _) | Expr::Sub(_, _) => 4,
@@ -313,6 +315,9 @@ impl Expr {
                 (None, b) => b,
                 (Some(a), Some(b)) => Some(a.min(b)),
             },
+            Expr::Coalesce(exprs) => {
+                exprs.iter().filter_map(|e| e.uses_time()).min()
+            }
             Expr::If(a, b, c) => {
                 match (
                     a.uses_time(),
@@ -356,6 +361,7 @@ impl Expr {
             | Expr::And(a, b)
             | Expr::Or(a, b)
             | Expr::If(a, b, None) => a.uses_solar() || b.uses_solar(),
+            Expr::Coalesce(exprs) => exprs.iter().any(|e| e.uses_solar()),
             Expr::If(a, b, Some(c)) => {
                 a.uses_solar() || b.uses_solar() || c.uses_solar()
             }
@@ -447,6 +453,17 @@ impl fmt::Display for Expr {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " % ")?;
                 self.fmt_subexpr(b, f)
+            }
+
+            Expr::Coalesce(exprs) => {
+                write!(f, "COALESCE(")?;
+                for (i, expr) in exprs.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", expr)?;
+                }
+                write!(f, ")")
             }
 
             Expr::If(a, b, c) => {
@@ -543,6 +560,7 @@ pub fn eval<'a>(
         Expr::Mul(a, b) => eval_as_mul_expr(a, b, inp, time, solar),
         Expr::Div(a, b) => eval_as_div_expr(a, b, inp, time, solar),
         Expr::Rem(a, b) => eval_as_rem_expr(a, b, inp, time, solar),
+        Expr::Coalesce(exprs) => eval_as_coalesce_expr(exprs, inp, time, solar),
         Expr::If(a, b, c) => eval_as_if_expr(a, b, c, inp, time, solar),
     }
 }
@@ -959,6 +977,20 @@ fn eval_as_rem_expr<'a>(
     }
 }
 
+fn eval_as_coalesce_expr<'a>(
+    exprs: &'a [Expr],
+    inp: &'a [Option<device::Value>],
+    time: &tod::Info,
+    solar: Option<&solar::Info>,
+) -> Option<Cow<'a, device::Value>> {
+    for expr in exprs {
+        if let Some(val) = eval(expr, inp, time, solar) {
+            return Some(val);
+        }
+    }
+    None
+}
+
 fn eval_as_if_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -1053,6 +1085,25 @@ pub fn optimize(e: Expr) -> Expr {
                 (Expr::Lit(device::Value::Bool(false)), e)
                 | (e, Expr::Lit(device::Value::Bool(false))) => e,
                 _ => e,
+            }
+        }
+
+        Expr::Coalesce(exprs) => {
+            let mut opt_exprs = Vec::new();
+            for e in exprs {
+                let opt_e = optimize(e);
+                if let Expr::Lit(_) = opt_e {
+                    opt_exprs.push(opt_e);
+                    break;
+                } else if opt_e != Expr::Nothing {
+                    opt_exprs.push(opt_e);
+                }
+            }
+
+            match opt_exprs.len() {
+                0 => Expr::Nothing,
+                1 => opt_exprs.pop().unwrap(),
+                _ => Expr::Coalesce(opt_exprs),
             }
         }
 
@@ -3513,5 +3564,83 @@ mod tests {
                 expr
             );
         }
+    }
+
+    #[test]
+    fn test_coalesce_parser() {
+        let env: Env = (
+            &[String::from("a"), String::from("b")],
+            &[String::from("out")],
+        );
+
+        let cases = [
+            (
+                "COALESCE(1) -> {out}",
+                Expr::Coalesce(vec![Expr::Lit(device::Value::Int(1))]),
+            ),
+            (
+                "COALESCE({a}, {b}, 0) -> {out}",
+                Expr::Coalesce(vec![
+                    Expr::Var(0),
+                    Expr::Var(1),
+                    Expr::Lit(device::Value::Int(0)),
+                ]),
+            ),
+        ];
+
+        for (src, expected_expr) in cases {
+            let Program(expr, _) = Program::compile(src, &env).unwrap();
+
+            assert_eq!(expr, expected_expr);
+        }
+
+        assert!(Program::compile("COALESCE() -> {out}", &env).is_err());
+        assert!(Program::compile("COALESCE({a} {b}) -> {out}", &env).is_err());
+    }
+
+    #[test]
+    fn test_coalesce_eval() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        let inputs = vec![None, Some(device::Value::Bool(true))];
+        let expr = Expr::Coalesce(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(result, Some(Cow::Owned(device::Value::Bool(true))));
+
+        let inputs =
+            vec![Some(device::Value::Int(50)), Some(device::Value::Int(100))];
+        let expr = Expr::Coalesce(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(result, Some(Cow::Owned(device::Value::Int(50))));
+
+        let inputs = vec![None, None];
+        let expr = Expr::Coalesce(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_coalesce_optimization() {
+        let expr = Expr::Coalesce(vec![
+            Expr::Lit(device::Value::Int(10)),
+            Expr::Var(0), // Should be pruned
+        ]);
+        assert_eq!(optimize(expr), Expr::Lit(device::Value::Int(10)));
+
+        let expr = Expr::Coalesce(vec![
+            Expr::Nothing,
+            Expr::Lit(device::Value::Int(20)),
+        ]);
+        assert_eq!(optimize(expr), Expr::Lit(device::Value::Int(20)));
+
+        let expr = Expr::Coalesce(vec![Expr::Var(1)]);
+        assert_eq!(optimize(expr), Expr::Var(1));
+
+        let expr = Expr::Coalesce(vec![Expr::Nothing, Expr::Nothing]);
+        assert_eq!(optimize(expr), Expr::Nothing);
     }
 }
