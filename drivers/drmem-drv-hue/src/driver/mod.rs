@@ -58,7 +58,7 @@ impl Instance {
             .user_agent(APP_USER_AGENT)
             .default_headers(hdr_map)
             .use_rustls_tls()
-            .tcp_keepalive_interval(Duration::from_secs(30))
+            .tcp_keepalive(Duration::from_secs(30))
             .connect_timeout(Duration::from_millis(500))
             .build()
             .map_err(|e| {

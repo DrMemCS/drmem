@@ -17,7 +17,7 @@ tracing.workspace = true
 
 reqwest.workspace = true
 reqwest.default-features = false
-reqwest.features = ["http2", "stream", "rustls", "json"]
+reqwest.features = ["stream", "json"]
 
 futures.workspace = true
 
