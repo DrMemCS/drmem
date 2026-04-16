@@ -319,22 +319,19 @@ impl Expr {
                 exprs.iter().filter_map(|e| e.uses_time()).min()
             }
             Expr::If(a, b, c) => {
-                match (
-                    a.uses_time(),
-                    b.uses_time(),
-                    c.as_ref().map(|v| v.uses_time()),
-                ) {
-                    (None, None, None) | (None, None, Some(None)) => None,
-                    (None, None, Some(c @ Some(_))) => c,
-                    (None, b @ Some(_), None)
-                    | (None, b @ Some(_), Some(None)) => b,
-                    (None, Some(b), Some(Some(c))) => Some(b.min(c)),
-                    (a @ Some(_), None, None)
-                    | (a @ Some(_), None, Some(None)) => a,
-                    (Some(a), None, Some(Some(c))) => Some(a.min(c)),
-                    (Some(a), Some(b), None)
-                    | (Some(a), Some(b), Some(None)) => Some(a.min(b)),
-                    (Some(a), Some(b), Some(Some(c))) => Some(a.min(b.min(c))),
+                let a_time = a.uses_time();
+                let b_time = b.uses_time();
+                let c_time = c.as_ref().and_then(|v| v.uses_time());
+
+                match (a_time, b_time, c_time) {
+                    (None, None, None) => None,
+                    (None, None, Some(c)) => Some(c),
+                    (None, Some(b), None) => Some(b),
+                    (None, Some(b), Some(c)) => Some(b.min(c)),
+                    (Some(a), None, None) => Some(a),
+                    (Some(a), None, Some(c)) => Some(a.min(c)),
+                    (Some(a), Some(b), None) => Some(a.min(b)),
+                    (Some(a), Some(b), Some(c)) => Some(a.min(b).min(c)),
                 }
             }
         }
@@ -705,30 +702,19 @@ fn eval_as_eq_expr<'a>(
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
-        (device::Value::Bool(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a == b)))
-        }
-        (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a == b)))
-        }
-        (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a == b)))
-        }
-        (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool(*a as f64 == *b)))
-        }
-        (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(*a == *b as f64)))
-        }
-        (device::Value::Str(a), device::Value::Str(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a == b)))
-        }
+    let result = match (val_a.as_ref(), val_b.as_ref()) {
+        (device::Value::Bool(a), device::Value::Bool(b)) => a == b,
+        (device::Value::Int(a), device::Value::Int(b)) => a == b,
+        (device::Value::Flt(a), device::Value::Flt(b)) => a == b,
+        (device::Value::Int(a), device::Value::Flt(b)) => *a as f64 == *b,
+        (device::Value::Flt(a), device::Value::Int(b)) => *a == *b as f64,
+        (device::Value::Str(a), device::Value::Str(b)) => a == b,
         (a, b) => {
             error!("cannot compare {} and {} for equality", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(Cow::Owned(device::Value::Bool(result)))
 }
 
 #[inline(never)]
@@ -742,27 +728,18 @@ fn eval_as_lt_expr<'a>(
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
-        (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a < b)))
-        }
-        (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a < b)))
-        }
-        (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool((*a as f64) < *b)))
-        }
-        (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(*a < *b as f64)))
-        }
-        (device::Value::Str(a), device::Value::Str(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a < b)))
-        }
+    let result = match (val_a.as_ref(), val_b.as_ref()) {
+        (device::Value::Int(a), device::Value::Int(b)) => a < b,
+        (device::Value::Flt(a), device::Value::Flt(b)) => a < b,
+        (device::Value::Int(a), device::Value::Flt(b)) => (*a as f64) < *b,
+        (device::Value::Flt(a), device::Value::Int(b)) => *a < *b as f64,
+        (device::Value::Str(a), device::Value::Str(b)) => a < b,
         (a, b) => {
             error!("cannot compare {} and {} for order", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(Cow::Owned(device::Value::Bool(result)))
 }
 
 #[inline(never)]
@@ -776,27 +753,18 @@ fn eval_as_lteq_expr<'a>(
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
-        (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a <= b)))
-        }
-        (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a <= b)))
-        }
-        (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool((*a as f64) <= *b)))
-        }
-        (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(*a <= *b as f64)))
-        }
-        (device::Value::Str(a), device::Value::Str(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a <= b)))
-        }
+    let result = match (val_a.as_ref(), val_b.as_ref()) {
+        (device::Value::Int(a), device::Value::Int(b)) => a <= b,
+        (device::Value::Flt(a), device::Value::Flt(b)) => a <= b,
+        (device::Value::Int(a), device::Value::Flt(b)) => (*a as f64) <= *b,
+        (device::Value::Flt(a), device::Value::Int(b)) => *a <= *b as f64,
+        (device::Value::Str(a), device::Value::Str(b)) => a <= b,
         (a, b) => {
             error!("cannot compare {} and {} for order", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(Cow::Owned(device::Value::Bool(result)))
 }
 
 #[inline(never)]
@@ -810,36 +778,37 @@ fn eval_as_add_expr<'a>(
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (val_a.as_ref(), val_b.as_ref()) {
         (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(a + b)))
+            device::Value::Int(a + b)
         }
         (device::Value::Bool(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(*a as i32 + b)))
+            device::Value::Int(*a as i32 + b)
         }
         (device::Value::Int(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Int(a + *b as i32)))
+            device::Value::Int(a + *b as i32)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a + b)))
+            device::Value::Flt(a + b)
         }
         (device::Value::Bool(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(*a as u8 as f64 + b)))
+            device::Value::Flt(*a as u8 as f64 + b)
         }
         (device::Value::Flt(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a + *b as u8 as f64)))
+            device::Value::Flt(a + *b as u8 as f64)
         }
         (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) + b)))
+            device::Value::Flt(*a as f64 + b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a + *b as f64)))
+            device::Value::Flt(a + *b as f64)
         }
         (a, b) => {
             error!("cannot add {} and {} types together", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(Cow::Owned(result))
 }
 
 #[inline(never)]
@@ -853,36 +822,37 @@ fn eval_as_sub_expr<'a>(
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (val_a.as_ref(), val_b.as_ref()) {
         (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(a - b)))
+            device::Value::Int(a - b)
         }
         (device::Value::Bool(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(*a as i32 - b)))
+            device::Value::Int(*a as i32 - b)
         }
         (device::Value::Int(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Int(a - *b as i32)))
+            device::Value::Int(a - *b as i32)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a - b)))
+            device::Value::Flt(a - b)
         }
         (device::Value::Bool(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(*a as u8 as f64 - b)))
+            device::Value::Flt(*a as u8 as f64 - b)
         }
         (device::Value::Flt(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a - *b as u8 as f64)))
+            device::Value::Flt(a - *b as u8 as f64)
         }
         (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) - b)))
+            device::Value::Flt(*a as f64 - b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a - *b as f64)))
+            device::Value::Flt(a - *b as f64)
         }
         (a, b) => {
             error!("cannot subtract {} and {} types together", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(Cow::Owned(result))
 }
 
 #[inline(never)]
@@ -896,36 +866,37 @@ fn eval_as_mul_expr<'a>(
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (val_a.as_ref(), val_b.as_ref()) {
         (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(a * b)))
+            device::Value::Int(a * b)
         }
         (device::Value::Bool(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(*a as i32 * b)))
+            device::Value::Int(*a as i32 * b)
         }
         (device::Value::Int(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Int(a * *b as i32)))
+            device::Value::Int(a * *b as i32)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a * b)))
+            device::Value::Flt(a * b)
         }
         (device::Value::Bool(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(*a as u8 as f64 * b)))
+            device::Value::Flt(*a as u8 as f64 * b)
         }
         (device::Value::Flt(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a * *b as u8 as f64)))
+            device::Value::Flt(a * *b as u8 as f64)
         }
         (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) * b)))
+            device::Value::Flt(*a as f64 * b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a * *b as f64)))
+            device::Value::Flt(a * *b as f64)
         }
         (a, b) => {
             error!("cannot multiply {} and {} types together", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(Cow::Owned(result))
 }
 
 #[inline(never)]
@@ -939,24 +910,25 @@ fn eval_as_div_expr<'a>(
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (val_a.as_ref(), val_b.as_ref()) {
         (device::Value::Int(a), device::Value::Int(b)) if *b != 0 => {
-            Some(Cow::Owned(device::Value::Int(a / b)))
+            device::Value::Int(a / b)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) if *b != 0.0 => {
-            Some(Cow::Owned(device::Value::Flt(a / b)))
+            device::Value::Flt(a / b)
         }
         (device::Value::Int(a), device::Value::Flt(b)) if *b != 0.0 => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) / b)))
+            device::Value::Flt(*a as f64 / b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) if *b != 0 => {
-            Some(Cow::Owned(device::Value::Flt(a / *b as f64)))
+            device::Value::Flt(a / *b as f64)
         }
         (a, b) => {
             error!("cannot divide {} by {}", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(Cow::Owned(result))
 }
 
 #[inline(never)]
@@ -970,24 +942,25 @@ fn eval_as_rem_expr<'a>(
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (val_a.as_ref(), val_b.as_ref()) {
         (device::Value::Int(a), device::Value::Int(b)) if *b > 0 => {
-            Some(Cow::Owned(device::Value::Int(a % b)))
+            device::Value::Int(a % b)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) if *b > 0.0 => {
-            Some(Cow::Owned(device::Value::Flt(a % b)))
+            device::Value::Flt(a % b)
         }
         (device::Value::Int(a), device::Value::Flt(b)) if *b > 0.0 => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) % b)))
+            device::Value::Flt(*a as f64 % b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) if *b > 0 => {
-            Some(Cow::Owned(device::Value::Flt(a % *b as f64)))
+            device::Value::Flt(a % *b as f64)
         }
         (a, b) => {
             error!("cannot compute remainder of {} from {}", &b, &a);
-            None
+            return None;
         }
-    }
+    };
+    Some(Cow::Owned(result))
 }
 
 #[inline(never)]
@@ -1073,36 +1046,40 @@ where
 pub fn optimize(e: Expr) -> Expr {
     match e {
         // Look for optimizations with expressions starting with NOT.
-        Expr::Not(ref ne) => match &**ne {
+        Expr::Not(ne) => match *ne {
             // If the sub-expression is also a NOT expression. If so,
             // we throw them both away.
-            Expr::Not(e) => optimize(*e.clone()),
+            Expr::Not(inner_e) => optimize(*inner_e),
 
             // If the subexpression is either `true` or `false`,
             // return the complement.
             Expr::Lit(device::Value::Bool(val)) => {
                 Expr::Lit(device::Value::Bool(!val))
             }
-            _ => e,
+            _ => Expr::Not(ne),
         },
 
-        Expr::And(ref a, ref b) => {
-            match (optimize(*a.clone()), optimize(*b.clone())) {
-                (v @ Expr::Lit(device::Value::Bool(false)), _)
-                | (_, v @ Expr::Lit(device::Value::Bool(false))) => v,
-                (Expr::Lit(device::Value::Bool(true)), e)
-                | (e, Expr::Lit(device::Value::Bool(true))) => e,
-                _ => e,
+        Expr::And(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(device::Value::Bool(false)), _) => opt_a,
+                (_, Expr::Lit(device::Value::Bool(false))) => opt_b,
+                (Expr::Lit(device::Value::Bool(true)), _) => opt_b,
+                (_, Expr::Lit(device::Value::Bool(true))) => opt_a,
+                _ => Expr::And(Box::new(opt_a), Box::new(opt_b)),
             }
         }
 
-        Expr::Or(ref a, ref b) => {
-            match (optimize(*a.clone()), optimize(*b.clone())) {
-                (v @ Expr::Lit(device::Value::Bool(true)), _)
-                | (_, v @ Expr::Lit(device::Value::Bool(true))) => v,
-                (Expr::Lit(device::Value::Bool(false)), e)
-                | (e, Expr::Lit(device::Value::Bool(false))) => e,
-                _ => e,
+        Expr::Or(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(device::Value::Bool(true)), _) => opt_a,
+                (_, Expr::Lit(device::Value::Bool(true))) => opt_b,
+                (Expr::Lit(device::Value::Bool(false)), _) => opt_b,
+                (_, Expr::Lit(device::Value::Bool(false))) => opt_a,
+                _ => Expr::Or(Box::new(opt_a), Box::new(opt_b)),
             }
         }
 
@@ -1110,7 +1087,7 @@ pub fn optimize(e: Expr) -> Expr {
             let mut opt_exprs = Vec::new();
             for e in exprs {
                 let opt_e = optimize(e);
-                if let Expr::Lit(_) = opt_e {
+                if matches!(opt_e, Expr::Lit(_)) {
                     opt_exprs.push(opt_e);
                     break;
                 } else if opt_e != Expr::Nothing {
@@ -1138,52 +1115,72 @@ pub fn optimize(e: Expr) -> Expr {
             ),
         },
 
-        Expr::Add(a, b) => match (optimize(*a), optimize(*b)) {
-            (Expr::Lit(v), b) if is_zero(&v) => b,
-            (a, Expr::Lit(v)) if is_zero(&v) => a,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Add, Box::new(a), Box::new(b))
+        Expr::Add(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(v), _) if is_zero(v) => opt_b,
+                (_, Expr::Lit(v)) if is_zero(v) => opt_a,
+                (Expr::Lit(_), Expr::Lit(_)) => {
+                    fold_binary(Expr::Add, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Add(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Add(Box::new(a), Box::new(b)),
-        },
+        }
 
-        Expr::Sub(a, b) => match (optimize(*a), optimize(*b)) {
-            (a, Expr::Lit(v)) if is_zero(&v) => a,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Sub, Box::new(a), Box::new(b))
+        Expr::Sub(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_b,) {
+                (Expr::Lit(v),) if is_zero(v) => opt_a,
+                (Expr::Lit(_),) => {
+                    fold_binary(Expr::Sub, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Sub(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Sub(Box::new(a), Box::new(b)),
-        },
+        }
 
-        Expr::Mul(a, b) => match (optimize(*a), optimize(*b)) {
-            (Expr::Lit(v), _) if is_zero(&v) => Expr::Lit(v),
-            (_, Expr::Lit(v)) if is_zero(&v) => Expr::Lit(v),
-            (Expr::Lit(v), b) if is_one(&v) => b,
-            (a, Expr::Lit(v)) if is_one(&v) => a,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Mul, Box::new(a), Box::new(b))
+        Expr::Mul(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(v), _) if is_zero(v) => opt_a,
+                (_, Expr::Lit(v)) if is_zero(v) => opt_b,
+                (Expr::Lit(v), _) if is_one(v) => opt_b,
+                (_, Expr::Lit(v)) if is_one(v) => opt_a,
+                (Expr::Lit(_), Expr::Lit(_)) => {
+                    fold_binary(Expr::Mul, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Mul(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Mul(Box::new(a), Box::new(b)),
-        },
+        }
 
-        Expr::Div(a, b) => match (optimize(*a), optimize(*b)) {
-            (Expr::Lit(v), _) if is_zero(&v) => Expr::Lit(v),
-            (_, Expr::Lit(v)) if is_zero(&v) => Expr::Nothing,
-            (a, Expr::Lit(v)) if is_one(&v) => a,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Div, Box::new(a), Box::new(b))
+        Expr::Div(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(v), _) if is_zero(v) => opt_a,
+                (_, Expr::Lit(v)) if is_zero(v) => Expr::Nothing,
+                (_, Expr::Lit(v)) if is_one(v) => opt_a,
+                (Expr::Lit(_), Expr::Lit(_)) => {
+                    fold_binary(Expr::Div, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Div(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Div(Box::new(a), Box::new(b)),
-        },
+        }
 
-        Expr::Rem(a, b) => match (optimize(*a), optimize(*b)) {
-            (Expr::Lit(v), _) if is_zero(&v) => Expr::Lit(v),
-            (_, Expr::Lit(v)) if is_zero(&v) => Expr::Nothing,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Rem, Box::new(a), Box::new(b))
+        Expr::Rem(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(v), _) if is_zero(v) => opt_a,
+                (_, Expr::Lit(v)) if is_zero(v) => Expr::Nothing,
+                (Expr::Lit(_), Expr::Lit(_)) => {
+                    fold_binary(Expr::Rem, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Rem(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Rem(Box::new(a), Box::new(b)),
-        },
+        }
 
         Expr::Eq(a, b) => fold_binary(Expr::Eq, a, b),
 
