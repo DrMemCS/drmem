@@ -525,6 +525,7 @@ impl fmt::Display for Program {
 // it won't get computed ever again. The log will have a message
 // indicating what the error was.
 
+#[inline(never)]
 pub fn eval<'a>(
     e: &'a Expr,
     inp: &'a [Option<device::Value>],
@@ -565,6 +566,7 @@ pub fn eval<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_var<'a>(
     idx: usize,
     inp: &'a [Option<device::Value>],
@@ -572,6 +574,7 @@ fn eval_as_var<'a>(
     inp[idx].as_ref().map(Cow::Borrowed)
 }
 
+#[inline(never)]
 fn eval_as_not_expr<'a>(
     e: &'a Expr,
     inp: &'a [Option<device::Value>],
@@ -592,6 +595,7 @@ fn eval_as_not_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_or_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -641,6 +645,7 @@ fn eval_as_or_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_and_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -689,6 +694,7 @@ fn eval_as_and_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_eq_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -725,6 +731,7 @@ fn eval_as_eq_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_lt_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -758,6 +765,7 @@ fn eval_as_lt_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_lteq_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -791,6 +799,7 @@ fn eval_as_lteq_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_add_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -833,6 +842,7 @@ fn eval_as_add_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_sub_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -875,6 +885,7 @@ fn eval_as_sub_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_mul_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -917,6 +928,7 @@ fn eval_as_mul_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_div_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -947,6 +959,7 @@ fn eval_as_div_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_rem_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -977,6 +990,7 @@ fn eval_as_rem_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn eval_as_coalesce_expr<'a>(
     exprs: &'a [Expr],
     inp: &'a [Option<device::Value>],
@@ -991,6 +1005,7 @@ fn eval_as_coalesce_expr<'a>(
     None
 }
 
+#[inline(never)]
 fn eval_as_if_expr<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -1014,6 +1029,7 @@ fn eval_as_if_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn is_zero(v: &device::Value) -> bool {
     match v {
         device::Value::Int(i) => *i == 0,
@@ -1022,6 +1038,7 @@ fn is_zero(v: &device::Value) -> bool {
     }
 }
 
+#[inline(never)]
 fn is_one(v: &device::Value) -> bool {
     match v {
         device::Value::Int(i) => *i == 1,
@@ -1052,6 +1069,7 @@ where
 
 // This function takes an expression and tries to reduce it.
 
+#[inline(never)]
 pub fn optimize(e: Expr) -> Expr {
     match e {
         // Look for optimizations with expressions starting with NOT.
