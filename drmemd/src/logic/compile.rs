@@ -72,7 +72,7 @@ use chrono::{Datelike, Timelike};
 use drmem_api::{device, Error, Result};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
-use std::{borrow::Cow, fmt};
+use std::fmt;
 use tracing::error;
 
 // Pull in the lexer and parser for the Logic Node language.
@@ -523,29 +523,25 @@ impl fmt::Display for Program {
 // indicating what the error was.
 
 #[inline(never)]
-pub fn eval<'a>(
-    e: &'a Expr,
-    inp: &'a [Option<device::Value>],
+pub fn eval(
+    e: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     match e {
         Expr::Nothing => None,
 
-        // Optimization: Return a reference to the literal stored in the AST
-        Expr::Lit(v) => Some(Cow::Borrowed(v)),
+        // Optimization: Clone the literal stored in the AST
+        Expr::Lit(v) => Some(v.clone()),
 
-        // Optimization: Return a reference to the value in the input buffer
+        // Optimization: Clone the value from the input buffer
         Expr::Var(n) => eval_as_var(*n, inp),
 
-        // Time/Solar fields generate new values, so they return Owned
-        Expr::TimeVal(Zone::Utc, field) => {
-            Some(Cow::Owned(field.project(&time.0)))
-        }
-        Expr::TimeVal(Zone::Local, field) => {
-            Some(Cow::Owned(field.project(&time.1)))
-        }
-        Expr::SolarVal(field) => solar.map(|v| Cow::Owned(field.project(v))),
+        // Time/Solar fields generate new values
+        Expr::TimeVal(Zone::Utc, field) => Some(field.project(&time.0)),
+        Expr::TimeVal(Zone::Local, field) => Some(field.project(&time.1)),
+        Expr::SolarVal(field) => solar.map(|v| field.project(v)),
 
         Expr::Not(e) => eval_as_not_expr(e, inp, time, solar),
         Expr::Or(a, b) => eval_as_or_expr(a, b, inp, time, solar),
@@ -564,27 +560,22 @@ pub fn eval<'a>(
 }
 
 #[inline(never)]
-fn eval_as_var<'a>(
+fn eval_as_var(
     idx: usize,
-    inp: &'a [Option<device::Value>],
-) -> Option<Cow<'a, device::Value>> {
-    inp[idx].as_ref().map(Cow::Borrowed)
+    inp: &[Option<device::Value>],
+) -> Option<device::Value> {
+    inp[idx].as_ref().cloned()
 }
 
 #[inline(never)]
-fn eval_as_not_expr<'a>(
-    e: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_not_expr(
+    e: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     match eval(e, inp, time, solar)? {
-        Cow::Borrowed(device::Value::Bool(v)) => {
-            Some(Cow::Owned(device::Value::Bool(!v)))
-        }
-        Cow::Owned(device::Value::Bool(v)) => {
-            Some(Cow::Owned(device::Value::Bool(!v)))
-        }
+        device::Value::Bool(v) => Some(device::Value::Bool(!v)),
         v => {
             error!("NOT expression contains non-boolean value : {}", &v);
             None
@@ -593,31 +584,27 @@ fn eval_as_not_expr<'a>(
 }
 
 #[inline(never)]
-fn eval_as_or_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_or_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     // Check first argument. If true, short-circuit return it (borrowed or owned).
     match eval(a, inp, time, solar) {
-        Some(v) if matches!(v.as_ref(), device::Value::Bool(true)) => Some(v),
-        Some(v) if matches!(v.as_ref(), device::Value::Bool(false)) => {
-            match eval(b, inp, time, solar) {
-                Some(v) if matches!(v.as_ref(), device::Value::Bool(_)) => {
-                    Some(v)
-                }
-                Some(v) => {
-                    error!(
-                        "OR expression contains non-boolean, second argument: {}",
-                        &v
-                    );
-                    None
-                }
-                None => None,
+        v @ Some(device::Value::Bool(true)) => v,
+        Some(device::Value::Bool(false)) => match eval(b, inp, time, solar) {
+            Some(v) if matches!(&v, device::Value::Bool(_)) => Some(v),
+            Some(v) => {
+                error!(
+                    "OR expression contains non-boolean, second argument: {}",
+                    &v
+                );
+                None
             }
-        }
+            None => None,
+        },
         Some(v) => {
             error!(
                 "OR expression contains non-boolean, first argument: {}",
@@ -626,10 +613,8 @@ fn eval_as_or_expr<'a>(
             None
         }
         None => match eval(b, inp, time, solar) {
-            Some(v) if matches!(v.as_ref(), device::Value::Bool(true)) => {
-                Some(v)
-            }
-            Some(v) if matches!(v.as_ref(), device::Value::Bool(false)) => None,
+            v @ Some(device::Value::Bool(true)) => v,
+            Some(device::Value::Bool(false)) => None,
             Some(v) => {
                 error!(
                     "OR expression contains non-boolean, second argument: {}",
@@ -643,30 +628,26 @@ fn eval_as_or_expr<'a>(
 }
 
 #[inline(never)]
-fn eval_as_and_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_and_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     match eval(a, inp, time, solar) {
-        Some(v) if matches!(v.as_ref(), device::Value::Bool(false)) => Some(v),
-        Some(v) if matches!(v.as_ref(), device::Value::Bool(true)) => {
-            match eval(b, inp, time, solar) {
-                Some(v) if matches!(v.as_ref(), device::Value::Bool(_)) => {
-                    Some(v)
-                }
-                Some(v) => {
-                    error!(
-                        "AND expression contains non-boolean, second argument: {}",
-                        &v
-                    );
-                    None
-                }
-                None => None,
+        v @ Some(device::Value::Bool(false)) => v,
+        Some(device::Value::Bool(true)) => match eval(b, inp, time, solar) {
+            Some(v) if matches!(&v, device::Value::Bool(_)) => Some(v),
+            Some(v) => {
+                error!(
+                    "AND expression contains non-boolean, second argument: {}",
+                    &v
+                );
+                None
             }
-        }
+            None => None,
+        },
         Some(v) => {
             error!(
                 "AND expression contains non-boolean, first argument: {}",
@@ -675,10 +656,8 @@ fn eval_as_and_expr<'a>(
             None
         }
         None => match eval(b, inp, time, solar) {
-            Some(v) if matches!(v.as_ref(), device::Value::Bool(false)) => {
-                Some(v)
-            }
-            Some(v) if matches!(v.as_ref(), device::Value::Bool(true)) => None,
+            v @ Some(device::Value::Bool(false)) => v,
+            Some(device::Value::Bool(true)) => None,
             Some(v) => {
                 error!(
                     "AND expression contains non-boolean, second argument: {}",
@@ -692,17 +671,17 @@ fn eval_as_and_expr<'a>(
 }
 
 #[inline(never)]
-fn eval_as_eq_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_eq_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    let result = match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Bool(a), device::Value::Bool(b)) => a == b,
         (device::Value::Int(a), device::Value::Int(b)) => a == b,
         (device::Value::Flt(a), device::Value::Flt(b)) => a == b,
@@ -714,21 +693,21 @@ fn eval_as_eq_expr<'a>(
             return None;
         }
     };
-    Some(Cow::Owned(device::Value::Bool(result)))
+    Some(device::Value::Bool(result))
 }
 
 #[inline(never)]
-fn eval_as_lt_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_lt_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    let result = match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) => a < b,
         (device::Value::Flt(a), device::Value::Flt(b)) => a < b,
         (device::Value::Int(a), device::Value::Flt(b)) => (*a as f64) < *b,
@@ -739,21 +718,21 @@ fn eval_as_lt_expr<'a>(
             return None;
         }
     };
-    Some(Cow::Owned(device::Value::Bool(result)))
+    Some(device::Value::Bool(result))
 }
 
 #[inline(never)]
-fn eval_as_lteq_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_lteq_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    let result = match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) => a <= b,
         (device::Value::Flt(a), device::Value::Flt(b)) => a <= b,
         (device::Value::Int(a), device::Value::Flt(b)) => (*a as f64) <= *b,
@@ -764,21 +743,21 @@ fn eval_as_lteq_expr<'a>(
             return None;
         }
     };
-    Some(Cow::Owned(device::Value::Bool(result)))
+    Some(device::Value::Bool(result))
 }
 
 #[inline(never)]
-fn eval_as_add_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_add_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    let result = match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) => {
             device::Value::Int(a + b)
         }
@@ -808,21 +787,21 @@ fn eval_as_add_expr<'a>(
             return None;
         }
     };
-    Some(Cow::Owned(result))
+    Some(result)
 }
 
 #[inline(never)]
-fn eval_as_sub_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_sub_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    let result = match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) => {
             device::Value::Int(a - b)
         }
@@ -852,21 +831,21 @@ fn eval_as_sub_expr<'a>(
             return None;
         }
     };
-    Some(Cow::Owned(result))
+    Some(result)
 }
 
 #[inline(never)]
-fn eval_as_mul_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_mul_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    let result = match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) => {
             device::Value::Int(a * b)
         }
@@ -896,21 +875,21 @@ fn eval_as_mul_expr<'a>(
             return None;
         }
     };
-    Some(Cow::Owned(result))
+    Some(result)
 }
 
 #[inline(never)]
-fn eval_as_div_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_div_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    let result = match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) if *b != 0 => {
             device::Value::Int(a / b)
         }
@@ -928,21 +907,21 @@ fn eval_as_div_expr<'a>(
             return None;
         }
     };
-    Some(Cow::Owned(result))
+    Some(result)
 }
 
 #[inline(never)]
-fn eval_as_rem_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+fn eval_as_rem_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    let result = match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) if *b > 0 => {
             device::Value::Int(a % b)
         }
@@ -960,16 +939,16 @@ fn eval_as_rem_expr<'a>(
             return None;
         }
     };
-    Some(Cow::Owned(result))
+    Some(result)
 }
 
 #[inline(never)]
-fn eval_as_coalesce_expr<'a>(
-    exprs: &'a [Expr],
-    inp: &'a [Option<device::Value>],
+fn eval_as_coalesce_expr(
+    exprs: &[Expr],
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     for expr in exprs {
         if let Some(val) = eval(expr, inp, time, solar) {
             return Some(val);
@@ -979,20 +958,20 @@ fn eval_as_coalesce_expr<'a>(
 }
 
 #[inline(never)]
-fn eval_as_if_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    c: &'a Option<Box<Expr>>,
-    inp: &'a [Option<device::Value>],
+fn eval_as_if_expr(
+    a: &Expr,
+    b: &Expr,
+    c: &Option<Box<Expr>>,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     match eval(a, inp, time, solar)? {
-        // Optimization: Returns the Cow from the branch, preserving the borrow if possible
-        v if matches!(v.as_ref(), device::Value::Bool(true)) => {
+        // Optimization: Returns the value from the branch
+        v if matches!(v, device::Value::Bool(true)) => {
             eval(b, inp, time, solar)
         }
-        v if matches!(v.as_ref(), device::Value::Bool(false)) => {
+        v if matches!(v, device::Value::Bool(false)) => {
             c.as_ref().and_then(|v| eval(v, inp, time, solar))
         }
         v => {
@@ -1032,7 +1011,7 @@ where
         let result = constructor(Box::new(a_opt), Box::new(b_opt));
 
         if let Some(val) = eval(&result, &[], &dummy_time, None) {
-            return Expr::Lit(val.into_owned());
+            return Expr::Lit(val.clone());
         } else {
             return result;
         }
@@ -1513,7 +1492,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1617,7 +1596,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1731,7 +1710,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1798,7 +1777,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1875,7 +1854,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1972,7 +1951,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1996,8 +1975,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(3))
         );
         assert_eq!(
@@ -2006,8 +1984,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(2))
         );
         assert_eq!(
@@ -2019,8 +1996,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2032,8 +2008,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(3.0))
         );
         assert_eq!(
@@ -2045,8 +2020,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2058,8 +2032,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2071,8 +2044,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(3.0))
         );
         assert_eq!(
@@ -2084,8 +2056,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(3.0))
         );
     }
@@ -2106,8 +2077,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2116,8 +2086,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(0))
         );
         assert_eq!(
@@ -2129,8 +2098,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2142,8 +2110,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2155,8 +2122,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(0.0))
         );
         assert_eq!(
@@ -2168,8 +2134,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2181,8 +2146,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2194,8 +2158,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
     }
@@ -2216,8 +2179,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(2))
         );
         assert_eq!(
@@ -2226,8 +2188,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2239,8 +2200,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(0))
         );
         assert_eq!(
@@ -2252,8 +2212,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2265,8 +2224,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2278,8 +2236,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(0.0))
         );
         assert_eq!(
@@ -2291,8 +2248,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2304,8 +2260,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
     }
@@ -2328,8 +2283,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(2))
         );
         assert_eq!(
@@ -2338,8 +2292,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2351,8 +2304,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2364,8 +2316,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2377,8 +2328,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2390,8 +2340,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2403,8 +2352,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2416,8 +2364,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2426,8 +2373,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2439,8 +2385,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2452,8 +2397,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2465,8 +2409,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
     }
@@ -2490,8 +2433,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2512,8 +2454,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2525,8 +2466,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2538,8 +2478,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2551,8 +2490,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2564,8 +2502,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2577,8 +2514,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2587,8 +2523,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2600,8 +2535,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2613,8 +2547,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2626,8 +2559,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2639,8 +2571,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
     }
@@ -2650,10 +2581,7 @@ mod tests {
         const FALSE: device::Value = device::Value::Bool(false);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
-        assert_eq!(
-            eval(&Expr::Lit(FALSE), &[], &time, None).map(Cow::into_owned),
-            Some(FALSE)
-        );
+        assert_eq!(eval(&Expr::Lit(FALSE), &[], &time, None), Some(FALSE));
     }
 
     // This function tests the optimizations that can be done on an
@@ -3180,7 +3108,7 @@ mod tests {
         let expr = format!("{} -> {{a}}", expr);
         let prog = Program::compile(&expr, &env).unwrap();
 
-        eval(&prog.0, &[], &time, solar).map(Cow::into_owned)
+        eval(&prog.0, &[], &time, solar)
     }
 
     #[test]
@@ -3622,14 +3550,14 @@ mod tests {
         let expr = Expr::Coalesce(vec![Expr::Var(0), Expr::Var(1)]);
 
         let result = eval(&expr, &inputs, &time, solar);
-        assert_eq!(result, Some(Cow::Owned(device::Value::Bool(true))));
+        assert_eq!(result, Some(device::Value::Bool(true)));
 
         let inputs =
             vec![Some(device::Value::Int(50)), Some(device::Value::Int(100))];
         let expr = Expr::Coalesce(vec![Expr::Var(0), Expr::Var(1)]);
 
         let result = eval(&expr, &inputs, &time, solar);
-        assert_eq!(result, Some(Cow::Owned(device::Value::Int(50))));
+        assert_eq!(result, Some(device::Value::Int(50)));
 
         let inputs = vec![None, None];
         let expr = Expr::Coalesce(vec![Expr::Var(0), Expr::Var(1)]);
