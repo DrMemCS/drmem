@@ -58,9 +58,9 @@ impl Instance {
         self.values
             .binary_search_by(|e| {
                 if idx < *e.0.start() {
-                    Ordering::Less
-                } else if idx > *e.0.end() {
                     Ordering::Greater
+                } else if idx > *e.0.end() {
+                    Ordering::Less
                 } else {
                     Ordering::Equal
                 }
