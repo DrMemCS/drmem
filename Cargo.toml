@@ -40,14 +40,14 @@ debug = false
 incremental = false
 
 [profile.release.build-override]
-opt-level = 3
+opt-level = 'z'
 incremental = false
 
 [profile.release]
-opt-level = 3
+opt-level = 'z'
 debug = false
 lto = "thin"
-codegen-units = 1
+codegen-units = 20
 debug-assertions = false
 strip = "symbols"
 incremental = false

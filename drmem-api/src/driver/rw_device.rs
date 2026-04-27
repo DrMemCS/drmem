@@ -57,6 +57,7 @@ pub type SettingStream<T> =
 // sent back to the client and the message isn't forwarded to the
 // driver. Otherwise the converted value is yielded.
 
+#[inline(never)]
 pub fn create_setting_stream<T>(rx: RxDeviceSetting) -> SettingStream<T>
 where
     T: device::ReadWriteCompat,
@@ -98,6 +99,7 @@ where
 
     /// Saves a new value, returned by the device, to the backend
     /// storage.
+    #[inline(never)]
     pub fn report_update(
         &mut self,
         value: T,

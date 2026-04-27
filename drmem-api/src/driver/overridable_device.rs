@@ -23,7 +23,7 @@ use crate::{
     driver::{rw_device, Reporter, RxDeviceSetting, SettingResponder},
 };
 use tokio_stream::StreamExt;
-use tracing::info;
+use tracing::{info, warn};
 
 pub type SettingTransaction<T> = (T, Option<SettingResponder<T>>);
 
@@ -96,6 +96,7 @@ where
     /// storage. This only writes values that have changed.
     ///
     /// This method is not cancel-safe.
+    #[inline(never)]
     pub async fn report_update(&mut self, new_value: T) {
         match &mut self.state {
             State::Unknown => {
@@ -167,6 +168,7 @@ where
                 self.state = if value == &new_value {
                     State::Synced { value: new_value }
                 } else {
+                    warn!("reasserting setting");
                     State::ReassertSetting {
                         value: value.clone(),
                     }
@@ -235,6 +237,7 @@ where
     /// Gets the last value of the device. If DrMem is built with
     /// persistent storage, this value will be initialized with the
     /// last value saved to storage.
+    #[inline(never)]
     pub fn get_last(&self) -> Option<&T> {
         match &self.state {
             State::Unknown => None,
@@ -252,6 +255,7 @@ where
     /// Waits for the next setting to arrive.
     ///
     /// This method is cancel-safe.
+    #[inline(never)]
     pub async fn next_setting(&mut self) -> Option<SettingTransaction<T>> {
         loop {
             match &mut self.state {
