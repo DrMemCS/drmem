@@ -10,7 +10,7 @@ use reqwest::{
 };
 use std::{convert::Infallible, sync::Arc};
 use tokio::{sync::mpsc, task::JoinHandle, time::Duration};
-use tracing::{Level, Span, error, instrument};
+use tracing::{Level, Span, error, info, instrument};
 
 mod hue_streamer;
 pub(crate) mod payload;
@@ -122,7 +122,7 @@ impl Instance {
         Ok(())
     }
 
-    #[instrument(level = Level::INFO, name = "control", skip(self, rtype, cmd))]
+    #[instrument(level = Level::INFO, name = "control", skip(self, rtype, cmd), fields(id = id, r#type = rtype))]
     async fn send_command(
         &self,
         id: &str,
@@ -155,12 +155,14 @@ impl Instance {
     ) {
         match dev_set {
             device::DeviceSet::Switch(switch) => {
+                info!("notifying switch: {:?}", &update);
                 if let Some(on) = update.on {
                     switch.state.report_update(on.on).await;
                 }
             }
 
             device::DeviceSet::Bulb(dimmer) => {
+                info!("notifying bulb: {:?}", &update);
                 if let Some(on) = update.on {
                     if !on.on {
                         dimmer.brightness.report_update(0.0).await;
@@ -182,6 +184,8 @@ impl Instance {
 
             device::DeviceSet::ColorBulb(color_bulb)
             | device::DeviceSet::Group(color_bulb) => {
+                info!("notifying color bulb: {:?}", &update);
+
                 // Handle brightness updates
                 if let Some(on) = &update.on {
                     if !on.on {
@@ -240,12 +244,15 @@ impl<R: Reporter> API<R> for Instance {
         }
 
         loop {
+            info!("waiting for next event");
             tokio::select! {
                 Some(update) = self.updates.recv() => {
+                    info!("got update: {:?}", &update);
 
-                    // Look up the device ID in the hardware map. If it doesn't
-                    // exist, ignore the update. If it does, report the new
-                    // state to the appropriate setting(s).
+                    // Look up the device ID in the hardware map. If
+                    // it doesn't exist, ignore the update. If it
+                    // does, report the new state to the appropriate
+                    // setting(s).
 
                     if let Some(dev_set) = devices.map.get_mut(update.id.as_ref()) {
                         Self::report_update(dev_set, update).await;
@@ -253,6 +260,7 @@ impl<R: Reporter> API<R> for Instance {
                 }
 
                 (id, rtype, opt_cmd) = devices.next_setting() => {
+                    info!("new setting: {}, {}, {:?}", &id, &rtype, &opt_cmd);
                     if let Some(cmd) = opt_cmd {
                         self.send_command(&id, rtype, cmd).await;
                     }
