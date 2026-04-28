@@ -273,24 +273,22 @@ where
     #[inline(never)]
     #[instrument(skip(self))]
     pub async fn next_setting(&mut self) -> Option<SettingTransaction<T>> {
-        loop {
+        info!("entered in state {}", self.state_name());
+        let result = loop {
             match &mut self.state {
-                State::Unknown =>
                 // At this point, we have no known state. If a
                 // setting comes in, we're going to assume it's
                 // different from the hardware's state so we
                 // switch to Setting.
-                {
-                    match self.set_stream.next().await {
-                        Some(reply) => {
-                            self.state = State::UnknownTrans {
-                                value: reply.0.clone(),
-                                report: reply.1,
-                            };
-                        }
-                        None => return None,
+                State::Unknown => match self.set_stream.next().await {
+                    Some(reply) => {
+                        self.state = State::UnknownTrans {
+                            value: reply.0.clone(),
+                            report: reply.1,
+                        };
                     }
-                }
+                    None => break None,
+                },
 
                 // This is a transition state between Unknown and
                 // Setting. This was needed to break up the Unknown
@@ -304,12 +302,10 @@ where
                     if let State::UnknownTrans { value, report } =
                         std::mem::replace(
                             &mut self.state,
-                            State::Setting {
-                                value: value.clone(),
-                            },
+                            State::Setting { value },
                         )
                     {
-                        return Some((value, Some(report)));
+                        break Some((value, Some(report)));
                     } else {
                         unreachable!()
                     }
@@ -332,7 +328,7 @@ where
                     self.state = State::Setting {
                         value: value.clone(),
                     };
-                    return Some(result);
+                    break Some(result);
                 }
 
                 State::Setting { value } => {
@@ -348,7 +344,7 @@ where
                                     State::UnreportedSetting { value: reply.0 };
                             }
                         }
-                        None => return None,
+                        None => break None,
                     }
                 }
 
@@ -363,7 +359,7 @@ where
                             State::SyncedTrans { value: reply.0 }
                         };
                     }
-                    None => return None,
+                    None => break None,
                 },
 
                 State::SettingTrans { value: (val, _) } => {
@@ -377,7 +373,7 @@ where
                             State::Setting { value: val.clone() },
                         )
                     {
-                        return Some(reply);
+                        break Some(reply);
                     } else {
                         unreachable!()
                     }
@@ -432,7 +428,7 @@ where
                                         *setting = r.0.clone();
                                         r.1.ok(r.0);
                                     }
-                                    None => return None
+                                    None => break None
                                 }
                             }
                             _ = tokio::time::sleep(delay) => {
@@ -462,13 +458,16 @@ where
                                 *setting = reply.0.clone();
                                 reply.1.ok(reply.0);
                             }
-                            None => return None,
+                            None => break None,
                         }
                     }
                 }
             }
             info!("looping for another setting");
         };
+
+        info!("exited in state {}", self.state_name());
+        result
     }
 }
 
