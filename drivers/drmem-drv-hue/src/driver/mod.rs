@@ -122,7 +122,7 @@ impl Instance {
         Ok(())
     }
 
-    #[instrument(level = Level::INFO, name = "control", skip(self, rtype, cmd), fields(id = id, r#type = rtype))]
+    #[instrument(level = Level::INFO, name = "control", skip(self), fields(id = id, r#type = rtype))]
     async fn send_command(
         &self,
         id: &str,
@@ -131,20 +131,17 @@ impl Instance {
     ) {
         let url =
             format!("https://{}/clip/v2/resource/{}/{}", self.host, rtype, id);
+        let body_str = serde_json::to_string(&cmd).unwrap();
 
-        match self.client.put(&url).json(&cmd).send().await {
+        info!("sending command");
+
+        match self.client.put(&url).body(body_str).send().await {
             Ok(resp) => {
                 if let Err(e) = resp.error_for_status() {
-                    tracing::error!(
-                        "Hue bridge rejected setting for {}: {}",
-                        id,
-                        e
-                    );
+                    error!("Hue bridge rejected setting for {}: {}", id, e);
                 }
             }
-            Err(e) => {
-                tracing::error!("Failed to communicate with Hue bridge: {}", e);
-            }
+            Err(e) => error!("Failed to communicate with Hue bridge: {}", e),
         }
     }
 
