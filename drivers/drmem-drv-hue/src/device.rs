@@ -5,7 +5,11 @@ use drmem_api::{
     driver::{Registrator, Reporter, ResettableState, classes},
 };
 use palette::{IntoColor, LinSrgb, Yxy};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    task::{Context, Poll},
+};
 use tokio::time::Duration;
 
 // Each type of device has a specific set of channels. In order to
@@ -76,151 +80,201 @@ impl<R: Reporter> Set<R> {
         ))
     }
 
-    pub async fn next_setting(
-        &mut self,
-    ) -> (Arc<str>, &'static str, Option<payload::LightCommand>) {
-        use std::future::poll_fn;
-        use std::task::Poll;
+    // Helper function to process the futures in a `Dimmer` type.
 
-        poll_fn(move |cx| {
+    fn process_bulb(
+        id: Arc<str>,
+        rtype: &'static str,
+        dimmer: &mut classes::Dimmer<R>,
+        cx: &mut Context,
+    ) -> Poll<(Arc<str>, &'static str, Option<payload::LightCommand>)> {
+        // Handle any incoming brightness settings.
+
+        if let Poll::Ready(Some((val, reply))) =
+            std::pin::pin!(dimmer.brightness.next_setting()).poll(cx)
+        {
+            let val = val.clamp(0.0, 100.0);
+
+            if let Some(r) = reply {
+                r.ok(val);
+            }
+
+            let cmd = if val == 0.0 {
+                payload::LightCommand {
+                    on: Some(payload::On { on: false }),
+                    dimming: None,
+                    color: None,
+                }
+            } else {
+                payload::LightCommand {
+                    on: Some(payload::On { on: true }),
+                    dimming: Some(payload::Dimming {
+                        brightness: val as f32,
+                    }),
+                    color: None,
+                }
+            };
+            return Poll::Ready((id, rtype, Some(cmd)));
+        }
+
+        // Hue devices don't have an indicator but we still have to
+        // drain the channel. This sends a reply to the client, but
+        // doesn't return a command to act upon.
+
+        if let Poll::Ready(Some((val, reply))) =
+            std::pin::pin!(dimmer.indicator.next_setting()).poll(cx)
+        {
+            if let Some(r) = reply {
+                r.ok(val);
+            }
+            return Poll::Ready((id, rtype, None));
+        }
+
+        Poll::Pending
+    }
+
+    // Helper function to process the futures in a `ColorBulb` type.
+
+    fn process_colorbulb(
+        id: Arc<str>,
+        rtype: &'static str,
+        cb: &mut classes::ColorBulb<R>,
+        cx: &mut Context,
+    ) -> Poll<(Arc<str>, &'static str, Option<payload::LightCommand>)> {
+        if let Poll::Ready(Some((val, reply))) =
+            std::pin::pin!(cb.brightness.next_setting()).poll(cx)
+        {
+            let val = val.clamp(0.0, 100.0);
+
+            if let Some(r) = reply {
+                r.ok(val);
+            }
+
+            let cmd = if val == 0.0 {
+                payload::LightCommand {
+                    on: Some(payload::On { on: false }),
+                    dimming: None,
+                    color: None,
+                }
+            } else {
+                payload::LightCommand {
+                    on: Some(payload::On { on: true }),
+                    dimming: Some(payload::Dimming {
+                        brightness: val as f32,
+                    }),
+                    color: None,
+                }
+            };
+
+            return Poll::Ready((id, rtype, Some(cmd)));
+        }
+
+        if let Poll::Ready(Some((val, reply))) =
+            std::pin::pin!(cb.color.next_setting()).poll(cx)
+        {
+            if let Some(r) = reply {
+                r.ok(val.clone());
+            }
+
+            let rgb = LinSrgb::new(
+                val.red as f32 / 255.0,
+                val.green as f32 / 255.0,
+                val.blue as f32 / 255.0,
+            );
+            let yxy: Yxy = rgb.into_color();
+
+            return Poll::Ready((
+                id,
+                rtype,
+                Some(payload::LightCommand {
+                    on: Some(payload::On { on: true }),
+                    dimming: None,
+                    color: Some(payload::Color {
+                        xy: Some(payload::XyCoordinates { x: yxy.x, y: yxy.y }),
+                    }),
+                }),
+            ));
+        }
+        Poll::Pending
+    }
+
+    // Helper function to process the futures in a `Switch` type.
+
+    fn process_switch(
+        id: Arc<str>,
+        rtype: &'static str,
+        switch: &mut classes::Switch<R>,
+        cx: &mut Context,
+    ) -> Poll<(Arc<str>, &'static str, Option<payload::LightCommand>)> {
+        // If the `state` device has a setting, return it.
+
+        if let Poll::Ready(Some((val, reply))) =
+            std::pin::pin!(switch.state.next_setting()).poll(cx)
+        {
+            if let Some(r) = reply {
+                r.ok(val);
+            }
+            return Poll::Ready((
+                id,
+                rtype,
+                Some(payload::LightCommand {
+                    on: Some(payload::On { on: val }),
+                    dimming: None,
+                    color: None,
+                }),
+            ));
+        }
+
+        // If the `indicator` device has a setting, return it.
+
+        if let Poll::Ready(Some((val, reply))) =
+            std::pin::pin!(switch.indicator.next_setting()).poll(cx)
+        {
+            if let Some(r) = reply {
+                r.ok(val);
+            }
+            return Poll::Ready((id, rtype, None));
+        }
+
+        // No settings. Return `Pending`.
+
+        Poll::Pending
+    }
+
+    pub fn next_setting(
+        &mut self,
+    ) -> impl Future<Output = (Arc<str>, &'static str, Option<payload::LightCommand>)>
+    {
+        use std::future::poll_fn;
+
+        poll_fn(move |mut cx| {
             for (id, dev) in self.map.iter_mut() {
                 let rtype = match dev {
                     DeviceSet::Group(_) => "grouped_light",
                     _ => "light",
                 };
+                let id = id.clone();
 
-                match dev {
+                let res = match dev {
                     DeviceSet::Switch(switch) => {
-                        if let Poll::Ready(Some((val, reply))) =
-                            std::pin::pin!(switch.state.next_setting()).poll(cx)
-                        {
-                            if let Some(r) = reply {
-                                r.ok(val);
-                            }
-                            return Poll::Ready((
-                                id.clone(),
-                                rtype,
-                                Some(payload::LightCommand {
-                                    on: Some(payload::On { on: val }),
-                                    dimming: None,
-                                    color: None,
-                                }),
-                            ));
-                        }
-                        if let Poll::Ready(Some((val, reply))) =
-                            std::pin::pin!(switch.indicator.next_setting())
-                                .poll(cx)
-                        {
-                            if let Some(r) = reply {
-                                r.ok(val);
-                            }
-                            return Poll::Ready((id.clone(), rtype, None));
-                        }
+                        Set::process_switch(id, rtype, switch, &mut cx)
                     }
 
                     DeviceSet::Bulb(dimmer) => {
-                        if let Poll::Ready(Some((val, reply))) =
-                            std::pin::pin!(dimmer.brightness.next_setting())
-                                .poll(cx)
-                        {
-                            let val = val.clamp(0.0, 100.0);
-
-                            if let Some(r) = reply {
-                                r.ok(val);
-                            }
-                            let cmd = if val == 0.0 {
-                                payload::LightCommand {
-                                    on: Some(payload::On { on: false }),
-                                    dimming: None,
-                                    color: None,
-                                }
-                            } else {
-                                payload::LightCommand {
-                                    on: Some(payload::On { on: true }),
-                                    dimming: Some(payload::Dimming {
-                                        brightness: val as f32,
-                                    }),
-                                    color: None,
-                                }
-                            };
-                            return Poll::Ready((id.clone(), rtype, Some(cmd)));
-                        }
-                        if let Poll::Ready(Some((val, reply))) =
-                            std::pin::pin!(dimmer.indicator.next_setting())
-                                .poll(cx)
-                        {
-                            if let Some(r) = reply {
-                                r.ok(val);
-                            }
-                            return Poll::Ready((id.clone(), rtype, None));
-                        }
+                        Set::process_bulb(id, rtype, dimmer, &mut cx)
                     }
 
                     DeviceSet::ColorBulb(cb) | DeviceSet::Group(cb) => {
-                        if let Poll::Ready(Some((val, reply))) =
-                            std::pin::pin!(cb.brightness.next_setting())
-                                .poll(cx)
-                        {
-                            let val = val.clamp(0.0, 100.0);
-
-                            if let Some(r) = reply {
-                                r.ok(val);
-                            }
-
-                            let cmd = if val == 0.0 {
-                                payload::LightCommand {
-                                    on: Some(payload::On { on: false }),
-                                    dimming: None,
-                                    color: None,
-                                }
-                            } else {
-                                payload::LightCommand {
-                                    on: Some(payload::On { on: true }),
-                                    dimming: Some(payload::Dimming {
-                                        brightness: val as f32,
-                                    }),
-                                    color: None,
-                                }
-                            };
-
-                            return Poll::Ready((id.clone(), rtype, Some(cmd)));
-                        }
-
-                        if let Poll::Ready(Some((val, reply))) =
-                            std::pin::pin!(cb.color.next_setting()).poll(cx)
-                        {
-                            if let Some(r) = reply {
-                                r.ok(val.clone());
-                            }
-
-                            let rgb = LinSrgb::new(
-                                val.red as f32 / 255.0,
-                                val.green as f32 / 255.0,
-                                val.blue as f32 / 255.0,
-                            );
-                            let yxy: Yxy = rgb.into_color();
-
-                            return Poll::Ready((
-                                id.clone(),
-                                rtype,
-                                Some(payload::LightCommand {
-                                    on: Some(payload::On { on: true }),
-                                    dimming: None,
-                                    color: Some(payload::Color {
-                                        xy: Some(payload::XyCoordinates {
-                                            x: yxy.x,
-                                            y: yxy.y,
-                                        }),
-                                    }),
-                                }),
-                            ));
-                        }
+                        Set::process_colorbulb(id, rtype, cb, &mut cx)
                     }
+                };
+
+                if let Poll::Ready(_) = res {
+                    return res;
                 }
             }
             Poll::Pending
         })
-        .await
     }
 }
 

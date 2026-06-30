@@ -23,14 +23,13 @@ use crate::{
     driver::{rw_device, Reporter, RxDeviceSetting, SettingResponder},
 };
 use tokio_stream::StreamExt;
-use tracing::info;
+use tracing::{info, instrument, warn};
 
 pub type SettingTransaction<T> = (T, Option<SettingResponder<T>>);
 
 // Describes the states that the device goes through as it receives
 // settings and polled readings.
 
-//#[derive(PartialEq)]
 enum State<T: device::ReadWriteCompat> {
     Unknown,
     UnknownTrans {
@@ -71,7 +70,7 @@ pub struct OverridableDevice<T: device::ReadWriteCompat, R: Reporter> {
 
 impl<T, R> OverridableDevice<T, R>
 where
-    T: device::ReadWriteCompat,
+    T: device::ReadWriteCompat + std::fmt::Debug,
     R: Reporter,
 {
     pub fn new(
@@ -92,11 +91,28 @@ where
         }
     }
 
+    fn state_name(&self) -> &'static str {
+        match &self.state {
+            State::Unknown => "Unknown",
+            State::UnknownTrans { .. } => "UnknownTrans",
+            State::Synced { .. } => "Synced",
+            State::SyncedTrans { .. } => "SyncedTrans",
+            State::Setting { .. } => "Setting",
+            State::SettingTrans { .. } => "SettingTrans",
+            State::ReassertSetting { .. } => "ReassertSetting",
+            State::UnreportedSetting { .. } => "UnreportedSetting",
+            State::Overridden { .. } => "Overridden",
+        }
+    }
+
     /// Saves a new value, returned by the device, to the backend
     /// storage. This only writes values that have changed.
     ///
     /// This method is not cancel-safe.
+    #[inline(never)]
+    #[instrument(skip(self))]
     pub async fn report_update(&mut self, new_value: T) {
+        info!("entered in state {}", self.state_name());
         match &mut self.state {
             State::Unknown => {
                 self.reporter.report_value(new_value.clone().into()).await;
@@ -114,7 +130,9 @@ where
             // setting.
             //
             // This situation will probably never happen.
-            State::UnknownTrans { .. } => {}
+            State::UnknownTrans { .. } => {
+                warn!("in UnknownTrans state ... ignoring reading");
+            }
 
             State::Overridden {
                 r#override: value,
@@ -132,7 +150,6 @@ where
                     self.state = State::Synced {
                         value: setting.clone(),
                     };
-                    info!("value matches setting ... exiting override mode")
                 } else if value != &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Overridden {
@@ -140,7 +157,6 @@ where
                         setting: value.clone(),
                         r#override: new_value,
                     };
-                    info!("override timer reset")
                 }
             }
 
@@ -155,7 +171,6 @@ where
                         setting: value.clone(),
                         r#override: new_value,
                     };
-                    info!("device in override mode")
                 }
             }
 
@@ -167,6 +182,7 @@ where
                 self.state = if value == &new_value {
                     State::Synced { value: new_value }
                 } else {
+                    warn!("reasserting setting");
                     State::ReassertSetting {
                         value: value.clone(),
                     }
@@ -226,15 +242,17 @@ where
                         tmo: tokio::time::Instant::now(),
                         setting: value.clone(),
                         r#override: new_value,
-                    }
+                    };
                 }
             }
         }
+        info!("exited in state {}", self.state_name());
     }
 
     /// Gets the last value of the device. If DrMem is built with
     /// persistent storage, this value will be initialized with the
     /// last value saved to storage.
+    #[inline(never)]
     pub fn get_last(&self) -> Option<&T> {
         match &self.state {
             State::Unknown => None,
@@ -252,25 +270,25 @@ where
     /// Waits for the next setting to arrive.
     ///
     /// This method is cancel-safe.
+    #[inline(never)]
+    #[instrument(skip(self))]
     pub async fn next_setting(&mut self) -> Option<SettingTransaction<T>> {
-        loop {
+        info!("entered in state {}", self.state_name());
+        let result = loop {
             match &mut self.state {
-                State::Unknown =>
                 // At this point, we have no known state. If a
                 // setting comes in, we're going to assume it's
                 // different from the hardware's state so we
                 // switch to Setting.
-                {
-                    match self.set_stream.next().await {
-                        Some(reply) => {
-                            self.state = State::UnknownTrans {
-                                value: reply.0.clone(),
-                                report: reply.1,
-                            };
-                        }
-                        None => return None,
+                State::Unknown => match self.set_stream.next().await {
+                    Some(reply) => {
+                        self.state = State::UnknownTrans {
+                            value: reply.0.clone(),
+                            report: reply.1,
+                        };
                     }
-                }
+                    None => break None,
+                },
 
                 // This is a transition state between Unknown and
                 // Setting. This was needed to break up the Unknown
@@ -284,37 +302,33 @@ where
                     if let State::UnknownTrans { value, report } =
                         std::mem::replace(
                             &mut self.state,
-                            State::Setting {
-                                value: value.clone(),
-                            },
+                            State::Setting { value },
                         )
                     {
-                        return Some((value, Some(report)));
+                        break Some((value, Some(report)));
                     } else {
                         unreachable!()
                     }
                 }
 
-                State::UnreportedSetting { value } =>
                 // If we have an unreported setting, re-report it and
                 // switch to the "reported" setting state.
-                {
+                State::UnreportedSetting { value } => {
                     self.reporter.report_value(value.clone().into()).await;
                     self.state = State::Setting {
                         value: value.clone(),
                     };
                 }
 
-                State::ReassertSetting { value } =>
                 // We need to reassert the setting. Immediately return
                 // it and switch to the "reported" setting state.
-                {
+                State::ReassertSetting { value } => {
                     let result = (value.clone(), None);
 
                     self.state = State::Setting {
                         value: value.clone(),
                     };
-                    return Some(result);
+                    break Some(result);
                 }
 
                 State::Setting { value } => {
@@ -330,7 +344,7 @@ where
                                     State::UnreportedSetting { value: reply.0 };
                             }
                         }
-                        None => return None,
+                        None => break None,
                     }
                 }
 
@@ -345,7 +359,7 @@ where
                             State::SyncedTrans { value: reply.0 }
                         };
                     }
-                    None => return None,
+                    None => break None,
                 },
 
                 State::SettingTrans { value: (val, _) } => {
@@ -359,7 +373,7 @@ where
                             State::Setting { value: val.clone() },
                         )
                     {
-                        return Some(reply);
+                        break Some(reply);
                     } else {
                         unreachable!()
                     }
@@ -414,7 +428,7 @@ where
                                         *setting = r.0.clone();
                                         r.1.ok(r.0);
                                     }
-                                    None => return None
+                                    None => break None
                                 }
                             }
                             _ = tokio::time::sleep(delay) => {
@@ -428,7 +442,6 @@ where
                                 // hardware can be adjusted.
 
                                 self.state = if setting != r#override {
-                                    info!("timer expired ... restoring setting");
                                     State::SettingTrans {
                                         value: (setting.clone(), None)
                                     }
@@ -445,12 +458,16 @@ where
                                 *setting = reply.0.clone();
                                 reply.1.ok(reply.0);
                             }
-                            None => return None,
+                            None => break None,
                         }
                     }
                 }
             }
-        }
+            info!("looping for another setting");
+        };
+
+        info!("exited in state {}", self.state_name());
+        result
     }
 }
 
@@ -488,7 +505,7 @@ mod tests {
 
     // Helper function that creates a `OverridableDevice`.
 
-    fn mk_device<T: device::ReadWriteCompat>(
+    fn mk_device<T: device::ReadWriteCompat + std::fmt::Debug>(
         init: Option<T>,
         tmo: Option<Duration>,
     ) -> (

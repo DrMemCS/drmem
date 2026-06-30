@@ -18,7 +18,8 @@ tracing-subscriber = { version = "0.3", default-features = false }
 serde = { version = "1", default-features = false, features = ["rc"] }
 serde_json = { version = "1", default-features = false }
 palette = { version = "0.7", default-features = false }
-reqwest = { version = "0.13", default-features = false }
+reqwest = { version = "0.11", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 
 # Profiles used by all binaries and packages.
 
@@ -39,14 +40,14 @@ debug = false
 incremental = false
 
 [profile.release.build-override]
-opt-level = 3
+opt-level = 'z'
 incremental = false
 
 [profile.release]
-opt-level = 3
+opt-level = 'z'
 debug = false
 lto = "thin"
-codegen-units = 1
+codegen-units = 20
 debug-assertions = false
 strip = "symbols"
 incremental = false

@@ -12,7 +12,7 @@ pub struct HueEvent {
     pub data: Vec<ResourceData>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct LightCommand {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<On>,
