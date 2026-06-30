@@ -26,6 +26,6 @@
 - Use `jj` for version control
 
 ## Commands
-- Build: `cargo build`
-- Check: `cargo check`
-- Test: `cargo test`
+- Build: `cargo build --features simple-backend,all-drivers,graphql`
+- Check: `cargo check --features simple-backend,all-drivers,graphql`
+- Test: `cargo test --features simple-backend,all-drivers,graphql`
