@@ -53,11 +53,8 @@ impl<R: Reporter> HueDevice<R> for SwitchDevice<R> {
 
                 // Check indicator device (drain but don't send command)
                 opt_txn = self.inner.indicator.next_setting() => {
-                    if let Some((val, reply)) = opt_txn {
-                        if let Some(r) = reply {
-                            r.ok(val);
-                        }
-                        return None;
+                    if let Some((val, Some(r))) = opt_txn {
+                        r.ok(val);
                     }
                 }
             }
@@ -121,11 +118,8 @@ impl<R: Reporter> HueDevice<R> for DimmerDevice<R> {
 
                 // Check indicator device (drain but don't send command)
                 opt_txn = self.inner.indicator.next_setting() => {
-                    if let Some((val, reply)) = opt_txn {
-                        if let Some(r) = reply {
-                            r.ok(val);
-                        }
-                        return None;
+                    if let Some((val, Some(r))) = opt_txn {
+                        r.ok(val);
                     }
                 }
             }
