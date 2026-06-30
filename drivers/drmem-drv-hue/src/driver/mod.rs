@@ -168,15 +168,25 @@ impl Instance {
                     } else if let Some(dim) = update.dimming {
                         dimmer
                             .brightness
-                            .report_update(dim.brightness as f64)
+                            .report_update((dim.brightness as f64).round())
                             .await;
                     } else {
-                        dimmer.brightness.report_update(100.0).await;
+                        dimmer
+                            .brightness
+                            .report_update(
+                                (dimmer
+                                    .brightness
+                                    .get_last()
+                                    .as_deref()
+                                    .unwrap_or(&100.0))
+                                .round(),
+                            )
+                            .await;
                     }
                 } else if let Some(dim) = update.dimming {
                     dimmer
                         .brightness
-                        .report_update(dim.brightness as f64)
+                        .report_update((dim.brightness as f64).round())
                         .await;
                 }
             }
@@ -192,13 +202,25 @@ impl Instance {
                     } else if let Some(dim) = &update.dimming {
                         color_bulb
                             .brightness
-                            .report_update(dim.brightness as f64)
+                            .report_update((dim.brightness as f64).round())
+                            .await;
+                    } else {
+                        color_bulb
+                            .brightness
+                            .report_update(
+                                (color_bulb
+                                    .brightness
+                                    .get_last()
+                                    .as_deref()
+                                    .unwrap_or(&100.0))
+                                .round(),
+                            )
                             .await;
                     }
                 } else if let Some(dim) = &update.dimming {
                     color_bulb
                         .brightness
-                        .report_update(dim.brightness as f64)
+                        .report_update((dim.brightness as f64).round())
                         .await;
                 }
 

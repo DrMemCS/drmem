@@ -93,7 +93,7 @@ impl<R: Reporter> Set<R> {
         if let Poll::Ready(Some((val, reply))) =
             std::pin::pin!(dimmer.brightness.next_setting()).poll(cx)
         {
-            let val = val.clamp(0.0, 100.0);
+            let val = val.clamp(0.0, 100.0).round();
 
             if let Some(r) = reply {
                 r.ok(val);
@@ -144,7 +144,7 @@ impl<R: Reporter> Set<R> {
         if let Poll::Ready(Some((val, reply))) =
             std::pin::pin!(cb.brightness.next_setting()).poll(cx)
         {
-            let val = val.clamp(0.0, 100.0);
+            let val = val.clamp(0.0, 100.0).round();
 
             if let Some(r) = reply {
                 r.ok(val);
