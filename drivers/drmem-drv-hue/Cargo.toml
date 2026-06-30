@@ -17,7 +17,7 @@ tracing.workspace = true
 
 reqwest.workspace = true
 reqwest.default-features = false
-reqwest.features = ["http2", "stream", "rustls-no-provider", "json"]
+reqwest.features = ["stream", "rustls-tls-webpki-roots", "json"]
 
 rustls.version = "0.23"
 rustls.default-features = false
