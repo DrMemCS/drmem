@@ -3,23 +3,25 @@ use drmem_api::{
     Error, Result,
     driver::{API, Reporter},
 };
-use palette::{IntoColor, LinSrgb, LinSrgba, Yxy};
 use reqwest::{
     Client,
     header::{HeaderMap, HeaderValue},
 };
-use std::{convert::Infallible, sync::Arc};
-use tokio::{sync::mpsc, task::JoinHandle, time::Duration};
+use std::{convert::Infallible, future::pending, sync::Arc};
+use tokio::{sync::Mutex, time::Duration};
 use tracing::{Level, Span, error, info, instrument};
 
-mod hue_streamer;
+pub(crate) mod color;
+pub(crate) mod constants;
+pub(crate) mod device_traits;
 pub(crate) mod payload;
 
+use constants::{GROUPED_LIGHT_RESOURCE, LIGHT_RESOURCE};
+
 pub struct Instance {
-    client: Client,
+    client: Arc<Mutex<Client>>,
     host: Arc<str>,
-    updates: mpsc::Receiver<payload::ResourceData>,
-    update_task: JoinHandle<Result<Infallible>>,
+    poll_interval: Duration,
 }
 
 impl Instance {
@@ -75,27 +77,23 @@ impl Instance {
                 ))
             })?;
 
-        let (tx, rx) = mpsc::channel(100);
-        let update_task =
-            hue_streamer::start(cfg.host.clone(), client.clone(), tx);
-
         Ok(Instance {
             host: cfg.host.clone(),
-            client,
-            updates: rx,
-            update_task,
+            client: Arc::new(Mutex::new(client)),
+            poll_interval: Duration::from_secs(cfg.poll_interval_secs),
         })
     }
 
-    async fn sync_initial_state<R: Reporter>(
+    // Poll all devices and update their states from the bridge
+    async fn poll_all_devices<R: Reporter>(
         &self,
         devices: &mut device::Set<R>,
     ) -> Result<()> {
-        for rtype in &["light", "grouped_light"] {
-            let url =
-                format!("https://{}/clip/v2/resource/{}", self.host, rtype);
+        for rtype in &[LIGHT_RESOURCE, GROUPED_LIGHT_RESOURCE] {
+            let url = constants::resource_url(&self.host, rtype);
 
-            let resp = self.client
+            let client = self.client.lock().await;
+            let resp = client
                 .get(url)
                 .send()
                 .await
@@ -117,131 +115,11 @@ impl Instance {
 
             for update in payload.data {
                 if let Some(dev_set) = devices.map.get_mut(update.id.as_ref()) {
-                    Self::report_update(dev_set, update).await;
+                    dev_set.apply_update(&update).await;
                 }
             }
         }
         Ok(())
-    }
-
-    #[instrument(level = Level::INFO, name = "control", skip(self), fields(id = id, r#type = rtype))]
-    async fn send_command(
-        &self,
-        id: &str,
-        rtype: &str,
-        cmd: payload::LightCommand,
-    ) {
-        let url =
-            format!("https://{}/clip/v2/resource/{}/{}", self.host, rtype, id);
-        let body_str = serde_json::to_string(&cmd).unwrap();
-
-        info!("sending command");
-
-        match self.client.put(&url).body(body_str).send().await {
-            Ok(resp) => {
-                if let Err(e) = resp.error_for_status() {
-                    error!("Hue bridge rejected setting for {}: {}", id, e);
-                }
-            }
-            Err(e) => error!("Failed to communicate with Hue bridge: {}", e),
-        }
-    }
-
-    #[instrument(level = Level::INFO, name = "report", skip(dev_set, update), fields(id = update.id.as_ref()))]
-    async fn report_update<R: Reporter>(
-        dev_set: &mut device::DeviceSet<R>,
-        update: payload::ResourceData,
-    ) {
-        match dev_set {
-            device::DeviceSet::Switch(switch) => {
-                info!("notifying switch: {:?}", &update);
-                if let Some(on) = update.on {
-                    switch.state.report_update(on.on).await;
-                }
-            }
-
-            device::DeviceSet::Bulb(dimmer) => {
-                info!("notifying bulb: {:?}", &update);
-                if let Some(on) = update.on {
-                    if !on.on {
-                        dimmer.brightness.report_update(0.0).await;
-                    } else if let Some(dim) = update.dimming {
-                        dimmer
-                            .brightness
-                            .report_update((dim.brightness as f64).round())
-                            .await;
-                    } else {
-                        dimmer
-                            .brightness
-                            .report_update(
-                                (dimmer
-                                    .brightness
-                                    .get_last()
-                                    .as_deref()
-                                    .unwrap_or(&100.0))
-                                .round(),
-                            )
-                            .await;
-                    }
-                } else if let Some(dim) = update.dimming {
-                    dimmer
-                        .brightness
-                        .report_update((dim.brightness as f64).round())
-                        .await;
-                }
-            }
-
-            device::DeviceSet::ColorBulb(color_bulb)
-            | device::DeviceSet::Group(color_bulb) => {
-                info!("notifying color bulb: {:?}", &update);
-
-                // Handle brightness updates
-                if let Some(on) = &update.on {
-                    if !on.on {
-                        color_bulb.brightness.report_update(0.0).await;
-                    } else if let Some(dim) = &update.dimming {
-                        color_bulb
-                            .brightness
-                            .report_update((dim.brightness as f64).round())
-                            .await;
-                    } else {
-                        color_bulb
-                            .brightness
-                            .report_update(
-                                (color_bulb
-                                    .brightness
-                                    .get_last()
-                                    .as_deref()
-                                    .unwrap_or(&100.0))
-                                .round(),
-                            )
-                            .await;
-                    }
-                } else if let Some(dim) = &update.dimming {
-                    color_bulb
-                        .brightness
-                        .report_update((dim.brightness as f64).round())
-                        .await;
-                }
-
-                // Handle color updates using palette's CIE XY conversion
-
-                if let Some(color) =
-                    &update.color.as_ref().and_then(|c| c.xy.as_ref())
-                {
-                    let yxy = Yxy::new(color.x, color.y, 1.0);
-                    let rgb: LinSrgb = yxy.into_color();
-
-                    let rgba = LinSrgba::new(
-                        (rgb.red.clamp(0.0, 1.0) * 255.0) as u8,
-                        (rgb.green.clamp(0.0, 1.0) * 255.0) as u8,
-                        (rgb.blue.clamp(0.0, 1.0) * 255.0) as u8,
-                        255,
-                    );
-                    color_bulb.color.report_update(rgba).await;
-                }
-            }
-        }
     }
 }
 
@@ -254,43 +132,161 @@ impl<R: Reporter> API<R> for Instance {
         Self::new::<R>(cfg).map(Box::new)
     }
 
-    // Main run loop for the Hue driver.
+    // Main run loop for the Hue driver - spawns per-device loops
 
     async fn run<'a>(
         &'a mut self,
         devices: &'a mut Self::HardwareType,
     ) -> Infallible {
-        if let Err(e) = self.sync_initial_state(devices).await {
-            panic!("failed to sync initial hue state: {e}");
+        // Initial state sync
+        if let Err(e) = self.poll_all_devices(devices).await {
+            error!("failed to sync initial hue state: {}", e);
+            // Continue anyway - devices will sync on first poll
         }
 
+        // Spawn a task for each device that manages its own timeouts
+        let mut tasks = Vec::new();
+
+        // Take ownership of devices map and iterate
+        let devices_map = std::mem::take(&mut devices.map);
+
+        for (id, mut dev) in devices_map {
+            let client = Arc::clone(&self.client);
+            let host = self.host.clone();
+            let poll_interval = self.poll_interval;
+            let rtype = dev.resource_type();
+
+            let task = tokio::spawn(async move {
+                Self::device_loop(
+                    client,
+                    host,
+                    poll_interval,
+                    id,
+                    rtype,
+                    &mut dev,
+                )
+                .await
+            });
+
+            tasks.push(task);
+        }
+
+        // Wait for all device loops (they run forever)
+        for task in tasks {
+            let _ = task.await;
+        }
+
+        // This should never return, but if all tasks die, return Infallible
+
+        pending::<()>().await;
+        unreachable!()
+    }
+}
+
+impl Instance {
+    // Per-device loop that manages its own timeouts
+    async fn device_loop<R: Reporter>(
+        client: Arc<Mutex<Client>>,
+        host: Arc<str>,
+        poll_interval: Duration,
+        id: Arc<str>,
+        rtype: &'static str,
+        dev: &mut device_traits::DeviceWrapper<R>,
+    ) {
+        let mut poll_timer = tokio::time::interval(poll_interval);
+        poll_timer.tick().await; // Consume the first immediate tick
+
         loop {
-            info!("waiting for next event");
             tokio::select! {
-                Some(update) = self.updates.recv() => {
-                    info!("got update: {:?}", &update);
-
-                    // Look up the device ID in the hardware map. If
-                    // it doesn't exist, ignore the update. If it
-                    // does, report the new state to the appropriate
-                    // setting(s).
-
-                    if let Some(dev_set) = devices.map.get_mut(update.id.as_ref()) {
-                        Self::report_update(dev_set, update).await;
-                    }
+                _ = poll_timer.tick() => {
+                    info!("periodic poll for device {}", id);
+                    Self::poll_device_direct(&client, &host, &id, rtype, dev).await;
                 }
 
-                (id, rtype, opt_cmd) = devices.next_setting() => {
-                    info!("new setting: {}, {}, {:?}", &id, &rtype, &opt_cmd);
+                opt_cmd = dev.next_setting() => {
+                    info!("new setting for device {}: {:?}", id, opt_cmd);
                     if let Some(cmd) = opt_cmd {
-                        self.send_command(&id, rtype, cmd).await;
-                    }
-                }
+                        Self::send_command_direct(&client, &host, &id, rtype, cmd).await;
 
-                Err(e) = &mut self.update_task => {
-                    panic!("Hue stream task failed -- {}", e)
+                        // Immediately poll this device to get its new state
+                        info!("polling device {} after command", id);
+                        Self::poll_device_direct(&client, &host, &id, rtype, dev).await;
+                    }
                 }
             }
         }
+    }
+
+    // Direct device poll (doesn't need the devices map)
+    async fn poll_device_direct<R: Reporter>(
+        client: &Arc<Mutex<Client>>,
+        host: &str,
+        id: &str,
+        rtype: &str,
+        dev: &mut device_traits::DeviceWrapper<R>,
+    ) {
+        let url = constants::device_url(host, rtype, id);
+
+        let client_guard = client.lock().await;
+        match client_guard.get(&url).send().await {
+            Ok(resp) => match resp.error_for_status() {
+                Ok(resp) => match resp.text().await {
+                    Ok(body) => {
+                        match serde_json::from_str::<payload::HueResponse>(
+                            &body,
+                        ) {
+                            Ok(payload) => {
+                                for update in payload.data {
+                                    Self::report_update(dev, &update).await;
+                                }
+                            }
+                            Err(e) => error!(
+                                "Failed to parse poll response for {}: {}",
+                                id, e
+                            ),
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to read poll response for {}: {}", id, e)
+                    }
+                },
+                Err(e) => error!("Hue bridge error polling {}: {}", id, e),
+            },
+            Err(e) => error!("Failed to poll device {}: {}", id, e),
+        }
+    }
+
+    // Direct command send (doesn't need the devices map)
+    #[instrument(level = Level::INFO, name = "control", skip(client), fields(id = id, r#type = rtype))]
+    async fn send_command_direct(
+        client: &Arc<Mutex<Client>>,
+        host: &str,
+        id: &str,
+        rtype: &str,
+        cmd: payload::LightCommand,
+    ) {
+        let url = constants::device_url(host, rtype, id);
+        let body_str = serde_json::to_string(&cmd).unwrap();
+
+        info!("sending command");
+
+        let client_guard = client.lock().await;
+        match client_guard.put(&url).body(body_str).send().await {
+            Ok(resp) => {
+                if let Err(e) = resp.error_for_status() {
+                    error!("Hue bridge rejected setting for {}: {}", id, e);
+                }
+            }
+            Err(e) => error!("Failed to communicate with Hue bridge: {}", e),
+        }
+    }
+
+    #[instrument(level = Level::INFO, name = "report", skip(dev_wrapper, update), fields(id = update.id.as_ref()))]
+    async fn report_update<R: Reporter>(
+        dev_wrapper: &mut device_traits::DeviceWrapper<R>,
+        update: &payload::ResourceData,
+    ) {
+        info!("applying update: {:?}", &update);
+        dev_wrapper.apply_update(update).await;
     }
 }

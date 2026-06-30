@@ -24,6 +24,7 @@
 - Do not edit generated files directly
 - Run `make check` before committing
 - Use `jj` for version control
+- Never use `unsafe` code
 
 ## Commands
 - Build: `cargo build --features simple-backend,all-drivers,graphql`

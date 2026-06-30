@@ -17,15 +17,11 @@ tracing.workspace = true
 
 reqwest.workspace = true
 reqwest.default-features = false
-reqwest.features = ["stream", "rustls-tls-webpki-roots", "json"]
+reqwest.features = ["rustls-tls-webpki-roots", "json"]
 
 rustls.version = "0.23"
 rustls.default-features = false
 rustls.features = ["std", "ring"]
-
-futures.workspace = true
-
-futures-util = "0.3"
 
 serde_json.workspace = true
 serde_json.default-features = false
