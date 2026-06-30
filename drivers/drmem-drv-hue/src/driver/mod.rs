@@ -225,8 +225,17 @@ impl Instance {
     ) {
         let url = constants::device_url(host, rtype, id);
 
-        let client_guard = client.lock().await;
-        match client_guard.get(&url).send().await {
+        // Minimize the scope in which we lock the mutex. Since the response
+        // may result in many report updates, which can block, we don't want
+        // to hold off other tasks.
+
+        let response = {
+            let client_guard = client.lock().await;
+
+            client_guard.get(&url).send().await
+        };
+
+        match response {
             Ok(resp) => match resp.error_for_status() {
                 Ok(resp) => match resp.text().await {
                     Ok(body) => {
