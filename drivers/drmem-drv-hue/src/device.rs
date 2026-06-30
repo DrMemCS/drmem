@@ -6,7 +6,6 @@ use drmem_api::{
 };
 use std::{collections::HashMap, sync::Arc};
 use tokio::time::Duration;
-use tracing::info;
 
 use device_traits::DeviceWrapper;
 
@@ -23,14 +22,6 @@ impl<R: Reporter> Set<R> {
         max_history: Option<usize>,
     ) -> Result<(Arc<str>, DeviceWrapper<R>)> {
         let tmo = cfg.override_timeout.map(|v| Duration::from_secs(v));
-
-        if let Some(t) = tmo {
-            info!(
-                "device {} has override timeout of {} seconds",
-                cfg.id,
-                t.as_secs()
-            );
-        }
 
         Ok((
             cfg.id.clone(),

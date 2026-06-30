@@ -9,7 +9,7 @@ use reqwest::{
 };
 use std::{convert::Infallible, future::pending, sync::Arc};
 use tokio::{sync::Mutex, time::Duration};
-use tracing::{Level, Span, error, info, instrument};
+use tracing::{Level, Span, error, instrument};
 
 pub(crate) mod color;
 pub(crate) mod constants;
@@ -199,17 +199,14 @@ impl Instance {
         loop {
             tokio::select! {
                 _ = poll_timer.tick() => {
-                    info!("periodic poll for device {}", id);
                     Self::poll_device_direct(&client, &host, &id, rtype, dev).await;
                 }
 
                 opt_cmd = dev.next_setting() => {
-                    info!("new setting for device {}: {:?}", id, opt_cmd);
                     if let Some(cmd) = opt_cmd {
                         Self::send_command_direct(&client, &host, &id, rtype, cmd).await;
 
                         // Immediately poll this device to get its new state
-                        info!("polling device {} after command", id);
                         Self::poll_device_direct(&client, &host, &id, rtype, dev).await;
                     }
                 }
@@ -267,10 +264,8 @@ impl Instance {
     ) {
         let url = constants::device_url(host, rtype, id);
         let body_str = serde_json::to_string(&cmd).unwrap();
-
-        info!("sending command");
-
         let client_guard = client.lock().await;
+
         match client_guard.put(&url).body(body_str).send().await {
             Ok(resp) => {
                 if let Err(e) = resp.error_for_status() {
@@ -286,7 +281,6 @@ impl Instance {
         dev_wrapper: &mut device_traits::DeviceWrapper<R>,
         update: &payload::ResourceData,
     ) {
-        info!("applying update: {:?}", &update);
         dev_wrapper.apply_update(update).await;
     }
 }

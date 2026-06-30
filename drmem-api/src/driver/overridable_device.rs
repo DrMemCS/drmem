@@ -91,20 +91,6 @@ where
         }
     }
 
-    fn state_name(&self) -> &'static str {
-        match &self.state {
-            State::Unknown => "Unknown",
-            State::UnknownTrans { .. } => "UnknownTrans",
-            State::Synced { .. } => "Synced",
-            State::SyncedTrans { .. } => "SyncedTrans",
-            State::Setting { .. } => "Setting",
-            State::SettingTrans { .. } => "SettingTrans",
-            State::ReassertSetting { .. } => "ReassertSetting",
-            State::UnreportedSetting { .. } => "UnreportedSetting",
-            State::Overridden { .. } => "Overridden",
-        }
-    }
-
     /// Saves a new value, returned by the device, to the backend
     /// storage. This only writes values that have changed.
     ///
@@ -112,7 +98,6 @@ where
     #[inline(never)]
     #[instrument(skip(self))]
     pub async fn report_update(&mut self, new_value: T) {
-        info!("entered in state {}", self.state_name());
         match &mut self.state {
             State::Unknown => {
                 self.reporter.report_value(new_value.clone().into()).await;
@@ -146,11 +131,13 @@ where
                 // reading.
 
                 if setting == &new_value {
+                    info!("value matches setting, transitioning to Synced");
                     self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Synced {
                         value: setting.clone(),
                     };
                 } else if value != &new_value {
+                    info!("value differs from setting, transitioning to Overridden");
                     self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Overridden {
                         tmo: tokio::time::Instant::now(),
@@ -246,7 +233,6 @@ where
                 }
             }
         }
-        info!("exited in state {}", self.state_name());
     }
 
     /// Gets the last value of the device. If DrMem is built with
@@ -273,7 +259,6 @@ where
     #[inline(never)]
     #[instrument(skip(self))]
     pub async fn next_setting(&mut self) -> Option<SettingTransaction<T>> {
-        info!("entered in state {}", self.state_name());
         let result = loop {
             match &mut self.state {
                 // At this point, we have no known state. If a
@@ -463,10 +448,7 @@ where
                     }
                 }
             }
-            info!("looping for another setting");
         };
-
-        info!("exited in state {}", self.state_name());
         result
     }
 }

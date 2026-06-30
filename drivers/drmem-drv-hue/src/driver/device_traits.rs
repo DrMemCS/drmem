@@ -139,6 +139,7 @@ impl<R: Reporter> HueDevice<R> for DimmerDevice<R> {
                 self.inner.brightness.report_update(0.0).await;
             } else if let Some(dim) = &update.dimming {
                 let brightness = (dim.brightness as f64).round();
+
                 debug!("dimmer: reporting brightness update: {}", brightness);
                 self.inner.brightness.report_update(brightness).await;
             } else {
@@ -148,6 +149,7 @@ impl<R: Reporter> HueDevice<R> for DimmerDevice<R> {
             }
         } else if let Some(dim) = &update.dimming {
             let brightness = (dim.brightness as f64).round();
+
             debug!("dimmer: reporting brightness update: {}", brightness);
             self.inner.brightness.report_update(brightness).await;
         }
@@ -247,6 +249,7 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
                 self.inner.brightness.report_update(0.0).await;
             } else if let Some(dim) = &update.dimming {
                 let brightness = (dim.brightness as f64).round();
+
                 debug!(
                     "colorbulb: reporting brightness update: {}",
                     brightness
@@ -259,6 +262,7 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
             }
         } else if let Some(dim) = &update.dimming {
             let brightness = (dim.brightness as f64).round();
+
             debug!("colorbulb: reporting brightness update: {}", brightness);
             self.inner.brightness.report_update(brightness).await;
         }
@@ -267,6 +271,7 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
         if let Some(color) = &update.color.as_ref().and_then(|c| c.xy.as_ref())
         {
             let rgba = super::color::cie_xy_to_rgba(color.x, color.y);
+
             debug!("colorbulb: reporting color update: {:?}", rgba);
             self.inner.color.report_update(rgba).await;
         }
