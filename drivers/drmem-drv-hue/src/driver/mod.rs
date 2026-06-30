@@ -194,12 +194,10 @@ impl Instance {
         dev: &mut device_traits::DeviceWrapper<R>,
     ) {
         let mut poll_timer = tokio::time::interval(poll_interval);
-        poll_timer.tick().await; // Consume the first immediate tick
 
         loop {
             tokio::select! {
                 _ = poll_timer.tick() => {
-                    Self::poll_device_direct(&client, &host, &id, rtype, dev).await;
                 }
 
                 opt_cmd = dev.next_setting() => {
@@ -207,10 +205,13 @@ impl Instance {
                         Self::send_command_direct(&client, &host, &id, rtype, cmd).await;
 
                         // Immediately poll this device to get its new state
-                        Self::poll_device_direct(&client, &host, &id, rtype, dev).await;
+                        poll_timer.reset();
+                    } else {
+                        continue;
                     }
                 }
             }
+            Self::poll_device_direct(&client, &host, &id, rtype, dev).await;
         }
     }
 
