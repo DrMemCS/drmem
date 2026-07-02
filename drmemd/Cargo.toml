@@ -47,6 +47,10 @@ serde.workspace = true
 serde.default-features = false
 serde.features = ["derive"]
 
+serde_json.workspace = true
+serde_json.default-features = false
+serde_json.features = ["std"]
+
 clap.version = "4"
 clap.default-features = false
 clap.features = ["cargo", "std"]
@@ -120,27 +124,43 @@ optional = true
 # This section defines the optional dependencies for the 'graphql'
 # feature.
 
-[dependencies.juniper]
-version = "0.16"
+[dependencies.async-graphql]
+version = "7"
 default-features = false
 features = ["chrono"]
 optional = true
 
-[dependencies.juniper_warp]
-version = "0.8"
-default-features = false
-features = ["subscriptions"]
-optional = true
-
-[dependencies.juniper_graphql_ws]
-version = "0.4"
+[dependencies.async-graphql-axum]
+version = "7"
 default-features = false
 optional = true
 
-[dependencies.warp]
+[dependencies.async-stream]
 version = "0.3"
 default-features = false
-features = ["tls", "compression-gzip"]
+optional = true
+
+[dependencies.axum]
+version = "0.8"
+default-features = false
+features = ["ws"]
+optional = true
+
+[dependencies.axum-server]
+version = "0.7"
+default-features = false
+features = ["tls-rustls-no-provider"]
+optional = true
+
+[dependencies.tower]
+version = "0.5"
+default-features = false
+optional = true
+
+[dependencies.tower-http]
+version = "0.6"
+default-features = false
+features = ["compression-gzip", "cors"]
 optional = true
 
 [dependencies.libmdns]
@@ -176,8 +196,9 @@ redis-backend = ["dep:redis", "graphql"]
 # Client APIs
 
 no-client = []
-graphql = ["dep:warp", "dep:juniper", "dep:juniper_graphql_ws",
-           "dep:juniper_warp", "dep:libmdns", "dep:rustls-pki-types",
+graphql = ["dep:axum", "dep:axum-server", "dep:async-graphql",
+           "dep:async-graphql-axum", "dep:async-stream", "dep:tower",
+           "dep:tower-http", "dep:libmdns", "dep:rustls-pki-types",
            "dep:ring", "dep:rustls-pemfile"]
 graphiql = ["graphql"]
 
