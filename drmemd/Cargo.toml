@@ -147,7 +147,7 @@ features = ["ws"]
 optional = true
 
 [dependencies.axum-server]
-version = "0.7"
+version = "0.8"
 default-features = false
 features = ["tls-rustls-no-provider"]
 optional = true
