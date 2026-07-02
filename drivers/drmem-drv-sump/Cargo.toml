@@ -18,7 +18,7 @@ serde.workspace = true
 serde.default-features = false
 serde.features = ["derive"]
 
-socket2.version = "0.5"
+socket2.version = "0.6"
 socket2.default-features = false
 
 toml.workspace = true

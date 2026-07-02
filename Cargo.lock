@@ -688,7 +688,7 @@ version = "0.7.1"
 dependencies = [
  "drmem-api",
  "serde",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tokio",
  "toml",
  "tracing",
