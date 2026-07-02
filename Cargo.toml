@@ -10,7 +10,7 @@ resolver = "2"
 [workspace.dependencies]
 chrono = { version = "0.4", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std"] }
-toml = { version = "0.8", default-features = false }
+toml = { version = "1" }
 tokio = { version = "1", default-features = false }
 tokio-stream = { version = "0.1", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }

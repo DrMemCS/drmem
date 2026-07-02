@@ -22,7 +22,6 @@ socket2.version = "0.6"
 socket2.default-features = false
 
 toml.workspace = true
-toml.default-features = false
 
 tokio.workspace = true
 tokio.default-features = false

@@ -24,7 +24,6 @@ futures.default-features = false
 futures.features = ["alloc", "std"]
 
 toml.workspace = true
-toml.default-features = false
 toml.features = ["parse"]
 
 tokio.workspace = true

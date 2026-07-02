@@ -15,7 +15,6 @@ doctest = false
 
 [dependencies]
 toml.workspace = true
-toml.default-features = false
 
 futures.workspace = true
 futures.default-features = false
