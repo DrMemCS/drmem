@@ -24,3 +24,4 @@ test-publish-drmemd.sh
 
 *.sql
 drmem.toml
+Cargo.lock
