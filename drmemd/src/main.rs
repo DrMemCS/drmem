@@ -1,9 +1,5 @@
 #![deny(unsafe_code)]
 
-#[cfg(feature = "graphql")]
-#[macro_use]
-extern crate lazy_static;
-
 use drmem_api::{driver::RequestChan, Error, Result};
 use futures::future;
 use std::{convert::Infallible, sync::Arc};

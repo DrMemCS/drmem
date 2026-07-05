@@ -887,18 +887,9 @@ fn schema<R: Reporter + Clone>(config_db: ConfigDb<R>) -> Schema<R> {
 // Define the URI paths used by the GraphQL interface.
 
 mod paths {
-    pub const BASE: &str = "drmem";
-    pub const QUERY: &str = "q";
-    pub const SUBSCRIBE: &str = "s";
-
-    // Until we can build strings at compile-time, we use the
-    // `lazy_static` macro.
-
-    lazy_static! {
-        pub static ref FULL_QUERY: String = format!("/{}/{}", BASE, QUERY);
-        pub static ref FULL_SUBSCRIBE: String =
-            format!("/{}/{}", BASE, SUBSCRIBE);
-    }
+    pub const BASE: &str = "/drmem";
+    pub const QUERY: &str = "/q";
+    pub const SUBSCRIBE: &str = "/s";
 }
 
 fn logic_to_gql<R: Reporter>(logic: &Logic) -> Arc<LogicBlock<R>> {
@@ -996,8 +987,12 @@ async fn execute_graphql_request<R: Reporter + Clone>(
 async fn graphiql() -> Html<String> {
     Html(
         async_graphql::http::GraphiQLSource::build()
-            .endpoint(&*paths::FULL_QUERY)
-            .subscription_endpoint(&*paths::FULL_SUBSCRIBE)
+            .endpoint(&format!("{}{}", paths::BASE, paths::QUERY))
+            .subscription_endpoint(&format!(
+                "{}{}",
+                paths::BASE,
+                paths::SUBSCRIBE
+            ))
             .finish(),
     )
 }
@@ -1033,11 +1028,11 @@ fn build_base_routes<R: Reporter + Clone>(
     // Build the GraphQL API routes with state and context
     let graphql_routes = Router::new()
         .route(
-            &format!("/{}", paths::QUERY),
+            paths::QUERY,
             post(graphql_post_handler::<R>).get(graphql_get_handler::<R>),
         )
         .route_service(
-            &format!("/{}", paths::SUBSCRIBE),
+            paths::SUBSCRIBE,
             GraphQLSubscription::new(schema.clone()),
         )
         .with_state(schema)
@@ -1105,8 +1100,9 @@ fn build_app<R: Reporter + Clone>(
     context: ConfigDb<R>,
 ) -> Router {
     let graphql_routes = build_base_routes(schema, context);
+
     Router::new()
-        .nest(&format!("/{}", paths::BASE), graphql_routes)
+        .nest(paths::BASE, graphql_routes)
         .layer(cors_layer())
         .layer(CompressionLayer::new())
 }
@@ -1205,9 +1201,9 @@ fn build_mdns_payload(
             "boot-time={}",
             boot_time.to_rfc3339_opts(SecondsFormat::Secs, true)
         ),
-        format!("queries={}", &*paths::FULL_QUERY),
-        format!("mutations={}", &*paths::FULL_QUERY),
-        format!("subscriptions={}", &*paths::FULL_SUBSCRIBE),
+        format!("queries={}{}", paths::BASE, paths::QUERY),
+        format!("mutations={}{}", paths::BASE, paths::QUERY),
+        format!("subscriptions={}{}", paths::BASE, paths::SUBSCRIBE),
     ];
 
     // If security is specified, this section of code adds the digital
