@@ -21,7 +21,7 @@ use futures::Future;
 use libmdns::Responder;
 use std::{sync::Arc, time::Duration};
 use tower_http::{compression::CompressionLayer, cors::CorsLayer};
-use tracing::{debug, error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, instrument, warn, Instrument};
 
 pub mod config;
 
@@ -66,7 +66,7 @@ impl<R: Reporter> DriverInfo<R> {
     }
 }
 
-#[derive(InputObject)]
+#[derive(InputObject, Debug)]
 #[graphql(name = "SettingData")]
 /// Describes data that can be sent to devices. When specifying data, one --
 /// and only one -- field must be set.
@@ -306,6 +306,7 @@ impl<R: Reporter + Clone> Query<R> {
     /// Returns logic blocks configured in the node. By default, all logic
     /// blocks are returned. If either parameter is given, the results are
     /// filtered to only return information that matches the selection values.
+    #[instrument(skip(self, ctx))]
     async fn logic_blocks(
         &self,
         ctx: &Context<'_>,
@@ -332,6 +333,7 @@ impl<R: Reporter + Clone> Query<R> {
     /// information is returned. If `name` is specified and a driver with that
     /// name exists, a single element array is returned. Otherwise an error is
     /// returned.
+    #[instrument(skip(self, ctx))]
     async fn driver_info(
         &self,
         ctx: &Context<'_>,
@@ -376,6 +378,7 @@ impl<R: Reporter + Clone> Query<R> {
     ///
     /// If the argument `settable` is provided, it returns devices that are or
     /// aren't settable, depending on the value of the argument.
+    #[instrument(skip(self, ctx))]
     async fn device_info(
         &self,
         ctx: &Context<'_>,
@@ -558,6 +561,7 @@ impl<R: Reporter> Mutation<R> {
     /// is returned. The `value` parameter contains several fields. Only one
     /// should be set. It is an error to have all fields `null` or more than
     /// one field non-`null`.
+    #[instrument(skip(self, ctx))]
     async fn set_device(
         &self,
         ctx: &Context<'_>,
@@ -565,6 +569,7 @@ impl<R: Reporter> Mutation<R> {
         value: SettingData,
     ) -> Result<Reading> {
         let db = ctx.data::<ConfigDb<R>>()?;
+
         match value {
             SettingData {
                 f_int: None,
@@ -666,7 +671,7 @@ impl<R: Reporter> Mutation<R> {
     }
 }
 
-#[derive(InputObject)]
+#[derive(InputObject, Debug)]
 /// Defines a range of time between two dates.
 struct DateRange {
     /// The start of the date range (in UTC.) If `null`, it means "now".
@@ -833,6 +838,7 @@ impl<R: Reporter> SubscriptionRoot<R> {
     /// Sets up a connection to receive all updates to a device. The GraphQL
     /// request must provide the name of a device. This method returns a stream
     /// which generates a reply each time a device's value changes.
+    #[instrument(skip(self, ctx))]
     async fn monitor_device(
         &self,
         ctx: &Context<'_>,
@@ -846,15 +852,17 @@ impl<R: Reporter> SubscriptionRoot<R> {
             .try_into()
             .map_err(|_| Error::new("badly formed device name"))?;
 
-        debug!("setting monitor for '{}'", &name);
-
         let start = range.as_ref().and_then(|v| v.start);
         let end = range.as_ref().and_then(|v| v.end);
+
+        debug!("creating monitor for '{}'", &name);
 
         let rx =
             db.1.monitor_device(name, start, end)
                 .await
                 .map_err(|_| Error::new("device not found"))?;
+
+        debug!("returning monitor");
 
         Ok(tokio_stream::StreamExt::map(
             rx,
@@ -1005,8 +1013,14 @@ async fn check_authorization(
         if let Ok(client_str) = client_id.to_str() {
             if allowed_clients.iter().any(|v| cmp_fprints(v, client_str)) {
                 return Ok(next.run(request).await);
+            } else {
+                warn!("client is not in known set of clients");
             }
+        } else {
+            warn!("X-DrMem-Client-Id header couldn't be converted to `str`");
         }
+    } else {
+        warn!("request is missing X-DrMem-Client-Id header");
     }
     Err(StatusCode::FORBIDDEN)
 }
@@ -1268,7 +1282,7 @@ pub fn server<R: Reporter + Clone>(
             // Make mDNS run in the background.
 
             let jh = tokio::spawn(async move {
-                task.await;
+                task.instrument(info_span!("MDNS")).await;
                 drop(service)
             });
 
@@ -1279,7 +1293,7 @@ pub fn server<R: Reporter + Clone>(
                     error!("HTTP server error: {}", e);
                 }
             }
-            .instrument(info_span!("http"))
+            .instrument(info_span!("HTTP"))
         }
         Err(e) => {
             panic!("GraphQL config error : {e}")
