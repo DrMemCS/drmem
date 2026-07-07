@@ -18,11 +18,12 @@
   - `drmemd/src/graphql` -- defines the optional GraphQL interface
 
 ## Rules
+- Responses shouldn't be chatty -- keep it terse but informative
 - Prefer minimal patches
 - Prefer functional solutions over imperative
 - Run `cargo check` after code changes
 - Do not edit generated files directly
-- Run `make check` before committing
+- Run `cargo check` before committing
 - Use `jj` for version control
 - Never use `unsafe` code
 
