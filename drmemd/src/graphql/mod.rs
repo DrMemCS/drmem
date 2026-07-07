@@ -1019,10 +1019,7 @@ fn build_base_routes<R: Reporter + Clone>(
 // "Sanitizes" a string containing a digital fingerprint by returning
 // an Iterator that only returns the hex digits in uppercase.
 
-fn sanitize<T>(ii: T) -> impl Iterator<Item = char>
-where
-    T: Iterator<Item = char>,
-{
+fn sanitize(ii: impl Iterator<Item = char>) -> impl Iterator<Item = char> {
     ii.filter(char::is_ascii_hexdigit)
         .map(|v| v.to_ascii_uppercase())
 }
