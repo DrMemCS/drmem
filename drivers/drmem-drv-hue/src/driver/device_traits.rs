@@ -91,6 +91,7 @@ impl<R: Reporter> HueDevice<R> for DimmerDevice<R> {
                 opt_txn = self.inner.brightness.next_setting() => {
                     if let Some((val, reply)) = opt_txn {
                         let val = val.clamp(0.0, 100.0).round();
+
                         debug!("dimmer brightness setting ready: {}", val);
 
                         if let Some(r) = reply {
@@ -159,6 +160,9 @@ impl<R: Reporter> HueDevice<R> for DimmerDevice<R> {
 pub struct ColorBulbDevice<R: Reporter> {
     pub inner: classes::ColorBulb<R>,
     resource_type: &'static str,
+    /// Stores the last XY coordinates sent to the bridge to avoid
+    /// round-off errors when comparing RGB <-> XY conversions
+    last_xy: Option<(f32, f32)>,
 }
 
 impl<R: Reporter> ColorBulbDevice<R> {
@@ -170,6 +174,7 @@ impl<R: Reporter> ColorBulbDevice<R> {
             } else {
                 constants::LIGHT_RESOURCE
             },
+            last_xy: None,
         }
     }
 }
@@ -222,6 +227,10 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
 
                         let (x, y) = super::color::rgba_to_cie_xy(&val);
 
+                        // Store the XY coordinates we're sending to the bridge
+                        self.last_xy = Some((x, y));
+                        debug!("colorbulb: saved XY coordinates: ({}, {})", x, y);
+
                         return Some(payload::LightCommand {
                             on: Some(payload::On { on: true }),
                             dimming: None,
@@ -264,16 +273,30 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
         // Handle color updates
         if let Some(color) = &update.color.as_ref().and_then(|c| c.xy.as_ref())
         {
-            let rgba = super::color::cie_xy_to_rgba(color.x, color.y);
+            let bridge_xy = (color.x, color.y);
 
-            debug!("colorbulb: reporting color update: {:?}", rgba);
-            self.inner.color.report_update(rgba).await;
+            // Check if the bridge's XY coordinates match our last sent XY
+            // Use a tolerance to handle floating point precision
+
+            let xy_matches = self.last_xy.map_or(false, |(last_x, last_y)| {
+                (last_x - bridge_xy.0).abs() < 0.001
+                    && (last_y - bridge_xy.1).abs() < 0.001
+            });
+
+            if !xy_matches {
+                let rgba =
+                    super::color::cie_xy_to_rgba(bridge_xy.0, bridge_xy.1);
+
+                self.inner.color.report_update(rgba).await;
+                self.last_xy = Some(bridge_xy);
+            }
         }
     }
 
     fn reset(&mut self) {
         self.inner.brightness.reset_state();
         self.inner.color.reset_state();
+        self.last_xy = None;
     }
 }
 
