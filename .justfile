@@ -62,11 +62,11 @@ _check-simple:
 
 _check-simple-graphql:
 	@echo "🤔 Checking simple-backend, with GraphQL"; \
-	nice cargo check --features simple-backend,graphql,all-drivers
+	nice cargo check --features simple-backend,graphiql,all-drivers
 
 _check-redis-graphql:
 	@echo "🤔 Checking redis-backend, with GraphQL"; \
-	nice cargo check --features redis-backend,graphql,all-drivers
+	nice cargo check --features redis-backend,graphiql,all-drivers
 
 check: _check-simple _check-simple-graphql _check-redis-graphql
 	@echo "🎉 DrMem source was checked successfully!"
