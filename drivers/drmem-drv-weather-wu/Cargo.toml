@@ -35,4 +35,4 @@ reqwest.default-features = false
 weather-underground.version = "0.1"
 weather-underground.default-features = false
 
-drmem-api = { path = "../../drmem-api", version = "0.7" }
+drmem-api = { path = "../../drmem-api", version = "0.8" }

@@ -1215,6 +1215,15 @@ mod tests {
             "#1 -> {bulb}",
             "#12 -> {bulb}",
             "#12345 -> {bulb}",
+            "#abcdef0 -> {bulb}",
+            "#abcdef012 -> {bulb}",
+            // Invalid temperature formats
+            "#K -> {bulb}",          // Missing kelvin value
+            "#4000k -> {bulb}",      // lowercase 'k'
+            "#4000K@ -> {bulb}",     // Missing alpha value
+            "#4000K@256 -> {bulb}",  // Alpha out of range
+            "#4000K@101% -> {bulb}", // Percentage > 100
+            "#4000K@% -> {bulb}",    // Missing percentage value
         ];
 
         for entry in BAD_EXPR.iter() {
@@ -1253,6 +1262,13 @@ mod tests {
             "{solar:az} -> {bulb}",
             "{solar:ra} -> {bulb}",
             "{solar:dec} -> {bulb}",
+            "#2700K -> {bulb}",
+            "#4000K -> {bulb}",
+            "#6500K -> {bulb}",
+            "#3000K@128 -> {bulb}",
+            "#5000K@255 -> {bulb}",
+            "#4500K@50% -> {bulb}",
+            "#6000K@100% -> {bulb}",
         ];
 
         for entry in GOOD_EXPR.iter() {
@@ -1307,54 +1323,85 @@ mod tests {
             (
                 "#123 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        0x11, 0x22, 0x33, 255,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(0x11, 0x22, 0x33, 255),
+                    })),
                     0,
                 ),
             ),
             (
                 "#1234 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        0x11, 0x22, 0x33, 0x44,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(0x11, 0x22, 0x33, 0x44),
+                    })),
                     0,
                 ),
             ),
             (
                 "#7f8081 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        127, 128, 129, 255,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(127, 128, 129, 255),
+                    })),
                     0,
                 ),
             ),
             (
                 "#7f808182 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        127, 128, 129, 130,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(127, 128, 129, 130),
+                    })),
                     0,
                 ),
             ),
             (
                 "#7F80A0 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        127, 128, 160, 255,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(127, 128, 160, 255),
+                    })),
                     0,
                 ),
             ),
             (
-                "#black -> {bulb}",
+                "#2700K -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        0, 0, 0, 255,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                        kelvin: 2700,
+                        a: 255,
+                    })),
+                    0,
+                ),
+            ),
+            (
+                "#4000K@128 -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                        kelvin: 4000,
+                        a: 128,
+                    })),
+                    0,
+                ),
+            ),
+            (
+                "#6500K@50% -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                        kelvin: 6500,
+                        a: 127, // 50% of 255 = 127.5, rounded down to 127
+                    })),
+                    0,
+                ),
+            ),
+            (
+                "#3000K@100% -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                        kelvin: 3000,
+                        a: 255,
+                    })),
                     0,
                 ),
             ),
@@ -3389,7 +3436,7 @@ mod tests {
             ("1", None),
             ("1.0", None),
             ("true", None),
-            ("#green", None),
+            ("#00ff00", None),
             ("\"test\"", None),
             ("{solar:alt}", None),
             // Make sure the time values return the proper field.
@@ -3482,7 +3529,7 @@ mod tests {
             ("1", false),
             ("1.0", false),
             ("true", false),
-            ("#green", false),
+            ("#00ff00", false),
             ("\"test\"", false),
             ("{utc:second}", false),
             // Make sure the solar values return true.

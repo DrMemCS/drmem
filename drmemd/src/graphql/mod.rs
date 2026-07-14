@@ -737,33 +737,50 @@ impl From<&device::Reading> for Reading {
                 string_value: Some(v.clone()),
                 color_value: None,
             },
-            device::Value::Color(v) if v.alpha == 255 => Reading {
-                device: "".into(),
-                stamp: DateTime::<Utc>::from(value.ts),
-                int_value: None,
-                float_value: None,
-                bool_value: None,
-                string_value: None,
-                color_value: Some(vec![
-                    v.red as i32,
-                    v.green as i32,
-                    v.blue as i32,
-                ]),
-            },
-            device::Value::Color(v) => Reading {
-                device: "".into(),
-                stamp: DateTime::<Utc>::from(value.ts),
-                int_value: None,
-                float_value: None,
-                bool_value: None,
-                string_value: None,
-                color_value: Some(vec![
-                    v.red as i32,
-                    v.green as i32,
-                    v.blue as i32,
-                    v.alpha as i32,
-                ]),
-            },
+            device::Value::Color(device::ColorType::Rgba { color })
+                if color.alpha == 255 =>
+            {
+                Reading {
+                    device: "".into(),
+                    stamp: DateTime::<Utc>::from(value.ts),
+                    int_value: None,
+                    float_value: None,
+                    bool_value: None,
+                    string_value: None,
+                    color_value: Some(vec![
+                        color.red as i32,
+                        color.green as i32,
+                        color.blue as i32,
+                    ]),
+                }
+            }
+            device::Value::Color(device::ColorType::Rgba { color }) => {
+                Reading {
+                    device: "".into(),
+                    stamp: DateTime::<Utc>::from(value.ts),
+                    int_value: None,
+                    float_value: None,
+                    bool_value: None,
+                    string_value: None,
+                    color_value: Some(vec![
+                        color.red as i32,
+                        color.green as i32,
+                        color.blue as i32,
+                        color.alpha as i32,
+                    ]),
+                }
+            }
+            device::Value::Color(device::ColorType::Ccta { kelvin, a }) => {
+                Reading {
+                    device: "".into(),
+                    stamp: DateTime::<Utc>::from(value.ts),
+                    int_value: None,
+                    float_value: None,
+                    bool_value: None,
+                    string_value: None,
+                    color_value: Some(vec![*kelvin as i32, *a as i32]),
+                }
+            }
         }
     }
 }
@@ -788,17 +805,25 @@ impl<R: Reporter> SubscriptionRoot<R> {
                 device::Value::Int(v) => reading.int_value = Some(v),
                 device::Value::Flt(v) => reading.float_value = Some(v),
                 device::Value::Str(v) => reading.string_value = Some(v.clone()),
-                device::Value::Color(v) if v.alpha == 255 => {
-                    reading.color_value =
-                        Some(vec![v.red as i32, v.green as i32, v.blue as i32])
-                }
-                device::Value::Color(v) => {
+                device::Value::Color(device::ColorType::Rgba { color })
+                    if color.alpha == 255 =>
+                {
                     reading.color_value = Some(vec![
-                        v.red as i32,
-                        v.green as i32,
-                        v.blue as i32,
-                        v.alpha as i32,
+                        color.red as i32,
+                        color.green as i32,
+                        color.blue as i32,
                     ])
+                }
+                device::Value::Color(device::ColorType::Rgba { color }) => {
+                    reading.color_value = Some(vec![
+                        color.red as i32,
+                        color.green as i32,
+                        color.blue as i32,
+                        color.alpha as i32,
+                    ])
+                }
+                device::Value::Color(device::ColorType::Ccta { kelvin, a }) => {
+                    reading.color_value = Some(vec![kelvin as i32, a as i32])
                 }
             }
 

@@ -45,7 +45,8 @@ false                   "FALSE"
 <VAR>:                  "COLON"
 
 \#			<+COLOR>;
-<COLOR>[0-9a-zA-Z]+	<-COLOR>"COLOR"
+<COLOR>[0-9]+K(@[0-9]+%?)?	<-COLOR>"TEMPERATURE"
+<COLOR>[0-9a-fA-f]{3,8}     <-COLOR>"COLOR"
 
 [\t\n\r ]+ ;
 

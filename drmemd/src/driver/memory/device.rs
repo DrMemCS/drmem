@@ -142,7 +142,7 @@ impl<R: Reporter> ResettableState for Set<R> {}
 
 #[cfg(test)]
 mod test {
-    use drmem_api::device::Value;
+    use drmem_api::device::{ColorType, Value};
 
     #[test]
     fn test_validators() {
@@ -155,7 +155,9 @@ mod test {
             assert!(!f(&Value::Int(10)));
             assert!(!f(&Value::Flt(20.0)));
             assert!(!f(&Value::Str("Hello".into())));
-            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(!f(&Value::Color(ColorType::Rgba {
+                color: palette::LinSrgba::new(0, 0, 0, 0)
+            })));
         }
         {
             let f = get_validator(&Value::Int(5));
@@ -164,7 +166,9 @@ mod test {
             assert!(f(&Value::Int(10)));
             assert!(!f(&Value::Flt(20.0)));
             assert!(!f(&Value::Str("Hello".into())));
-            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(!f(&Value::Color(ColorType::Rgba {
+                color: palette::LinSrgba::new(0, 0, 0, 0)
+            })));
         }
         {
             let f = get_validator(&Value::Flt(2.0));
@@ -173,7 +177,9 @@ mod test {
             assert!(!f(&Value::Int(10)));
             assert!(f(&Value::Flt(20.0)));
             assert!(!f(&Value::Str("Hello".into())));
-            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(!f(&Value::Color(ColorType::Rgba {
+                color: palette::LinSrgba::new(0, 0, 0, 0)
+            })));
         }
         {
             let f = get_validator(&Value::Str("World".into()));
@@ -182,18 +188,22 @@ mod test {
             assert!(!f(&Value::Int(10)));
             assert!(!f(&Value::Flt(20.0)));
             assert!(f(&Value::Str("Hello".into())));
-            assert!(!f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(!f(&Value::Color(ColorType::Rgba {
+                color: palette::LinSrgba::new(0, 0, 0, 0)
+            })));
         }
         {
-            let f = get_validator(&Value::Color(palette::LinSrgba::new(
-                100, 100, 100, 100,
-            )));
+            let f = get_validator(&Value::Color(ColorType::Rgba {
+                color: palette::LinSrgba::new(100, 100, 100, 100),
+            }));
 
             assert!(!f(&Value::Bool(false)));
             assert!(!f(&Value::Int(10)));
             assert!(!f(&Value::Flt(20.0)));
             assert!(!f(&Value::Str("Hello".into())));
-            assert!(f(&Value::Color(palette::LinSrgba::new(0, 0, 0, 0))));
+            assert!(f(&Value::Color(ColorType::Rgba {
+                color: palette::LinSrgba::new(0, 0, 0, 0)
+            })));
         }
     }
 }
