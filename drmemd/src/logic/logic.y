@@ -22,6 +22,7 @@
 %epp KW_THEN "then"
 %epp KW_ELSE "else"
 %epp KW_COALESCE "coalesce"
+%epp KW_WITH_ALPHA "with_alpha"
 %epp COMMA ","
 %epp ADD "+"
 %epp SUB "-"
@@ -137,14 +138,18 @@ Factor -> Result<Expr>:
       "B_NOT" Factor { Ok(Expr::Not(Box::new($2?))) }
     | "(" TopExpr ")" { $2 }
     | "KW_COALESCE" "(" ExprList ")" { Ok(Expr::Coalesce($3?)) }
+    | "KW_WITH_ALPHA" "(" TopExpr "COMMA" TopExpr ")"
+      {
+          Ok(Expr::WithAlpha(Box::new($3?), Box::new($5?)))
+      }
     | Conditional { $1 }
     | "TRUE" { Ok(Expr::Lit(device::Value::Bool(true))) }
     | "FALSE" { Ok(Expr::Lit(device::Value::Bool(false))) }
     | "INT"
       {
-	  let s = get_str("literal integer", $1, $lexer)?;
+	    let s = get_str("literal integer", $1, $lexer)?;
 
-          parse_int(s)
+        parse_int(s)
       }
     | "FLT"
       {

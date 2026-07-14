@@ -9,8 +9,8 @@
 //     #.##              floating point numbers
 //     "TEXT"            strings
 //     {NAME}            variable named NAME (from config params)
-//     #rrggbb or
-//     #name		 RGB color values
+//     #rrggbb[aa]       RGB color values with optional alpha channel
+//     #tttK		     White color temperature in Kelvin
 //
 // There are two built-in types, "utc" and "local", which can be used
 // to obtain time-of-day values. Use the {} notation to access them:
@@ -65,15 +65,21 @@
 //
 //     +,-,*,/,%         Perform addition, subtraction, multiplication,
 //                       division, and modulo operations
+// Functions
+//
+//     coalesce(EXPR1, EXPR2, ...)     Returns the first non-null expression
+//     with_alpha(COLOR, ALPHA)        Returns a new color with the specified
+//                                     alpha value
 
 use super::solar;
 use super::tod;
 use chrono::{Datelike, Timelike};
+use drmem_api::device::ColorType;
 use drmem_api::{device, Error, Result};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
 use std::fmt;
-use tracing::error;
+use tracing::{error, warn};
 
 // Pull in the lexer and parser for the Logic Node language.
 
@@ -243,6 +249,9 @@ pub enum Expr {
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Coalesce(Vec<Expr>),
 
+    // Color/Temperature functions
+    WithAlpha(Box<Expr>, Box<Expr>),
+
     // NotEq, Gt, and GtEq are parsed and converted into one of the
     // following three representations (the NotEq is a combination Not
     // and Eq value.)
@@ -266,7 +275,8 @@ impl Expr {
             | Expr::TimeVal(..)
             | Expr::SolarVal(..)
             | Expr::Nothing
-            | Expr::Coalesce(_) => 10,
+            | Expr::Coalesce(_)
+            | Expr::WithAlpha(_, _) => 10,
             Expr::Not(_) => 9,
             Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 5,
             Expr::Add(_, _) | Expr::Sub(_, _) => 4,
@@ -309,7 +319,8 @@ impl Expr {
             | Expr::LtEq(a, b)
             | Expr::Eq(a, b)
             | Expr::And(a, b)
-            | Expr::Or(a, b) => match (a.uses_time(), b.uses_time()) {
+            | Expr::Or(a, b)
+            | Expr::WithAlpha(a, b) => match (a.uses_time(), b.uses_time()) {
                 (None, None) => None,
                 (a, None) => a,
                 (None, b) => b,
@@ -357,6 +368,7 @@ impl Expr {
             | Expr::Eq(a, b)
             | Expr::And(a, b)
             | Expr::Or(a, b)
+            | Expr::WithAlpha(a, b)
             | Expr::If(a, b, None) => a.uses_solar() || b.uses_solar(),
             Expr::Coalesce(exprs) => exprs.iter().any(|e| e.uses_solar()),
             Expr::If(a, b, Some(c)) => {
@@ -450,6 +462,14 @@ impl fmt::Display for Expr {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " % ")?;
                 self.fmt_subexpr(b, f)
+            }
+
+            Expr::WithAlpha(a, b) => {
+                write!(f, "with_alpha(")?;
+                self.fmt_subexpr(a, f)?;
+                write!(f, ", ")?;
+                self.fmt_subexpr(b, f)?;
+                write!(f, ")")
             }
 
             Expr::Coalesce(exprs) => {
@@ -554,6 +574,9 @@ pub fn eval(
         Expr::Mul(a, b) => eval_as_mul_expr(a, b, inp, time, solar),
         Expr::Div(a, b) => eval_as_div_expr(a, b, inp, time, solar),
         Expr::Rem(a, b) => eval_as_rem_expr(a, b, inp, time, solar),
+        Expr::WithAlpha(a, b) => {
+            eval_as_with_alpha_expr(a, b, inp, time, solar)
+        }
         Expr::Coalesce(exprs) => eval_as_coalesce_expr(exprs, inp, time, solar),
         Expr::If(a, b, c) => eval_as_if_expr(a, b, c, inp, time, solar),
     }
@@ -940,6 +963,56 @@ fn eval_as_rem_expr(
         }
     };
     Some(result)
+}
+
+#[inline(never)]
+fn eval_as_with_alpha_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
+    time: &tod::Info,
+    solar: Option<&solar::Info>,
+) -> Option<device::Value> {
+    use palette::WithAlpha;
+
+    let new_alpha = match eval(b, inp, time, solar) {
+        Some(device::Value::Flt(alpha)) => {
+            (alpha.clamp(0.0, 1.0) * 255.0) as u8
+        }
+        Some(v) => {
+            error!(
+                    "second argument to WITH_ALPHA must be between 0.0 and 1.0, got {}",
+                    &v
+                );
+            return None;
+        }
+        None => {
+            warn!("second argument to WITH_ALPHA evaluated to None");
+            return None;
+        }
+    };
+
+    match eval(a, inp, time, solar) {
+        Some(device::Value::Color(ColorType::Rgba { color })) => {
+            Some(device::Value::Color(ColorType::Rgba {
+                color: color.with_alpha(new_alpha),
+            }))
+        }
+        Some(device::Value::Color(ColorType::Ccta { kelvin, .. })) => {
+            Some(device::Value::Color(ColorType::Ccta {
+                kelvin,
+                a: new_alpha,
+            }))
+        }
+        Some(v) => {
+            error!("first argument to WITH_ALPHA must be a color, got {}", &v);
+            None
+        }
+        None => {
+            warn!("first argument to WITH_ALPHA evaluated to None");
+            None
+        }
+    }
 }
 
 #[inline(never)]
@@ -3611,6 +3684,28 @@ mod tests {
 
         let result = eval(&expr, &inputs, &time, solar);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_with_alpha() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        let inputs =
+            vec![Some(device::Value::Color(device::ColorType::Rgba {
+                color: palette::LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            }))];
+        let expr = Expr::WithAlpha(
+            Box::new(Expr::Var(0)),
+            Box::new(Expr::Lit(device::Value::Flt(0.5))),
+        );
+
+        assert_eq!(
+            eval(&expr, &inputs, &time, solar),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: palette::LinSrgba::new(255u8, 0u8, 0u8, 127u8),
+            }))
+        );
     }
 
     #[test]

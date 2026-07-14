@@ -16,7 +16,8 @@ or                      "B_OR"
 [Tt][Hh][Ee][Nn]        "KW_THEN"
 [Ee][Ll][Ss][Ee]        "KW_ELSE"
 [Ee][Nn][Dd]            "KW_END"
-[Cc][Oo][Aa][Ll][Ee][Ss][Cc][Ee] "KW_COALESCE"
+[Cc][Oo][Aa][Ll][Ee][Ss][Cc][Ee]        "KW_COALESCE"
+[Ww][Ii][Tt][Hh]_[Aa][Ll][Pp][Hh][Aa]   "KW_WITH_ALPHA"
 
 ,                       "COMMA"
 
