@@ -67,9 +67,11 @@
 //                       division, and modulo operations
 // Functions
 //
-//     coalesce(EXPR1, EXPR2, ...)     Returns the first non-null expression
-//     with_alpha(COLOR, ALPHA)        Returns a new color with the specified
-//                                     alpha value
+//     brightness(COLOR)              Returns the perceived brightness of the
+//                                    color
+//     coalesce(EXPR1, EXPR2, ...)    Returns the first non-null expression
+//     with_alpha(COLOR, ALPHA)       Returns a new color with the specified
+//                                    alpha value
 
 use super::solar;
 use super::tod;
@@ -250,6 +252,7 @@ pub enum Expr {
     Coalesce(Vec<Expr>),
 
     // Color/Temperature functions
+    Brightness(Box<Expr>),
     WithAlpha(Box<Expr>, Box<Expr>),
 
     // NotEq, Gt, and GtEq are parsed and converted into one of the
@@ -276,7 +279,8 @@ impl Expr {
             | Expr::SolarVal(..)
             | Expr::Nothing
             | Expr::Coalesce(_)
-            | Expr::WithAlpha(_, _) => 10,
+            | Expr::WithAlpha(_, _)
+            | Expr::Brightness(_) => 10,
             Expr::Not(_) => 9,
             Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 5,
             Expr::Add(_, _) | Expr::Sub(_, _) => 4,
@@ -309,7 +313,7 @@ impl Expr {
             | Expr::Lit(_)
             | Expr::Var(_)
             | Expr::Nothing => None,
-            Expr::Not(e) => e.uses_time(),
+            Expr::Brightness(e) | Expr::Not(e) => e.uses_time(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
             | Expr::Rem(a, b)
@@ -357,7 +361,7 @@ impl Expr {
             Expr::TimeVal(..) | Expr::Lit(_) | Expr::Var(_) | Expr::Nothing => {
                 false
             }
-            Expr::Not(e) => e.uses_solar(),
+            Expr::Brightness(e) | Expr::Not(e) => e.uses_solar(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
             | Expr::Rem(a, b)
@@ -462,6 +466,12 @@ impl fmt::Display for Expr {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " % ")?;
                 self.fmt_subexpr(b, f)
+            }
+
+            Expr::Brightness(e) => {
+                write!(f, "brightness(")?;
+                self.fmt_subexpr(e, f)?;
+                write!(f, ")")
             }
 
             Expr::WithAlpha(a, b) => {
@@ -577,6 +587,7 @@ pub fn eval(
         Expr::WithAlpha(a, b) => {
             eval_as_with_alpha_expr(a, b, inp, time, solar)
         }
+        Expr::Brightness(e) => eval_as_brightness_expr(e, inp, time, solar),
         Expr::Coalesce(exprs) => eval_as_coalesce_expr(exprs, inp, time, solar),
         Expr::If(a, b, c) => eval_as_if_expr(a, b, c, inp, time, solar),
     }
@@ -1010,6 +1021,37 @@ fn eval_as_with_alpha_expr(
         }
         None => {
             warn!("first argument to WITH_ALPHA evaluated to None");
+            None
+        }
+    }
+}
+
+#[inline(never)]
+fn eval_as_brightness_expr(
+    a: &Expr,
+    inp: &[Option<device::Value>],
+    time: &tod::Info,
+    solar: Option<&solar::Info>,
+) -> Option<device::Value> {
+    match eval(a, inp, time, solar) {
+        Some(device::Value::Color(ColorType::Rgba { color })) => {
+            let brightness = (0.2126 * color.red as f32
+                + 0.7152 * color.green as f32
+                + 0.0722 * color.blue as f32)
+                * color.alpha as f32
+                / 255.0;
+
+            Some(device::Value::Flt(brightness as f64))
+        }
+        Some(device::Value::Color(ColorType::Ccta { a, .. })) => {
+            Some(device::Value::Flt(a as f64))
+        }
+        Some(v) => {
+            error!("argument to BRIGHTNESS must be a color, got {}", &v);
+            None
+        }
+        None => {
+            warn!("argument to BRIGHTNESS evaluated to None");
             None
         }
     }
@@ -3705,6 +3747,34 @@ mod tests {
             Some(device::Value::Color(device::ColorType::Rgba {
                 color: palette::LinSrgba::new(255u8, 0u8, 0u8, 127u8),
             }))
+        );
+    }
+
+    #[test]
+    fn test_brightness() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: palette::LinSrgba::new(255u8, 255u8, 255u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 2700,
+                a: 200u8,
+            })),
+        ];
+
+        let expr_rgba = Expr::Brightness(Box::new(Expr::Var(0)));
+        assert_eq!(
+            eval(&expr_rgba, &inputs, &time, solar),
+            Some(device::Value::Flt(255.0))
+        );
+
+        let expr_ccta = Expr::Brightness(Box::new(Expr::Var(1)));
+        assert_eq!(
+            eval(&expr_ccta, &inputs, &time, solar),
+            Some(device::Value::Flt(200.0))
         );
     }
 

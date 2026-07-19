@@ -23,6 +23,7 @@
 %epp KW_ELSE "else"
 %epp KW_COALESCE "coalesce"
 %epp KW_WITH_ALPHA "with_alpha"
+%epp KW_BRIGHTNESS "brightness"
 %epp COMMA ","
 %epp ADD "+"
 %epp SUB "-"
@@ -140,7 +141,11 @@ Factor -> Result<Expr>:
     | "KW_COALESCE" "(" ExprList ")" { Ok(Expr::Coalesce($3?)) }
     | "KW_WITH_ALPHA" "(" TopExpr "COMMA" TopExpr ")"
       {
-          Ok(Expr::WithAlpha(Box::new($3?), Box::new($5?)))
+        Ok(Expr::WithAlpha(Box::new($3?), Box::new($5?)))
+      }
+    | "KW_BRIGHTNESS" "(" Expr ")"
+      {
+        Ok(Expr::Brightness(Box::new($3?)))
       }
     | Conditional { $1 }
     | "TRUE" { Ok(Expr::Lit(device::Value::Bool(true))) }
