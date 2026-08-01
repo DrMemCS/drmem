@@ -19,6 +19,7 @@ or                      "B_OR"
 [Cc][Oo][Aa][Ll][Ee][Ss][Cc][Ee]            "KW_COALESCE"
 [Ww][Ii][Tt][Hh]_[Aa][Ll][Pp][Hh][Aa]       "KW_WITH_ALPHA"
 [Bb][Rr][Ii][Gg][Hh][Tt][Nn][Ee][Ss][Ss]    "KW_BRIGHTNESS"
+[Bb][Ll][Ee][Nn][Dd]                        "KW_BLEND"
 ,                       "COMMA"
 
 =                       "EQ"

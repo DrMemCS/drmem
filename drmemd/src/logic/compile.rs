@@ -254,6 +254,7 @@ pub enum Expr {
     // Color/Temperature functions
     Brightness(Box<Expr>),
     WithAlpha(Box<Expr>, Box<Expr>),
+    Blend(Vec<Expr>),
 
     // NotEq, Gt, and GtEq are parsed and converted into one of the
     // following three representations (the NotEq is a combination Not
@@ -280,7 +281,8 @@ impl Expr {
             | Expr::Nothing
             | Expr::Coalesce(_)
             | Expr::WithAlpha(_, _)
-            | Expr::Brightness(_) => 10,
+            | Expr::Brightness(_)
+            | Expr::Blend(_) => 10,
             Expr::Not(_) => 9,
             Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 5,
             Expr::Add(_, _) | Expr::Sub(_, _) => 4,
@@ -330,7 +332,7 @@ impl Expr {
                 (None, b) => b,
                 (Some(a), Some(b)) => Some(a.min(b)),
             },
-            Expr::Coalesce(exprs) => {
+            Expr::Coalesce(exprs) | Expr::Blend(exprs) => {
                 exprs.iter().filter_map(|e| e.uses_time()).min()
             }
             Expr::If(a, b, c) => {
@@ -374,7 +376,9 @@ impl Expr {
             | Expr::Or(a, b)
             | Expr::WithAlpha(a, b)
             | Expr::If(a, b, None) => a.uses_solar() || b.uses_solar(),
-            Expr::Coalesce(exprs) => exprs.iter().any(|e| e.uses_solar()),
+            Expr::Coalesce(exprs) | Expr::Blend(exprs) => {
+                exprs.iter().any(|e| e.uses_solar())
+            }
             Expr::If(a, b, Some(c)) => {
                 a.uses_solar() || b.uses_solar() || c.uses_solar()
             }
@@ -493,6 +497,17 @@ impl fmt::Display for Expr {
                 write!(f, ")")
             }
 
+            Expr::Blend(exprs) => {
+                write!(f, "BLEND(")?;
+                for (i, expr) in exprs.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", expr)?;
+                }
+                write!(f, ")")
+            }
+
             Expr::If(a, b, c) => {
                 write!(f, "if ")?;
                 self.fmt_subexpr(a, f)?;
@@ -589,6 +604,7 @@ pub fn eval(
         }
         Expr::Brightness(e) => eval_as_brightness_expr(e, inp, time, solar),
         Expr::Coalesce(exprs) => eval_as_coalesce_expr(exprs, inp, time, solar),
+        Expr::Blend(exprs) => eval_as_blend_expr(exprs, inp, time, solar),
         Expr::If(a, b, c) => eval_as_if_expr(a, b, c, inp, time, solar),
     }
 }
@@ -1073,6 +1089,224 @@ fn eval_as_coalesce_expr(
 }
 
 #[inline(never)]
+fn eval_as_blend_expr(
+    exprs: &[Expr],
+    inp: &[Option<device::Value>],
+    time: &tod::Info,
+    solar: Option<&solar::Info>,
+) -> Option<device::Value> {
+    use palette::{LinSrgba, Srgba};
+
+    // Accumulator can be either a temperature or RGB color
+    enum BlendAccumulator {
+        None,
+        Temperature { kelvin: u16, a: u8 },
+        Color { color: LinSrgba<u8> },
+    }
+
+    // Helper function to convert temperature to RGB
+    fn kelvin_to_rgb(kelvin: u16, alpha: u8) -> LinSrgba<u8> {
+        let k = kelvin as f32;
+        let temp = k / 100.0;
+
+        let r = if temp <= 66.0 {
+            255
+        } else {
+            let r = temp - 60.0;
+            let r = 329.698727446 * r.powf(-0.1332047592);
+            r.clamp(0.0, 255.0) as u8
+        };
+
+        let g = if temp <= 66.0 {
+            let g = temp;
+            let g = 99.4708025861 * g.ln() - 161.1195681661;
+            g.clamp(0.0, 255.0) as u8
+        } else {
+            let g = temp - 60.0;
+            let g = 288.1221695283 * g.powf(-0.0755148492);
+            g.clamp(0.0, 255.0) as u8
+        };
+
+        let b = if temp >= 66.0 {
+            255
+        } else if temp <= 19.0 {
+            0
+        } else {
+            let b = temp - 10.0;
+            let b = 138.5177312231 * b.ln() - 305.0447927307;
+            b.clamp(0.0, 255.0) as u8
+        };
+
+        LinSrgba::new(r, g, b, alpha)
+    }
+
+    // Helper function to blend two temperatures
+    fn blend_temps(
+        top_k: u16,
+        top_a: u8,
+        bottom_k: u16,
+        bottom_a: u8,
+    ) -> (u16, u8) {
+        let alpha_top = top_a as f32 / 255.0;
+        let alpha_bottom = bottom_a as f32 / 255.0;
+        let alpha_result = alpha_top + alpha_bottom * (1.0 - alpha_top);
+
+        if alpha_result > 0.0 {
+            let weight_top = alpha_top / alpha_result;
+            let weight_bottom =
+                (alpha_bottom * (1.0 - alpha_top)) / alpha_result;
+
+            let result_kelvin = ((top_k as f32) * weight_top
+                + (bottom_k as f32) * weight_bottom)
+                as u16;
+            let result_alpha = (alpha_result * 255.0) as u8;
+            (result_kelvin, result_alpha)
+        } else {
+            (bottom_k, 0)
+        }
+    }
+
+    // Helper function to blend two RGBA colors (top OVER bottom)
+    fn blend_rgba(top: LinSrgba<u8>, bottom: LinSrgba<u8>) -> LinSrgba<u8> {
+        let top_f32: Srgba<f32> = Srgba::new(
+            top.red as f32 / 255.0,
+            top.green as f32 / 255.0,
+            top.blue as f32 / 255.0,
+            top.alpha as f32 / 255.0,
+        );
+
+        let bottom_f32: Srgba<f32> = Srgba::new(
+            bottom.red as f32 / 255.0,
+            bottom.green as f32 / 255.0,
+            bottom.blue as f32 / 255.0,
+            bottom.alpha as f32 / 255.0,
+        );
+
+        let alpha_top = top_f32.alpha;
+        let alpha_bottom = bottom_f32.alpha;
+        let alpha_result = alpha_top + alpha_bottom * (1.0 - alpha_top);
+
+        let blended = if alpha_result > 0.0 {
+            Srgba::new(
+                (top_f32.red * alpha_top
+                    + bottom_f32.red * alpha_bottom * (1.0 - alpha_top))
+                    / alpha_result,
+                (top_f32.green * alpha_top
+                    + bottom_f32.green * alpha_bottom * (1.0 - alpha_top))
+                    / alpha_result,
+                (top_f32.blue * alpha_top
+                    + bottom_f32.blue * alpha_bottom * (1.0 - alpha_top))
+                    / alpha_result,
+                alpha_result,
+            )
+        } else {
+            Srgba::new(0.0, 0.0, 0.0, 0.0)
+        };
+
+        LinSrgba::new(
+            (blended.red * 255.0).round() as u8,
+            (blended.green * 255.0).round() as u8,
+            (blended.blue * 255.0).round() as u8,
+            (blended.alpha * 255.0).round() as u8,
+        )
+    }
+
+    // Single-pass blend: iterate in reverse (last expr is bottom layer)
+    let mut accumulator = BlendAccumulator::None;
+
+    for expr in exprs.iter().rev() {
+        match eval(expr, inp, time, solar) {
+            Some(device::Value::Color(color)) => {
+                accumulator = match (accumulator, color) {
+                    // First color - initialize accumulator
+                    (
+                        BlendAccumulator::None,
+                        device::ColorType::Ccta { kelvin, a },
+                    ) => BlendAccumulator::Temperature { kelvin, a },
+
+                    (
+                        BlendAccumulator::None,
+                        device::ColorType::Rgba { color },
+                    ) => BlendAccumulator::Color { color },
+
+                    // Both temperatures - blend as temperatures
+                    (
+                        BlendAccumulator::Temperature {
+                            kelvin: bottom_k,
+                            a: bottom_a,
+                        },
+                        device::ColorType::Ccta {
+                            kelvin: top_k,
+                            a: top_a,
+                        },
+                    ) => {
+                        let (k, a) =
+                            blend_temps(top_k, top_a, bottom_k, bottom_a);
+                        BlendAccumulator::Temperature { kelvin: k, a }
+                    }
+
+                    // Temperature accumulator + RGB color -> convert to RGB
+                    (
+                        BlendAccumulator::Temperature { kelvin, a },
+                        device::ColorType::Rgba { color: top },
+                    ) => {
+                        let bottom = kelvin_to_rgb(kelvin, a);
+                        let blended = blend_rgba(top, bottom);
+                        BlendAccumulator::Color { color: blended }
+                    }
+
+                    // RGB accumulator + temperature -> convert temp to RGB
+                    (
+                        BlendAccumulator::Color { color: bottom },
+                        device::ColorType::Ccta {
+                            kelvin: top_k,
+                            a: top_a,
+                        },
+                    ) => {
+                        let top = kelvin_to_rgb(top_k, top_a);
+                        let blended = blend_rgba(top, bottom);
+                        BlendAccumulator::Color { color: blended }
+                    }
+
+                    // Both RGB - blend as RGB
+                    (
+                        BlendAccumulator::Color { color: bottom },
+                        device::ColorType::Rgba { color: top },
+                    ) => {
+                        let blended = blend_rgba(top, bottom);
+                        BlendAccumulator::Color { color: blended }
+                    }
+                };
+            }
+            None => {
+                // None is treated as fully transparent - skip it
+                continue;
+            }
+            Some(v) => {
+                error!("BLEND arguments must be colors, got {}", &v);
+                return None;
+            }
+        }
+    }
+
+    // Return the final blended result
+    match accumulator {
+        BlendAccumulator::None => {
+            // No colors or all were None - return black with 0% brightness
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0, 0, 0, 0),
+            }))
+        }
+        BlendAccumulator::Temperature { kelvin, a } => {
+            Some(device::Value::Color(device::ColorType::Ccta { kelvin, a }))
+        }
+        BlendAccumulator::Color { color } => {
+            Some(device::Value::Color(device::ColorType::Rgba { color }))
+        }
+    }
+}
+
+#[inline(never)]
 fn eval_as_if_expr(
     a: &Expr,
     b: &Expr,
@@ -1193,6 +1427,21 @@ pub fn optimize(e: Expr) -> Expr {
                 0 => Expr::Nothing,
                 1 => opt_exprs.pop().unwrap(),
                 _ => Expr::Coalesce(opt_exprs),
+            }
+        }
+
+        Expr::Blend(exprs) => {
+            let opt_exprs: Vec<Expr> = exprs
+                .into_iter()
+                .map(optimize)
+                .filter(|e| e != &Expr::Nothing)
+                .collect();
+
+            match opt_exprs.len() {
+                0 => Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                    color: palette::LinSrgba::new(0, 0, 0, 0),
+                })),
+                _ => Expr::Blend(opt_exprs),
             }
         }
 
@@ -3797,5 +4046,336 @@ mod tests {
 
         let expr = Expr::Coalesce(vec![Expr::Nothing, Expr::Nothing]);
         assert_eq!(optimize(expr), Expr::Nothing);
+    }
+
+    #[test]
+    fn test_blend_parser() {
+        let env: Env = (
+            &[String::from("a"), String::from("b")],
+            &[String::from("out")],
+        );
+
+        let cases = [
+            (
+                "BLEND(#ff0000) -> {out}",
+                Expr::Blend(vec![Expr::Lit(device::Value::Color(
+                    device::ColorType::Rgba {
+                        color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+                    },
+                ))]),
+            ),
+            (
+                "BLEND({a}, {b}) -> {out}",
+                Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]),
+            ),
+            (
+                "BLEND(#ff0000, #00ff00, #0000ff) -> {out}",
+                Expr::Blend(vec![
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+                    })),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+                    })),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(0u8, 0u8, 255u8, 255u8),
+                    })),
+                ]),
+            ),
+        ];
+
+        for (src, expected_expr) in cases {
+            let Program(expr, _) = Program::compile(src, &env).unwrap();
+            assert_eq!(expr, expected_expr);
+        }
+
+        // Empty BLEND should fail to parse
+        assert!(Program::compile("BLEND() -> {out}", &env).is_err());
+        // Missing commas should fail
+        assert!(Program::compile("BLEND({a} {b}) -> {out}", &env).is_err());
+    }
+
+    #[test]
+    fn test_blend_two_rgba_colors() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Blend opaque red over opaque green - should get red
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            }))
+        );
+
+        // Blend semi-transparent red (50%) over opaque green
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 128u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        // Should be a blend of red and green
+        if let Some(device::Value::Color(device::ColorType::Rgba { color })) =
+            result
+        {
+            assert!(color.red > 0);
+            assert!(color.green > 0);
+            assert_eq!(color.blue, 0);
+            assert_eq!(color.alpha, 255); // Result should be opaque
+        } else {
+            panic!("Expected RGBA color result");
+        }
+    }
+
+    #[test]
+    fn test_blend_two_temperature_colors() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Blend two temperature colors - result should be a temperature
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 4000,
+                a: 255,
+            })),
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 6500,
+                a: 255,
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        if let Some(device::Value::Color(device::ColorType::Ccta {
+            kelvin,
+            a,
+        })) = result
+        {
+            // Should be 4000K (top layer is opaque)
+            assert_eq!(kelvin, 4000);
+            assert_eq!(a, 255);
+        } else {
+            panic!("Expected Ccta color result, got {:?}", result);
+        }
+
+        // Blend semi-transparent warm over cool
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 3000,
+                a: 128,
+            })),
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 6000,
+                a: 255,
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        if let Some(device::Value::Color(device::ColorType::Ccta {
+            kelvin,
+            a,
+        })) = result
+        {
+            // Should be between 3000K and 6000K
+            assert!(kelvin > 3000);
+            assert!(kelvin < 6000);
+            assert_eq!(a, 255); // Result should be opaque
+        } else {
+            panic!("Expected Ccta color result");
+        }
+    }
+
+    #[test]
+    fn test_blend_mixed_color_types() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Blend RGB over temperature - result should be RGB
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 4000,
+                a: 255,
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert!(matches!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba { .. }))
+        ));
+
+        // Blend temperature over RGB - result should be RGB
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 4000,
+                a: 255,
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert!(matches!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba { .. }))
+        ));
+    }
+
+    #[test]
+    fn test_blend_with_none() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // None is treated as transparent, so second color should show through
+        let inputs = vec![
+            None,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            }))
+        );
+
+        // All None should return black with 0 alpha
+        let inputs = vec![None, None];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 0u8, 0u8, 0u8),
+            }))
+        );
+    }
+
+    #[test]
+    fn test_blend_single_color() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Single color should return that color unchanged
+        let inputs =
+            vec![Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 128u8, 64u8, 200u8),
+            }))];
+        let expr = Expr::Blend(vec![Expr::Var(0)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 128u8, 64u8, 200u8),
+            }))
+        );
+    }
+
+    #[test]
+    fn test_blend_multiple_colors() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Blend three opaque colors - top should dominate
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 0u8, 255u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1), Expr::Var(2)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        // Top layer (red) is opaque, so result should be red
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            }))
+        );
+    }
+
+    #[test]
+    fn test_blend_invalid_type() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // BLEND with non-color type should return None and log error
+        let inputs = vec![
+            Some(device::Value::Int(42)),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_blend_optimization() {
+        // Blend with Nothing values should be filtered out
+        let expr = Expr::Blend(vec![
+            Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+            Expr::Nothing,
+            Expr::Var(0),
+        ]);
+
+        let optimized = optimize(expr);
+        if let Expr::Blend(exprs) = optimized {
+            assert_eq!(exprs.len(), 2); // Nothing should be removed
+            assert!(matches!(exprs[0], Expr::Lit(_)));
+            assert!(matches!(exprs[1], Expr::Var(0)));
+        } else {
+            panic!("Expected Blend expression");
+        }
+
+        // All Nothing should return black with 0 alpha
+        let expr = Expr::Blend(vec![Expr::Nothing, Expr::Nothing]);
+        let optimized = optimize(expr);
+        assert_eq!(
+            optimized,
+            Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 0u8, 0u8, 0u8),
+            }))
+        );
     }
 }
