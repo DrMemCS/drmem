@@ -627,6 +627,8 @@ mod tests {
 
                 f.report_value(device::Value::Int(data[0])).await;
 
+                tokio::time::sleep(time::Duration::from_millis(50)).await;
+
                 let s = db
                     .monitor_device(
                         name.clone(),
