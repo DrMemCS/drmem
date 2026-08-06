@@ -1016,8 +1016,8 @@ fn build_base_routes<R: Reporter + Clone>(
     schema: Schema<R>,
     context: ConfigDb<R>,
 ) -> Router {
-    #[allow(unused_mut)]
-    let mut router = Router::new()
+    // Build the GraphQL API routes with state and context
+    let graphql_routes = Router::new()
         .route(
             &format!("/{}", paths::QUERY),
             post(graphql_post_handler::<R>).get(graphql_get_handler::<R>),
@@ -1029,12 +1029,16 @@ fn build_base_routes<R: Reporter + Clone>(
         .with_state(schema)
         .layer(Extension(context));
 
+    // Build the base router and nest the GraphQL routes
+    #[allow(unused_mut)]
+    let mut routes = Router::new();
+
     #[cfg(feature = "graphiql")]
     {
-        router = router.route("/", get(graphiql));
+        routes = routes.route("/", get(graphiql));
     }
 
-    router
+    routes.merge(graphql_routes)
 }
 
 // "Sanitizes" a string containing a digital fingerprint by returning
@@ -1080,6 +1084,19 @@ fn cors_layer() -> CorsLayer {
         .max_age(Duration::from_secs(3_600))
 }
 
+// Builds the complete application router with all GraphQL routes nested
+// under the base path. This is the production route configuration.
+fn build_app<R: Reporter + Clone>(
+    schema: Schema<R>,
+    context: ConfigDb<R>,
+) -> Router {
+    let graphql_routes = build_base_routes(schema, context);
+    Router::new()
+        .nest(&format!("/{}", paths::BASE), graphql_routes)
+        .layer(cors_layer())
+        .layer(CompressionLayer::new())
+}
+
 // Builds the server object that will handle GraphQL requests. If the
 // configuration contains the `security` key, the server will require
 // TLS connections.
@@ -1093,22 +1110,19 @@ async fn build_server<R: Reporter + Clone>(
 ) -> std::io::Result<()> {
     let context = ConfigDb::<R>(db, cchan, logic_blocks);
     let schema = schema::<R>(context.clone());
-    let graphql_routes = build_base_routes(schema, context);
+    let app = build_app(schema, context);
 
     match security {
         Some(security) => {
             let allowed_clients = Arc::clone(&security.clients);
 
-            let app = Router::new()
-                .nest(&format!("/{}", paths::BASE), graphql_routes)
+            let app = app
                 .layer(axum::middleware::from_fn(
                     move |headers, ext, req, next| {
                         check_authorization(headers, ext, req, next)
                     },
                 ))
-                .layer(Extension(allowed_clients))
-                .layer(cors_layer())
-                .layer(CompressionLayer::new());
+                .layer(Extension(allowed_clients));
 
             // Build TLS configuration
             let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(
@@ -1128,11 +1142,6 @@ async fn build_server<R: Reporter + Clone>(
                 .await
         }
         None => {
-            let app = Router::new()
-                .nest(&format!("/{}", paths::BASE), graphql_routes)
-                .layer(cors_layer())
-                .layer(CompressionLayer::new());
-
             let listener =
                 tokio::net::TcpListener::bind(addr).await.map_err(|e| {
                     std::io::Error::new(
@@ -1346,5 +1355,136 @@ TBj0/VLZjmmx6BEP3ojY+x1J96relc8geMJgEtslQIxq/H5COEBkEveegeGTLg==
 		"CA:42:DD:41:74:5F:D0:B8:1E:B9:02:36:2C:F9:D8:BF:71:9D:A1:BD:1B:1E:FC:94:6F:5B:4C:99:F4:2C:1B:9E"
 	    )
 	);
+    }
+
+    // Mock Reporter for testing
+    #[derive(Clone)]
+    struct MockReporter;
+
+    impl drmem_api::driver::Reporter for MockReporter {
+        async fn report_value(&mut self, _value: drmem_api::device::Value) {}
+    }
+
+    // Helper to create a test schema and context
+    fn create_test_schema(
+    ) -> (super::Schema<MockReporter>, super::ConfigDb<MockReporter>) {
+        use drmem_api::client;
+        use tokio::sync::mpsc;
+
+        let db = crate::driver::DriverDb::<MockReporter>::create();
+
+        // Create a dummy channel - won't be used in route tests
+        let (tx, _rx) = mpsc::channel(10);
+        let req_chan = client::RequestChan::new(tx);
+
+        let logic_blocks = Vec::new();
+
+        let context = super::ConfigDb(db, req_chan, logic_blocks);
+        let schema = super::schema(context.clone());
+
+        (schema, context)
+    }
+
+    #[tokio::test]
+    async fn test_drmem_query_path_responds() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (schema, context) = create_test_schema();
+        let app = super::build_app(schema, context);
+
+        // Test POST to /drmem/q path (GraphQL query endpoint)
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/drmem/q")
+                    .method("POST")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"query":"{ __typename }"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Should return 200 OK (not 404)
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_drmem_subscription_path_responds() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (schema, context) = create_test_schema();
+        let app = super::build_app(schema, context);
+
+        // Test GET to /drmem/s path (GraphQL subscription endpoint)
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/drmem/s")
+                    .method("GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Should not return 404 (path exists)
+        assert_ne!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[cfg(feature = "graphiql")]
+    #[tokio::test]
+    async fn test_drmem_root_path_responds() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (schema, context) = create_test_schema();
+        let app = super::build_app(schema, context);
+
+        // Test GET to /drmem path (GraphiQL UI)
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/drmem")
+                    .method("GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Should return 200 OK
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_path_without_drmem_prefix_fails() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (schema, context) = create_test_schema();
+        let app = super::build_app(schema, context);
+
+        // Test that /q without /drmem prefix returns 404
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/q")
+                    .method("POST")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"query":"{ __typename }"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Should return 404 (path doesn't exist without /drmem prefix)
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }
