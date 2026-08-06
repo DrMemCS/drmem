@@ -199,7 +199,7 @@ graphql = ["dep:axum", "dep:axum-server", "dep:async-graphql",
            "dep:async-graphql-axum", "dep:async-stream", "dep:tower",
            "dep:tower-http", "dep:libmdns", "dep:rustls-pki-types",
            "dep:ring", "dep:rustls-pemfile"]
-graphiql = ["graphql"]
+graphiql = ["graphql", "async-graphql/graphiql"]
 
 # Drivers
 

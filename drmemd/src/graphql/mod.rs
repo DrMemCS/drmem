@@ -3,12 +3,6 @@ use async_graphql::{
     Context, Error, InputObject, Object, Result, SimpleObject, Subscription,
 };
 use async_graphql_axum::GraphQLSubscription;
-#[cfg(feature = "graphiql")]
-use axum::response::Html;
-#[cfg(feature = "graphiql")]
-use axum::routing::get;
-#[cfg(feature = "graphiql")]
-use axum::routing::get;
 use axum::{
     extract::{Query as AxumQuery, State},
     http::{header, HeaderMap, StatusCode},
@@ -16,6 +10,8 @@ use axum::{
     routing::post,
     Extension, Router,
 };
+#[cfg(feature = "graphiql")]
+use axum::{response::Html, routing::get};
 use chrono::prelude::*;
 use drmem_api::{
     client, device,
