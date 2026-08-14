@@ -30,7 +30,7 @@ impl Instance {
     pub const SUMMARY: &'static str =
         "controls devices registered with a Philips Hue bridge";
 
-    pub const DESCRIPTION: &'static str = include_str!("../../README.md");
+    pub const DESCRIPTION: &'static str = include_str!("../README.md");
 
     // Creates a new instance of the driver state.
 
