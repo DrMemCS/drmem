@@ -7,12 +7,7 @@ pub struct HueResponse {
     pub data: Vec<ResourceData>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct HueEvent {
-    pub data: Vec<ResourceData>,
-}
-
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct LightCommand {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<On>,
@@ -54,12 +49,4 @@ pub struct ResourceData {
     pub on: Option<On>,
     pub dimming: Option<Dimming>,
     pub color: Option<Color>,
-}
-
-impl ResourceData {
-    pub fn merge(&mut self, other: ResourceData) {
-        self.on = other.on.or(self.on.take());
-        self.dimming = other.dimming.or(self.dimming.take());
-        self.color = other.color.or(self.color.take());
-    }
 }

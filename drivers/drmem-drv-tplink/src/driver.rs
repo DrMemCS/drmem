@@ -70,7 +70,7 @@ impl Instance {
 
     pub const SUMMARY: &'static str = "monitors and controls TP-Link devices";
 
-    pub const DESCRIPTION: &'static str = include_str!("../../README.md");
+    pub const DESCRIPTION: &'static str = include_str!("../README.md");
 
     // Attempts to read a `tplink::Reply` type from the socket.
     // All replies have a 4-byte length header so we know how much

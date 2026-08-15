@@ -9,8 +9,8 @@
 //     #.##              floating point numbers
 //     "TEXT"            strings
 //     {NAME}            variable named NAME (from config params)
-//     #rrggbb or
-//     #name		 RGB color values
+//     #rrggbb[aa]       RGB color values with optional alpha channel
+//     #tttK		     White color temperature in Kelvin
 //
 // There are two built-in types, "utc" and "local", which can be used
 // to obtain time-of-day values. Use the {} notation to access them:
@@ -65,15 +65,23 @@
 //
 //     +,-,*,/,%         Perform addition, subtraction, multiplication,
 //                       division, and modulo operations
+// Functions
+//
+//     brightness(COLOR)              Returns the perceived brightness of the
+//                                    color
+//     coalesce(EXPR1, EXPR2, ...)    Returns the first non-null expression
+//     with_alpha(COLOR, ALPHA)       Returns a new color with the specified
+//                                    alpha value
 
 use super::solar;
 use super::tod;
 use chrono::{Datelike, Timelike};
+use drmem_api::device::ColorType;
 use drmem_api::{device, Error, Result};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
-use std::{borrow::Cow, fmt};
-use tracing::error;
+use std::fmt;
+use tracing::{error, warn};
 
 // Pull in the lexer and parser for the Logic Node language.
 
@@ -243,6 +251,11 @@ pub enum Expr {
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Coalesce(Vec<Expr>),
 
+    // Color/Temperature functions
+    Brightness(Box<Expr>),
+    WithAlpha(Box<Expr>, Box<Expr>),
+    Blend(Vec<Expr>),
+
     // NotEq, Gt, and GtEq are parsed and converted into one of the
     // following three representations (the NotEq is a combination Not
     // and Eq value.)
@@ -266,7 +279,10 @@ impl Expr {
             | Expr::TimeVal(..)
             | Expr::SolarVal(..)
             | Expr::Nothing
-            | Expr::Coalesce(_) => 10,
+            | Expr::Coalesce(_)
+            | Expr::WithAlpha(_, _)
+            | Expr::Brightness(_)
+            | Expr::Blend(_) => 10,
             Expr::Not(_) => 9,
             Expr::Mul(_, _) | Expr::Div(_, _) | Expr::Rem(_, _) => 5,
             Expr::Add(_, _) | Expr::Sub(_, _) => 4,
@@ -299,7 +315,7 @@ impl Expr {
             | Expr::Lit(_)
             | Expr::Var(_)
             | Expr::Nothing => None,
-            Expr::Not(e) => e.uses_time(),
+            Expr::Brightness(e) | Expr::Not(e) => e.uses_time(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
             | Expr::Rem(a, b)
@@ -309,32 +325,30 @@ impl Expr {
             | Expr::LtEq(a, b)
             | Expr::Eq(a, b)
             | Expr::And(a, b)
-            | Expr::Or(a, b) => match (a.uses_time(), b.uses_time()) {
+            | Expr::Or(a, b)
+            | Expr::WithAlpha(a, b) => match (a.uses_time(), b.uses_time()) {
                 (None, None) => None,
                 (a, None) => a,
                 (None, b) => b,
                 (Some(a), Some(b)) => Some(a.min(b)),
             },
-            Expr::Coalesce(exprs) => {
+            Expr::Coalesce(exprs) | Expr::Blend(exprs) => {
                 exprs.iter().filter_map(|e| e.uses_time()).min()
             }
             Expr::If(a, b, c) => {
-                match (
-                    a.uses_time(),
-                    b.uses_time(),
-                    c.as_ref().map(|v| v.uses_time()),
-                ) {
-                    (None, None, None) | (None, None, Some(None)) => None,
-                    (None, None, Some(c @ Some(_))) => c,
-                    (None, b @ Some(_), None)
-                    | (None, b @ Some(_), Some(None)) => b,
-                    (None, Some(b), Some(Some(c))) => Some(b.min(c)),
-                    (a @ Some(_), None, None)
-                    | (a @ Some(_), None, Some(None)) => a,
-                    (Some(a), None, Some(Some(c))) => Some(a.min(c)),
-                    (Some(a), Some(b), None)
-                    | (Some(a), Some(b), Some(None)) => Some(a.min(b)),
-                    (Some(a), Some(b), Some(Some(c))) => Some(a.min(b.min(c))),
+                let a_time = a.uses_time();
+                let b_time = b.uses_time();
+                let c_time = c.as_ref().and_then(|v| v.uses_time());
+
+                match (a_time, b_time, c_time) {
+                    (None, None, None) => None,
+                    (None, None, Some(c)) => Some(c),
+                    (None, Some(b), None) => Some(b),
+                    (None, Some(b), Some(c)) => Some(b.min(c)),
+                    (Some(a), None, None) => Some(a),
+                    (Some(a), None, Some(c)) => Some(a.min(c)),
+                    (Some(a), Some(b), None) => Some(a.min(b)),
+                    (Some(a), Some(b), Some(c)) => Some(a.min(b).min(c)),
                 }
             }
         }
@@ -349,7 +363,7 @@ impl Expr {
             Expr::TimeVal(..) | Expr::Lit(_) | Expr::Var(_) | Expr::Nothing => {
                 false
             }
-            Expr::Not(e) => e.uses_solar(),
+            Expr::Brightness(e) | Expr::Not(e) => e.uses_solar(),
             Expr::Mul(a, b)
             | Expr::Div(a, b)
             | Expr::Rem(a, b)
@@ -360,8 +374,11 @@ impl Expr {
             | Expr::Eq(a, b)
             | Expr::And(a, b)
             | Expr::Or(a, b)
+            | Expr::WithAlpha(a, b)
             | Expr::If(a, b, None) => a.uses_solar() || b.uses_solar(),
-            Expr::Coalesce(exprs) => exprs.iter().any(|e| e.uses_solar()),
+            Expr::Coalesce(exprs) | Expr::Blend(exprs) => {
+                exprs.iter().any(|e| e.uses_solar())
+            }
             Expr::If(a, b, Some(c)) => {
                 a.uses_solar() || b.uses_solar() || c.uses_solar()
             }
@@ -455,8 +472,33 @@ impl fmt::Display for Expr {
                 self.fmt_subexpr(b, f)
             }
 
+            Expr::Brightness(e) => {
+                write!(f, "brightness(")?;
+                self.fmt_subexpr(e, f)?;
+                write!(f, ")")
+            }
+
+            Expr::WithAlpha(a, b) => {
+                write!(f, "with_alpha(")?;
+                self.fmt_subexpr(a, f)?;
+                write!(f, ", ")?;
+                self.fmt_subexpr(b, f)?;
+                write!(f, ")")
+            }
+
             Expr::Coalesce(exprs) => {
                 write!(f, "COALESCE(")?;
+                for (i, expr) in exprs.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", expr)?;
+                }
+                write!(f, ")")
+            }
+
+            Expr::Blend(exprs) => {
+                write!(f, "BLEND(")?;
                 for (i, expr) in exprs.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
@@ -525,29 +567,26 @@ impl fmt::Display for Program {
 // it won't get computed ever again. The log will have a message
 // indicating what the error was.
 
-pub fn eval<'a>(
-    e: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+pub fn eval(
+    e: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     match e {
         Expr::Nothing => None,
 
-        // Optimization: Return a reference to the literal stored in the AST
-        Expr::Lit(v) => Some(Cow::Borrowed(v)),
+        // Optimization: Clone the literal stored in the AST
+        Expr::Lit(v) => Some(v.clone()),
 
-        // Optimization: Return a reference to the value in the input buffer
+        // Optimization: Clone the value from the input buffer
         Expr::Var(n) => eval_as_var(*n, inp),
 
-        // Time/Solar fields generate new values, so they return Owned
-        Expr::TimeVal(Zone::Utc, field) => {
-            Some(Cow::Owned(field.project(&time.0)))
-        }
-        Expr::TimeVal(Zone::Local, field) => {
-            Some(Cow::Owned(field.project(&time.1)))
-        }
-        Expr::SolarVal(field) => solar.map(|v| Cow::Owned(field.project(v))),
+        // Time/Solar fields generate new values
+        Expr::TimeVal(Zone::Utc, field) => Some(field.project(&time.0)),
+        Expr::TimeVal(Zone::Local, field) => Some(field.project(&time.1)),
+        Expr::SolarVal(field) => solar.map(|v| field.project(v)),
 
         Expr::Not(e) => eval_as_not_expr(e, inp, time, solar),
         Expr::Or(a, b) => eval_as_or_expr(a, b, inp, time, solar),
@@ -560,31 +599,33 @@ pub fn eval<'a>(
         Expr::Mul(a, b) => eval_as_mul_expr(a, b, inp, time, solar),
         Expr::Div(a, b) => eval_as_div_expr(a, b, inp, time, solar),
         Expr::Rem(a, b) => eval_as_rem_expr(a, b, inp, time, solar),
+        Expr::WithAlpha(a, b) => {
+            eval_as_with_alpha_expr(a, b, inp, time, solar)
+        }
+        Expr::Brightness(e) => eval_as_brightness_expr(e, inp, time, solar),
         Expr::Coalesce(exprs) => eval_as_coalesce_expr(exprs, inp, time, solar),
+        Expr::Blend(exprs) => eval_as_blend_expr(exprs, inp, time, solar),
         Expr::If(a, b, c) => eval_as_if_expr(a, b, c, inp, time, solar),
     }
 }
 
-fn eval_as_var<'a>(
+#[inline(never)]
+fn eval_as_var(
     idx: usize,
-    inp: &'a [Option<device::Value>],
-) -> Option<Cow<'a, device::Value>> {
-    inp[idx].as_ref().map(Cow::Borrowed)
+    inp: &[Option<device::Value>],
+) -> Option<device::Value> {
+    inp[idx].as_ref().cloned()
 }
 
-fn eval_as_not_expr<'a>(
-    e: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_not_expr(
+    e: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     match eval(e, inp, time, solar)? {
-        Cow::Borrowed(device::Value::Bool(v)) => {
-            Some(Cow::Owned(device::Value::Bool(!v)))
-        }
-        Cow::Owned(device::Value::Bool(v)) => {
-            Some(Cow::Owned(device::Value::Bool(!v)))
-        }
+        device::Value::Bool(v) => Some(device::Value::Bool(!v)),
         v => {
             error!("NOT expression contains non-boolean value : {}", &v);
             None
@@ -592,31 +633,28 @@ fn eval_as_not_expr<'a>(
     }
 }
 
-fn eval_as_or_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_or_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     // Check first argument. If true, short-circuit return it (borrowed or owned).
     match eval(a, inp, time, solar) {
-        Some(v) if matches!(v.as_ref(), device::Value::Bool(true)) => Some(v),
-        Some(v) if matches!(v.as_ref(), device::Value::Bool(false)) => {
-            match eval(b, inp, time, solar) {
-                Some(v) if matches!(v.as_ref(), device::Value::Bool(_)) => {
-                    Some(v)
-                }
-                Some(v) => {
-                    error!(
-                        "OR expression contains non-boolean, second argument: {}",
-                        &v
-                    );
-                    None
-                }
-                None => None,
+        v @ Some(device::Value::Bool(true)) => v,
+        Some(device::Value::Bool(false)) => match eval(b, inp, time, solar) {
+            Some(v) if matches!(&v, device::Value::Bool(_)) => Some(v),
+            Some(v) => {
+                error!(
+                    "OR expression contains non-boolean, second argument: {}",
+                    &v
+                );
+                None
             }
-        }
+            None => None,
+        },
         Some(v) => {
             error!(
                 "OR expression contains non-boolean, first argument: {}",
@@ -625,10 +663,8 @@ fn eval_as_or_expr<'a>(
             None
         }
         None => match eval(b, inp, time, solar) {
-            Some(v) if matches!(v.as_ref(), device::Value::Bool(true)) => {
-                Some(v)
-            }
-            Some(v) if matches!(v.as_ref(), device::Value::Bool(false)) => None,
+            v @ Some(device::Value::Bool(true)) => v,
+            Some(device::Value::Bool(false)) => None,
             Some(v) => {
                 error!(
                     "OR expression contains non-boolean, second argument: {}",
@@ -641,30 +677,27 @@ fn eval_as_or_expr<'a>(
     }
 }
 
-fn eval_as_and_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_and_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     match eval(a, inp, time, solar) {
-        Some(v) if matches!(v.as_ref(), device::Value::Bool(false)) => Some(v),
-        Some(v) if matches!(v.as_ref(), device::Value::Bool(true)) => {
-            match eval(b, inp, time, solar) {
-                Some(v) if matches!(v.as_ref(), device::Value::Bool(_)) => {
-                    Some(v)
-                }
-                Some(v) => {
-                    error!(
-                        "AND expression contains non-boolean, second argument: {}",
-                        &v
-                    );
-                    None
-                }
-                None => None,
+        v @ Some(device::Value::Bool(false)) => v,
+        Some(device::Value::Bool(true)) => match eval(b, inp, time, solar) {
+            Some(v) if matches!(&v, device::Value::Bool(_)) => Some(v),
+            Some(v) => {
+                error!(
+                    "AND expression contains non-boolean, second argument: {}",
+                    &v
+                );
+                None
             }
-        }
+            None => None,
+        },
         Some(v) => {
             error!(
                 "AND expression contains non-boolean, first argument: {}",
@@ -673,10 +706,8 @@ fn eval_as_and_expr<'a>(
             None
         }
         None => match eval(b, inp, time, solar) {
-            Some(v) if matches!(v.as_ref(), device::Value::Bool(false)) => {
-                Some(v)
-            }
-            Some(v) if matches!(v.as_ref(), device::Value::Bool(true)) => None,
+            v @ Some(device::Value::Bool(false)) => v,
+            Some(device::Value::Bool(true)) => None,
             Some(v) => {
                 error!(
                     "AND expression contains non-boolean, second argument: {}",
@@ -689,300 +720,366 @@ fn eval_as_and_expr<'a>(
     }
 }
 
-fn eval_as_eq_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_eq_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
-        (device::Value::Bool(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a == b)))
-        }
-        (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a == b)))
-        }
-        (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a == b)))
-        }
-        (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool(*a as f64 == *b)))
-        }
-        (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(*a == *b as f64)))
-        }
-        (device::Value::Str(a), device::Value::Str(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a == b)))
-        }
+    let result = match (&val_a, &val_b) {
+        (device::Value::Bool(a), device::Value::Bool(b)) => a == b,
+        (device::Value::Int(a), device::Value::Int(b)) => a == b,
+        (device::Value::Flt(a), device::Value::Flt(b)) => a == b,
+        (device::Value::Int(a), device::Value::Flt(b)) => *a as f64 == *b,
+        (device::Value::Flt(a), device::Value::Int(b)) => *a == *b as f64,
+        (device::Value::Str(a), device::Value::Str(b)) => a == b,
         (a, b) => {
             error!("cannot compare {} and {} for equality", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(device::Value::Bool(result))
 }
 
-fn eval_as_lt_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_lt_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
-        (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a < b)))
-        }
-        (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a < b)))
-        }
-        (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool((*a as f64) < *b)))
-        }
-        (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(*a < *b as f64)))
-        }
-        (device::Value::Str(a), device::Value::Str(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a < b)))
-        }
+    let result = match (&val_a, &val_b) {
+        (device::Value::Int(a), device::Value::Int(b)) => a < b,
+        (device::Value::Flt(a), device::Value::Flt(b)) => a < b,
+        (device::Value::Int(a), device::Value::Flt(b)) => (*a as f64) < *b,
+        (device::Value::Flt(a), device::Value::Int(b)) => *a < *b as f64,
+        (device::Value::Str(a), device::Value::Str(b)) => a < b,
         (a, b) => {
             error!("cannot compare {} and {} for order", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(device::Value::Bool(result))
 }
 
-fn eval_as_lteq_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_lteq_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
-        (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a <= b)))
-        }
-        (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a <= b)))
-        }
-        (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Bool((*a as f64) <= *b)))
-        }
-        (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Bool(*a <= *b as f64)))
-        }
-        (device::Value::Str(a), device::Value::Str(b)) => {
-            Some(Cow::Owned(device::Value::Bool(a <= b)))
-        }
+    let result = match (&val_a, &val_b) {
+        (device::Value::Int(a), device::Value::Int(b)) => a <= b,
+        (device::Value::Flt(a), device::Value::Flt(b)) => a <= b,
+        (device::Value::Int(a), device::Value::Flt(b)) => (*a as f64) <= *b,
+        (device::Value::Flt(a), device::Value::Int(b)) => *a <= *b as f64,
+        (device::Value::Str(a), device::Value::Str(b)) => a <= b,
         (a, b) => {
             error!("cannot compare {} and {} for order", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(device::Value::Bool(result))
 }
 
-fn eval_as_add_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_add_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(a + b)))
+            device::Value::Int(a + b)
         }
         (device::Value::Bool(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(*a as i32 + b)))
+            device::Value::Int(*a as i32 + b)
         }
         (device::Value::Int(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Int(a + *b as i32)))
+            device::Value::Int(a + *b as i32)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a + b)))
+            device::Value::Flt(a + b)
         }
         (device::Value::Bool(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(*a as u8 as f64 + b)))
+            device::Value::Flt(*a as u8 as f64 + b)
         }
         (device::Value::Flt(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a + *b as u8 as f64)))
+            device::Value::Flt(a + *b as u8 as f64)
         }
         (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) + b)))
+            device::Value::Flt(*a as f64 + b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a + *b as f64)))
+            device::Value::Flt(a + *b as f64)
         }
         (a, b) => {
             error!("cannot add {} and {} types together", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(result)
 }
 
-fn eval_as_sub_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_sub_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(a - b)))
+            device::Value::Int(a - b)
         }
         (device::Value::Bool(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(*a as i32 - b)))
+            device::Value::Int(*a as i32 - b)
         }
         (device::Value::Int(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Int(a - *b as i32)))
+            device::Value::Int(a - *b as i32)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a - b)))
+            device::Value::Flt(a - b)
         }
         (device::Value::Bool(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(*a as u8 as f64 - b)))
+            device::Value::Flt(*a as u8 as f64 - b)
         }
         (device::Value::Flt(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a - *b as u8 as f64)))
+            device::Value::Flt(a - *b as u8 as f64)
         }
         (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) - b)))
+            device::Value::Flt(*a as f64 - b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a - *b as f64)))
+            device::Value::Flt(a - *b as f64)
         }
         (a, b) => {
             error!("cannot subtract {} and {} types together", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(result)
 }
 
-fn eval_as_mul_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_mul_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(a * b)))
+            device::Value::Int(a * b)
         }
         (device::Value::Bool(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Int(*a as i32 * b)))
+            device::Value::Int(*a as i32 * b)
         }
         (device::Value::Int(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Int(a * *b as i32)))
+            device::Value::Int(a * *b as i32)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a * b)))
+            device::Value::Flt(a * b)
         }
         (device::Value::Bool(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt(*a as u8 as f64 * b)))
+            device::Value::Flt(*a as u8 as f64 * b)
         }
         (device::Value::Flt(a), device::Value::Bool(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a * *b as u8 as f64)))
+            device::Value::Flt(a * *b as u8 as f64)
         }
         (device::Value::Int(a), device::Value::Flt(b)) => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) * b)))
+            device::Value::Flt(*a as f64 * b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) => {
-            Some(Cow::Owned(device::Value::Flt(a * *b as f64)))
+            device::Value::Flt(a * *b as f64)
         }
         (a, b) => {
             error!("cannot multiply {} and {} types together", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(result)
 }
 
-fn eval_as_div_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_div_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) if *b != 0 => {
-            Some(Cow::Owned(device::Value::Int(a / b)))
+            device::Value::Int(a / b)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) if *b != 0.0 => {
-            Some(Cow::Owned(device::Value::Flt(a / b)))
+            device::Value::Flt(a / b)
         }
         (device::Value::Int(a), device::Value::Flt(b)) if *b != 0.0 => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) / b)))
+            device::Value::Flt(*a as f64 / b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) if *b != 0 => {
-            Some(Cow::Owned(device::Value::Flt(a / *b as f64)))
+            device::Value::Flt(a / *b as f64)
         }
         (a, b) => {
             error!("cannot divide {} by {}", &a, &b);
-            None
+            return None;
         }
-    }
+    };
+    Some(result)
 }
 
-fn eval_as_rem_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_rem_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
     let val_a = eval(a, inp, time, solar)?;
     let val_b = eval(b, inp, time, solar)?;
 
-    match (val_a.as_ref(), val_b.as_ref()) {
+    let result = match (&val_a, &val_b) {
         (device::Value::Int(a), device::Value::Int(b)) if *b > 0 => {
-            Some(Cow::Owned(device::Value::Int(a % b)))
+            device::Value::Int(a % b)
         }
         (device::Value::Flt(a), device::Value::Flt(b)) if *b > 0.0 => {
-            Some(Cow::Owned(device::Value::Flt(a % b)))
+            device::Value::Flt(a % b)
         }
         (device::Value::Int(a), device::Value::Flt(b)) if *b > 0.0 => {
-            Some(Cow::Owned(device::Value::Flt((*a as f64) % b)))
+            device::Value::Flt(*a as f64 % b)
         }
         (device::Value::Flt(a), device::Value::Int(b)) if *b > 0 => {
-            Some(Cow::Owned(device::Value::Flt(a % *b as f64)))
+            device::Value::Flt(a % *b as f64)
         }
         (a, b) => {
             error!("cannot compute remainder of {} from {}", &b, &a);
+            return None;
+        }
+    };
+    Some(result)
+}
+
+#[inline(never)]
+fn eval_as_with_alpha_expr(
+    a: &Expr,
+    b: &Expr,
+    inp: &[Option<device::Value>],
+    time: &tod::Info,
+    solar: Option<&solar::Info>,
+) -> Option<device::Value> {
+    use palette::WithAlpha;
+
+    let new_alpha = match eval(b, inp, time, solar) {
+        Some(device::Value::Flt(alpha)) => {
+            (alpha.clamp(0.0, 1.0) * 255.0) as u8
+        }
+        Some(v) => {
+            error!(
+                    "second argument to WITH_ALPHA must be between 0.0 and 1.0, got {}",
+                    &v
+                );
+            return None;
+        }
+        None => {
+            warn!("second argument to WITH_ALPHA evaluated to None");
+            return None;
+        }
+    };
+
+    match eval(a, inp, time, solar) {
+        Some(device::Value::Color(ColorType::Rgba { color })) => {
+            Some(device::Value::Color(ColorType::Rgba {
+                color: color.with_alpha(new_alpha),
+            }))
+        }
+        Some(device::Value::Color(ColorType::Ccta { kelvin, .. })) => {
+            Some(device::Value::Color(ColorType::Ccta {
+                kelvin,
+                a: new_alpha,
+            }))
+        }
+        Some(v) => {
+            error!("first argument to WITH_ALPHA must be a color, got {}", &v);
+            None
+        }
+        None => {
+            warn!("first argument to WITH_ALPHA evaluated to None");
             None
         }
     }
 }
 
-fn eval_as_coalesce_expr<'a>(
-    exprs: &'a [Expr],
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_brightness_expr(
+    a: &Expr,
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
+    match eval(a, inp, time, solar) {
+        Some(device::Value::Color(ColorType::Rgba { color })) => {
+            let brightness = (0.2126 * color.red as f32
+                + 0.7152 * color.green as f32
+                + 0.0722 * color.blue as f32)
+                * color.alpha as f32
+                / 255.0;
+
+            Some(device::Value::Flt(brightness as f64))
+        }
+        Some(device::Value::Color(ColorType::Ccta { a, .. })) => {
+            Some(device::Value::Flt(a as f64))
+        }
+        Some(v) => {
+            error!("argument to BRIGHTNESS must be a color, got {}", &v);
+            None
+        }
+        None => {
+            warn!("argument to BRIGHTNESS evaluated to None");
+            None
+        }
+    }
+}
+
+#[inline(never)]
+fn eval_as_coalesce_expr(
+    exprs: &[Expr],
+    inp: &[Option<device::Value>],
+    time: &tod::Info,
+    solar: Option<&solar::Info>,
+) -> Option<device::Value> {
     for expr in exprs {
         if let Some(val) = eval(expr, inp, time, solar) {
             return Some(val);
@@ -991,20 +1088,239 @@ fn eval_as_coalesce_expr<'a>(
     None
 }
 
-fn eval_as_if_expr<'a>(
-    a: &'a Expr,
-    b: &'a Expr,
-    c: &'a Option<Box<Expr>>,
-    inp: &'a [Option<device::Value>],
+#[inline(never)]
+fn eval_as_blend_expr(
+    exprs: &[Expr],
+    inp: &[Option<device::Value>],
     time: &tod::Info,
     solar: Option<&solar::Info>,
-) -> Option<Cow<'a, device::Value>> {
+) -> Option<device::Value> {
+    use palette::{LinSrgba, Srgba};
+
+    // Accumulator can be either a temperature or RGB color
+    enum BlendAccumulator {
+        None,
+        Temperature { kelvin: u16, a: u8 },
+        Color { color: LinSrgba<u8> },
+    }
+
+    // Helper function to convert temperature to RGB
+    fn kelvin_to_rgb(kelvin: u16, alpha: u8) -> LinSrgba<u8> {
+        let k = kelvin as f32;
+        let temp = k / 100.0;
+
+        let r = if temp <= 66.0 {
+            255
+        } else {
+            let r = temp - 60.0;
+            let r = 329.698727446 * r.powf(-0.1332047592);
+            r.clamp(0.0, 255.0) as u8
+        };
+
+        let g = if temp <= 66.0 {
+            let g = temp;
+            let g = 99.4708025861 * g.ln() - 161.1195681661;
+            g.clamp(0.0, 255.0) as u8
+        } else {
+            let g = temp - 60.0;
+            let g = 288.1221695283 * g.powf(-0.0755148492);
+            g.clamp(0.0, 255.0) as u8
+        };
+
+        let b = if temp >= 66.0 {
+            255
+        } else if temp <= 19.0 {
+            0
+        } else {
+            let b = temp - 10.0;
+            let b = 138.5177312231 * b.ln() - 305.0447927307;
+            b.clamp(0.0, 255.0) as u8
+        };
+
+        LinSrgba::new(r, g, b, alpha)
+    }
+
+    // Helper function to blend two temperatures
+    fn blend_temps(
+        top_k: u16,
+        top_a: u8,
+        bottom_k: u16,
+        bottom_a: u8,
+    ) -> (u16, u8) {
+        let alpha_top = top_a as f32 / 255.0;
+        let alpha_bottom = bottom_a as f32 / 255.0;
+        let alpha_result = alpha_top + alpha_bottom * (1.0 - alpha_top);
+
+        if alpha_result > 0.0 {
+            let weight_top = alpha_top / alpha_result;
+            let weight_bottom =
+                (alpha_bottom * (1.0 - alpha_top)) / alpha_result;
+
+            let result_kelvin = ((top_k as f32) * weight_top
+                + (bottom_k as f32) * weight_bottom)
+                as u16;
+            let result_alpha = (alpha_result * 255.0) as u8;
+            (result_kelvin, result_alpha)
+        } else {
+            (bottom_k, 0)
+        }
+    }
+
+    // Helper function to blend two RGBA colors (top OVER bottom)
+    fn blend_rgba(top: LinSrgba<u8>, bottom: LinSrgba<u8>) -> LinSrgba<u8> {
+        let top_f32: Srgba<f32> = Srgba::new(
+            top.red as f32 / 255.0,
+            top.green as f32 / 255.0,
+            top.blue as f32 / 255.0,
+            top.alpha as f32 / 255.0,
+        );
+
+        let bottom_f32: Srgba<f32> = Srgba::new(
+            bottom.red as f32 / 255.0,
+            bottom.green as f32 / 255.0,
+            bottom.blue as f32 / 255.0,
+            bottom.alpha as f32 / 255.0,
+        );
+
+        let alpha_top = top_f32.alpha;
+        let alpha_bottom = bottom_f32.alpha;
+        let alpha_result = alpha_top + alpha_bottom * (1.0 - alpha_top);
+
+        let blended = if alpha_result > 0.0 {
+            Srgba::new(
+                (top_f32.red * alpha_top
+                    + bottom_f32.red * alpha_bottom * (1.0 - alpha_top))
+                    / alpha_result,
+                (top_f32.green * alpha_top
+                    + bottom_f32.green * alpha_bottom * (1.0 - alpha_top))
+                    / alpha_result,
+                (top_f32.blue * alpha_top
+                    + bottom_f32.blue * alpha_bottom * (1.0 - alpha_top))
+                    / alpha_result,
+                alpha_result,
+            )
+        } else {
+            Srgba::new(0.0, 0.0, 0.0, 0.0)
+        };
+
+        LinSrgba::new(
+            (blended.red * 255.0).round() as u8,
+            (blended.green * 255.0).round() as u8,
+            (blended.blue * 255.0).round() as u8,
+            (blended.alpha * 255.0).round() as u8,
+        )
+    }
+
+    // Single-pass blend: iterate in reverse (last expr is bottom layer)
+    let mut accumulator = BlendAccumulator::None;
+
+    for expr in exprs.iter().rev() {
+        match eval(expr, inp, time, solar) {
+            Some(device::Value::Color(color)) => {
+                accumulator = match (accumulator, color) {
+                    // First color - initialize accumulator
+                    (
+                        BlendAccumulator::None,
+                        device::ColorType::Ccta { kelvin, a },
+                    ) => BlendAccumulator::Temperature { kelvin, a },
+
+                    (
+                        BlendAccumulator::None,
+                        device::ColorType::Rgba { color },
+                    ) => BlendAccumulator::Color { color },
+
+                    // Both temperatures - blend as temperatures
+                    (
+                        BlendAccumulator::Temperature {
+                            kelvin: bottom_k,
+                            a: bottom_a,
+                        },
+                        device::ColorType::Ccta {
+                            kelvin: top_k,
+                            a: top_a,
+                        },
+                    ) => {
+                        let (k, a) =
+                            blend_temps(top_k, top_a, bottom_k, bottom_a);
+                        BlendAccumulator::Temperature { kelvin: k, a }
+                    }
+
+                    // Temperature accumulator + RGB color -> convert to RGB
+                    (
+                        BlendAccumulator::Temperature { kelvin, a },
+                        device::ColorType::Rgba { color: top },
+                    ) => {
+                        let bottom = kelvin_to_rgb(kelvin, a);
+                        let blended = blend_rgba(top, bottom);
+                        BlendAccumulator::Color { color: blended }
+                    }
+
+                    // RGB accumulator + temperature -> convert temp to RGB
+                    (
+                        BlendAccumulator::Color { color: bottom },
+                        device::ColorType::Ccta {
+                            kelvin: top_k,
+                            a: top_a,
+                        },
+                    ) => {
+                        let top = kelvin_to_rgb(top_k, top_a);
+                        let blended = blend_rgba(top, bottom);
+                        BlendAccumulator::Color { color: blended }
+                    }
+
+                    // Both RGB - blend as RGB
+                    (
+                        BlendAccumulator::Color { color: bottom },
+                        device::ColorType::Rgba { color: top },
+                    ) => {
+                        let blended = blend_rgba(top, bottom);
+                        BlendAccumulator::Color { color: blended }
+                    }
+                };
+            }
+            None => {
+                // None is treated as fully transparent - skip it
+                continue;
+            }
+            Some(v) => {
+                error!("BLEND arguments must be colors, got {}", &v);
+                return None;
+            }
+        }
+    }
+
+    // Return the final blended result
+    match accumulator {
+        BlendAccumulator::None => {
+            // No colors or all were None - return black with 0% brightness
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0, 0, 0, 0),
+            }))
+        }
+        BlendAccumulator::Temperature { kelvin, a } => {
+            Some(device::Value::Color(device::ColorType::Ccta { kelvin, a }))
+        }
+        BlendAccumulator::Color { color } => {
+            Some(device::Value::Color(device::ColorType::Rgba { color }))
+        }
+    }
+}
+
+#[inline(never)]
+fn eval_as_if_expr(
+    a: &Expr,
+    b: &Expr,
+    c: &Option<Box<Expr>>,
+    inp: &[Option<device::Value>],
+    time: &tod::Info,
+    solar: Option<&solar::Info>,
+) -> Option<device::Value> {
     match eval(a, inp, time, solar)? {
-        // Optimization: Returns the Cow from the branch, preserving the borrow if possible
-        v if matches!(v.as_ref(), device::Value::Bool(true)) => {
+        // Optimization: Returns the value from the branch
+        v if matches!(v, device::Value::Bool(true)) => {
             eval(b, inp, time, solar)
         }
-        v if matches!(v.as_ref(), device::Value::Bool(false)) => {
+        v if matches!(v, device::Value::Bool(false)) => {
             c.as_ref().and_then(|v| eval(v, inp, time, solar))
         }
         v => {
@@ -1014,6 +1330,7 @@ fn eval_as_if_expr<'a>(
     }
 }
 
+#[inline(never)]
 fn is_zero(v: &device::Value) -> bool {
     match v {
         device::Value::Int(i) => *i == 0,
@@ -1022,6 +1339,7 @@ fn is_zero(v: &device::Value) -> bool {
     }
 }
 
+#[inline(never)]
 fn is_one(v: &device::Value) -> bool {
     match v {
         device::Value::Int(i) => *i == 1,
@@ -1042,7 +1360,7 @@ where
         let result = constructor(Box::new(a_opt), Box::new(b_opt));
 
         if let Some(val) = eval(&result, &[], &dummy_time, None) {
-            return Expr::Lit(val.into_owned());
+            return Expr::Lit(val.clone());
         } else {
             return result;
         }
@@ -1052,39 +1370,44 @@ where
 
 // This function takes an expression and tries to reduce it.
 
+#[inline(never)]
 pub fn optimize(e: Expr) -> Expr {
     match e {
         // Look for optimizations with expressions starting with NOT.
-        Expr::Not(ref ne) => match &**ne {
+        Expr::Not(ne) => match *ne {
             // If the sub-expression is also a NOT expression. If so,
             // we throw them both away.
-            Expr::Not(e) => optimize(*e.clone()),
+            Expr::Not(inner_e) => optimize(*inner_e),
 
             // If the subexpression is either `true` or `false`,
             // return the complement.
             Expr::Lit(device::Value::Bool(val)) => {
                 Expr::Lit(device::Value::Bool(!val))
             }
-            _ => e,
+            _ => Expr::Not(ne),
         },
 
-        Expr::And(ref a, ref b) => {
-            match (optimize(*a.clone()), optimize(*b.clone())) {
-                (v @ Expr::Lit(device::Value::Bool(false)), _)
-                | (_, v @ Expr::Lit(device::Value::Bool(false))) => v,
-                (Expr::Lit(device::Value::Bool(true)), e)
-                | (e, Expr::Lit(device::Value::Bool(true))) => e,
-                _ => e,
+        Expr::And(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(device::Value::Bool(false)), _) => opt_a,
+                (_, Expr::Lit(device::Value::Bool(false))) => opt_b,
+                (Expr::Lit(device::Value::Bool(true)), _) => opt_b,
+                (_, Expr::Lit(device::Value::Bool(true))) => opt_a,
+                _ => Expr::And(Box::new(opt_a), Box::new(opt_b)),
             }
         }
 
-        Expr::Or(ref a, ref b) => {
-            match (optimize(*a.clone()), optimize(*b.clone())) {
-                (v @ Expr::Lit(device::Value::Bool(true)), _)
-                | (_, v @ Expr::Lit(device::Value::Bool(true))) => v,
-                (Expr::Lit(device::Value::Bool(false)), e)
-                | (e, Expr::Lit(device::Value::Bool(false))) => e,
-                _ => e,
+        Expr::Or(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(device::Value::Bool(true)), _) => opt_a,
+                (_, Expr::Lit(device::Value::Bool(true))) => opt_b,
+                (Expr::Lit(device::Value::Bool(false)), _) => opt_b,
+                (_, Expr::Lit(device::Value::Bool(false))) => opt_a,
+                _ => Expr::Or(Box::new(opt_a), Box::new(opt_b)),
             }
         }
 
@@ -1092,7 +1415,7 @@ pub fn optimize(e: Expr) -> Expr {
             let mut opt_exprs = Vec::new();
             for e in exprs {
                 let opt_e = optimize(e);
-                if let Expr::Lit(_) = opt_e {
+                if matches!(opt_e, Expr::Lit(_)) {
                     opt_exprs.push(opt_e);
                     break;
                 } else if opt_e != Expr::Nothing {
@@ -1104,6 +1427,21 @@ pub fn optimize(e: Expr) -> Expr {
                 0 => Expr::Nothing,
                 1 => opt_exprs.pop().unwrap(),
                 _ => Expr::Coalesce(opt_exprs),
+            }
+        }
+
+        Expr::Blend(exprs) => {
+            let opt_exprs: Vec<Expr> = exprs
+                .into_iter()
+                .map(optimize)
+                .filter(|e| e != &Expr::Nothing)
+                .collect();
+
+            match opt_exprs.len() {
+                0 => Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                    color: palette::LinSrgba::new(0, 0, 0, 0),
+                })),
+                _ => Expr::Blend(opt_exprs),
             }
         }
 
@@ -1120,52 +1458,72 @@ pub fn optimize(e: Expr) -> Expr {
             ),
         },
 
-        Expr::Add(a, b) => match (optimize(*a), optimize(*b)) {
-            (Expr::Lit(v), b) if is_zero(&v) => b,
-            (a, Expr::Lit(v)) if is_zero(&v) => a,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Add, Box::new(a), Box::new(b))
+        Expr::Add(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(v), _) if is_zero(v) => opt_b,
+                (_, Expr::Lit(v)) if is_zero(v) => opt_a,
+                (Expr::Lit(_), Expr::Lit(_)) => {
+                    fold_binary(Expr::Add, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Add(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Add(Box::new(a), Box::new(b)),
-        },
+        }
 
-        Expr::Sub(a, b) => match (optimize(*a), optimize(*b)) {
-            (a, Expr::Lit(v)) if is_zero(&v) => a,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Sub, Box::new(a), Box::new(b))
+        Expr::Sub(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_b,) {
+                (Expr::Lit(v),) if is_zero(v) => opt_a,
+                (Expr::Lit(_),) => {
+                    fold_binary(Expr::Sub, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Sub(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Sub(Box::new(a), Box::new(b)),
-        },
+        }
 
-        Expr::Mul(a, b) => match (optimize(*a), optimize(*b)) {
-            (Expr::Lit(v), _) if is_zero(&v) => Expr::Lit(v),
-            (_, Expr::Lit(v)) if is_zero(&v) => Expr::Lit(v),
-            (Expr::Lit(v), b) if is_one(&v) => b,
-            (a, Expr::Lit(v)) if is_one(&v) => a,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Mul, Box::new(a), Box::new(b))
+        Expr::Mul(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(v), _) if is_zero(v) => opt_a,
+                (_, Expr::Lit(v)) if is_zero(v) => opt_b,
+                (Expr::Lit(v), _) if is_one(v) => opt_b,
+                (_, Expr::Lit(v)) if is_one(v) => opt_a,
+                (Expr::Lit(_), Expr::Lit(_)) => {
+                    fold_binary(Expr::Mul, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Mul(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Mul(Box::new(a), Box::new(b)),
-        },
+        }
 
-        Expr::Div(a, b) => match (optimize(*a), optimize(*b)) {
-            (Expr::Lit(v), _) if is_zero(&v) => Expr::Lit(v),
-            (_, Expr::Lit(v)) if is_zero(&v) => Expr::Nothing,
-            (a, Expr::Lit(v)) if is_one(&v) => a,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Div, Box::new(a), Box::new(b))
+        Expr::Div(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(v), _) if is_zero(v) => opt_a,
+                (_, Expr::Lit(v)) if is_zero(v) => Expr::Nothing,
+                (_, Expr::Lit(v)) if is_one(v) => opt_a,
+                (Expr::Lit(_), Expr::Lit(_)) => {
+                    fold_binary(Expr::Div, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Div(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Div(Box::new(a), Box::new(b)),
-        },
+        }
 
-        Expr::Rem(a, b) => match (optimize(*a), optimize(*b)) {
-            (Expr::Lit(v), _) if is_zero(&v) => Expr::Lit(v),
-            (_, Expr::Lit(v)) if is_zero(&v) => Expr::Nothing,
-            (a @ Expr::Lit(_), b @ Expr::Lit(_)) => {
-                fold_binary(Expr::Rem, Box::new(a), Box::new(b))
+        Expr::Rem(a, b) => {
+            let opt_a = optimize(*a);
+            let opt_b = optimize(*b);
+            match (&opt_a, &opt_b) {
+                (Expr::Lit(v), _) if is_zero(v) => opt_a,
+                (_, Expr::Lit(v)) if is_zero(v) => Expr::Nothing,
+                (Expr::Lit(_), Expr::Lit(_)) => {
+                    fold_binary(Expr::Rem, Box::new(opt_a), Box::new(opt_b))
+                }
+                _ => Expr::Rem(Box::new(opt_a), Box::new(opt_b)),
             }
-            (a, b) => Expr::Rem(Box::new(a), Box::new(b)),
-        },
+        }
 
         Expr::Eq(a, b) => fold_binary(Expr::Eq, a, b),
 
@@ -1221,6 +1579,15 @@ mod tests {
             "#1 -> {bulb}",
             "#12 -> {bulb}",
             "#12345 -> {bulb}",
+            "#abcdef0 -> {bulb}",
+            "#abcdef012 -> {bulb}",
+            // Invalid temperature formats
+            "#K -> {bulb}",          // Missing kelvin value
+            "#4000k -> {bulb}",      // lowercase 'k'
+            "#4000K@ -> {bulb}",     // Missing alpha value
+            "#4000K@256 -> {bulb}",  // Alpha out of range
+            "#4000K@101% -> {bulb}", // Percentage > 100
+            "#4000K@% -> {bulb}",    // Missing percentage value
         ];
 
         for entry in BAD_EXPR.iter() {
@@ -1259,6 +1626,13 @@ mod tests {
             "{solar:az} -> {bulb}",
             "{solar:ra} -> {bulb}",
             "{solar:dec} -> {bulb}",
+            "#2700K -> {bulb}",
+            "#4000K -> {bulb}",
+            "#6500K -> {bulb}",
+            "#3000K@128 -> {bulb}",
+            "#5000K@255 -> {bulb}",
+            "#4500K@50% -> {bulb}",
+            "#6000K@100% -> {bulb}",
         ];
 
         for entry in GOOD_EXPR.iter() {
@@ -1313,54 +1687,85 @@ mod tests {
             (
                 "#123 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        0x11, 0x22, 0x33, 255,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(0x11, 0x22, 0x33, 255),
+                    })),
                     0,
                 ),
             ),
             (
                 "#1234 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        0x11, 0x22, 0x33, 0x44,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(0x11, 0x22, 0x33, 0x44),
+                    })),
                     0,
                 ),
             ),
             (
                 "#7f8081 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        127, 128, 129, 255,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(127, 128, 129, 255),
+                    })),
                     0,
                 ),
             ),
             (
                 "#7f808182 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        127, 128, 129, 130,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(127, 128, 129, 130),
+                    })),
                     0,
                 ),
             ),
             (
                 "#7F80A0 -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        127, 128, 160, 255,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(127, 128, 160, 255),
+                    })),
                     0,
                 ),
             ),
             (
-                "#black -> {bulb}",
+                "#2700K -> {bulb}",
                 Program(
-                    Expr::Lit(device::Value::Color(LinSrgba::new(
-                        0, 0, 0, 255,
-                    ))),
+                    Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                        kelvin: 2700,
+                        a: 255,
+                    })),
+                    0,
+                ),
+            ),
+            (
+                "#4000K@128 -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                        kelvin: 4000,
+                        a: 128,
+                    })),
+                    0,
+                ),
+            ),
+            (
+                "#6500K@50% -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                        kelvin: 6500,
+                        a: 127, // 50% of 255 = 127.5, rounded down to 127
+                    })),
+                    0,
+                ),
+            ),
+            (
+                "#3000K@100% -> {bulb}",
+                Program(
+                    Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                        kelvin: 3000,
+                        a: 255,
+                    })),
                     0,
                 ),
             ),
@@ -1498,7 +1903,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1602,7 +2007,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1716,7 +2121,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1783,7 +2188,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1860,7 +2265,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1957,7 +2362,7 @@ mod tests {
 
         for entry in test_data {
             assert_eq!(
-                eval(&entry.0, &entry.1, &time, None).map(Cow::into_owned),
+                eval(&entry.0, &entry.1, &time, None),
                 entry.2,
                 "expression '{}' failed",
                 &entry.0
@@ -1981,8 +2386,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(3))
         );
         assert_eq!(
@@ -1991,8 +2395,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(2))
         );
         assert_eq!(
@@ -2004,8 +2407,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2017,8 +2419,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(3.0))
         );
         assert_eq!(
@@ -2030,8 +2431,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2043,8 +2443,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2056,8 +2455,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(3.0))
         );
         assert_eq!(
@@ -2069,8 +2467,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(3.0))
         );
     }
@@ -2091,8 +2488,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2101,8 +2497,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(0))
         );
         assert_eq!(
@@ -2114,8 +2509,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2127,8 +2521,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2140,8 +2533,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(0.0))
         );
         assert_eq!(
@@ -2153,8 +2545,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2166,8 +2557,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2179,8 +2569,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
     }
@@ -2201,8 +2590,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(2))
         );
         assert_eq!(
@@ -2211,8 +2599,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2224,8 +2611,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(0))
         );
         assert_eq!(
@@ -2237,8 +2623,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2250,8 +2635,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2263,8 +2647,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(0.0))
         );
         assert_eq!(
@@ -2276,8 +2659,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2289,8 +2671,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
     }
@@ -2313,8 +2694,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(2))
         );
         assert_eq!(
@@ -2323,8 +2703,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2336,8 +2715,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2349,8 +2727,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2362,8 +2739,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2375,8 +2751,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2388,8 +2763,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2401,8 +2775,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(2.0))
         );
         assert_eq!(
@@ -2411,8 +2784,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2424,8 +2796,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2437,8 +2808,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2450,8 +2820,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
     }
@@ -2475,8 +2844,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Int(1))
         );
         assert_eq!(
@@ -2497,8 +2865,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2510,8 +2877,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2523,8 +2889,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2536,8 +2901,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2549,8 +2913,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2562,8 +2925,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             Some(device::Value::Flt(1.0))
         );
         assert_eq!(
@@ -2572,8 +2934,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2585,8 +2946,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2598,8 +2958,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2611,8 +2970,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
         assert_eq!(
@@ -2624,8 +2982,7 @@ mod tests {
                 &[],
                 &time,
                 None
-            )
-            .map(Cow::into_owned),
+            ),
             None
         );
     }
@@ -2635,10 +2992,7 @@ mod tests {
         const FALSE: device::Value = device::Value::Bool(false);
         let time = Arc::new((chrono::Utc::now(), chrono::Local::now()));
 
-        assert_eq!(
-            eval(&Expr::Lit(FALSE), &[], &time, None).map(Cow::into_owned),
-            Some(FALSE)
-        );
+        assert_eq!(eval(&Expr::Lit(FALSE), &[], &time, None), Some(FALSE));
     }
 
     // This function tests the optimizations that can be done on an
@@ -3165,7 +3519,7 @@ mod tests {
         let expr = format!("{} -> {{a}}", expr);
         let prog = Program::compile(&expr, &env).unwrap();
 
-        eval(&prog.0, &[], &time, solar).map(Cow::into_owned)
+        eval(&prog.0, &[], &time, solar)
     }
 
     #[test]
@@ -3446,7 +3800,7 @@ mod tests {
             ("1", None),
             ("1.0", None),
             ("true", None),
-            ("#green", None),
+            ("#00ff00", None),
             ("\"test\"", None),
             ("{solar:alt}", None),
             // Make sure the time values return the proper field.
@@ -3539,7 +3893,7 @@ mod tests {
             ("1", false),
             ("1.0", false),
             ("true", false),
-            ("#green", false),
+            ("#00ff00", false),
             ("\"test\"", false),
             ("{utc:second}", false),
             // Make sure the solar values return true.
@@ -3607,20 +3961,70 @@ mod tests {
         let expr = Expr::Coalesce(vec![Expr::Var(0), Expr::Var(1)]);
 
         let result = eval(&expr, &inputs, &time, solar);
-        assert_eq!(result, Some(Cow::Owned(device::Value::Bool(true))));
+        assert_eq!(result, Some(device::Value::Bool(true)));
 
         let inputs =
             vec![Some(device::Value::Int(50)), Some(device::Value::Int(100))];
         let expr = Expr::Coalesce(vec![Expr::Var(0), Expr::Var(1)]);
 
         let result = eval(&expr, &inputs, &time, solar);
-        assert_eq!(result, Some(Cow::Owned(device::Value::Int(50))));
+        assert_eq!(result, Some(device::Value::Int(50)));
 
         let inputs = vec![None, None];
         let expr = Expr::Coalesce(vec![Expr::Var(0), Expr::Var(1)]);
 
         let result = eval(&expr, &inputs, &time, solar);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_with_alpha() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        let inputs =
+            vec![Some(device::Value::Color(device::ColorType::Rgba {
+                color: palette::LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            }))];
+        let expr = Expr::WithAlpha(
+            Box::new(Expr::Var(0)),
+            Box::new(Expr::Lit(device::Value::Flt(0.5))),
+        );
+
+        assert_eq!(
+            eval(&expr, &inputs, &time, solar),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: palette::LinSrgba::new(255u8, 0u8, 0u8, 127u8),
+            }))
+        );
+    }
+
+    #[test]
+    fn test_brightness() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: palette::LinSrgba::new(255u8, 255u8, 255u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 2700,
+                a: 200u8,
+            })),
+        ];
+
+        let expr_rgba = Expr::Brightness(Box::new(Expr::Var(0)));
+        assert_eq!(
+            eval(&expr_rgba, &inputs, &time, solar),
+            Some(device::Value::Flt(255.0))
+        );
+
+        let expr_ccta = Expr::Brightness(Box::new(Expr::Var(1)));
+        assert_eq!(
+            eval(&expr_ccta, &inputs, &time, solar),
+            Some(device::Value::Flt(200.0))
+        );
     }
 
     #[test]
@@ -3642,5 +4046,336 @@ mod tests {
 
         let expr = Expr::Coalesce(vec![Expr::Nothing, Expr::Nothing]);
         assert_eq!(optimize(expr), Expr::Nothing);
+    }
+
+    #[test]
+    fn test_blend_parser() {
+        let env: Env = (
+            &[String::from("a"), String::from("b")],
+            &[String::from("out")],
+        );
+
+        let cases = [
+            (
+                "BLEND(#ff0000) -> {out}",
+                Expr::Blend(vec![Expr::Lit(device::Value::Color(
+                    device::ColorType::Rgba {
+                        color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+                    },
+                ))]),
+            ),
+            (
+                "BLEND({a}, {b}) -> {out}",
+                Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]),
+            ),
+            (
+                "BLEND(#ff0000, #00ff00, #0000ff) -> {out}",
+                Expr::Blend(vec![
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+                    })),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+                    })),
+                    Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                        color: LinSrgba::new(0u8, 0u8, 255u8, 255u8),
+                    })),
+                ]),
+            ),
+        ];
+
+        for (src, expected_expr) in cases {
+            let Program(expr, _) = Program::compile(src, &env).unwrap();
+            assert_eq!(expr, expected_expr);
+        }
+
+        // Empty BLEND should fail to parse
+        assert!(Program::compile("BLEND() -> {out}", &env).is_err());
+        // Missing commas should fail
+        assert!(Program::compile("BLEND({a} {b}) -> {out}", &env).is_err());
+    }
+
+    #[test]
+    fn test_blend_two_rgba_colors() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Blend opaque red over opaque green - should get red
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            }))
+        );
+
+        // Blend semi-transparent red (50%) over opaque green
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 128u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        // Should be a blend of red and green
+        if let Some(device::Value::Color(device::ColorType::Rgba { color })) =
+            result
+        {
+            assert!(color.red > 0);
+            assert!(color.green > 0);
+            assert_eq!(color.blue, 0);
+            assert_eq!(color.alpha, 255); // Result should be opaque
+        } else {
+            panic!("Expected RGBA color result");
+        }
+    }
+
+    #[test]
+    fn test_blend_two_temperature_colors() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Blend two temperature colors - result should be a temperature
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 4000,
+                a: 255,
+            })),
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 6500,
+                a: 255,
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        if let Some(device::Value::Color(device::ColorType::Ccta {
+            kelvin,
+            a,
+        })) = result
+        {
+            // Should be 4000K (top layer is opaque)
+            assert_eq!(kelvin, 4000);
+            assert_eq!(a, 255);
+        } else {
+            panic!("Expected Ccta color result, got {:?}", result);
+        }
+
+        // Blend semi-transparent warm over cool
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 3000,
+                a: 128,
+            })),
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 6000,
+                a: 255,
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        if let Some(device::Value::Color(device::ColorType::Ccta {
+            kelvin,
+            a,
+        })) = result
+        {
+            // Should be between 3000K and 6000K
+            assert!(kelvin > 3000);
+            assert!(kelvin < 6000);
+            assert_eq!(a, 255); // Result should be opaque
+        } else {
+            panic!("Expected Ccta color result");
+        }
+    }
+
+    #[test]
+    fn test_blend_mixed_color_types() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Blend RGB over temperature - result should be RGB
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 4000,
+                a: 255,
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert!(matches!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba { .. }))
+        ));
+
+        // Blend temperature over RGB - result should be RGB
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 4000,
+                a: 255,
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert!(matches!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba { .. }))
+        ));
+    }
+
+    #[test]
+    fn test_blend_with_none() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // None is treated as transparent, so second color should show through
+        let inputs = vec![
+            None,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            }))
+        );
+
+        // All None should return black with 0 alpha
+        let inputs = vec![None, None];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 0u8, 0u8, 0u8),
+            }))
+        );
+    }
+
+    #[test]
+    fn test_blend_single_color() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Single color should return that color unchanged
+        let inputs =
+            vec![Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 128u8, 64u8, 200u8),
+            }))];
+        let expr = Expr::Blend(vec![Expr::Var(0)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 128u8, 64u8, 200u8),
+            }))
+        );
+    }
+
+    #[test]
+    fn test_blend_multiple_colors() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // Blend three opaque colors - top should dominate
+        let inputs = vec![
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 255u8, 0u8, 255u8),
+            })),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 0u8, 255u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1), Expr::Var(2)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        // Top layer (red) is opaque, so result should be red
+        assert_eq!(
+            result,
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            }))
+        );
+    }
+
+    #[test]
+    fn test_blend_invalid_type() {
+        let time = tod::Info::default();
+        let solar = None;
+
+        // BLEND with non-color type should return None and log error
+        let inputs = vec![
+            Some(device::Value::Int(42)),
+            Some(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+        ];
+        let expr = Expr::Blend(vec![Expr::Var(0), Expr::Var(1)]);
+
+        let result = eval(&expr, &inputs, &time, solar);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_blend_optimization() {
+        // Blend with Nothing values should be filtered out
+        let expr = Expr::Blend(vec![
+            Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255u8, 0u8, 0u8, 255u8),
+            })),
+            Expr::Nothing,
+            Expr::Var(0),
+        ]);
+
+        let optimized = optimize(expr);
+        if let Expr::Blend(exprs) = optimized {
+            assert_eq!(exprs.len(), 2); // Nothing should be removed
+            assert!(matches!(exprs[0], Expr::Lit(_)));
+            assert!(matches!(exprs[1], Expr::Var(0)));
+        } else {
+            panic!("Expected Blend expression");
+        }
+
+        // All Nothing should return black with 0 alpha
+        let expr = Expr::Blend(vec![Expr::Nothing, Expr::Nothing]);
+        let optimized = optimize(expr);
+        assert_eq!(
+            optimized,
+            Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0u8, 0u8, 0u8, 0u8),
+            }))
+        );
     }
 }

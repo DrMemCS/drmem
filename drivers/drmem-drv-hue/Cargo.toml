@@ -13,18 +13,20 @@ palette.workspace = true
 tokio.workspace = true
 tokio.default-features = false
 
+toml.workspace = true
+
 tracing.workspace = true
 
 reqwest.workspace = true
 reqwest.default-features = false
-reqwest.features = ["http2", "stream", "rustls", "json"]
+reqwest.features = ["rustls-tls-webpki-roots", "json"]
 
-futures.workspace = true
-
-futures-util = "0.3"
+rustls.version = "0.23"
+rustls.default-features = false
+rustls.features = ["std", "ring"]
 
 serde_json.workspace = true
 serde_json.default-features = false
 serde_json.features = ["std"]
 
-drmem-api = { path = "../../drmem-api", version = "0.7" }
+drmem-api = { path = "../../drmem-api", version = "0.8" }

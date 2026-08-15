@@ -268,7 +268,7 @@ impl<R: Reporter> RequestChan<R> {
         max_history: Option<usize>,
     ) -> Result<OverridableDevice<T, R>>
     where
-        T: device::ReadWriteCompat,
+        T: device::ReadWriteCompat + std::fmt::Debug,
         B: TryInto<Base> + std::fmt::Display,
     {
         let dev_name = self.build_final_name(subpath, name)?;

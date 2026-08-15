@@ -19,7 +19,6 @@ serde.default-features = false
 serde.features = ["derive"]
 
 toml.workspace = true
-toml.default-features = false
 
 tokio.workspace = true
 tokio.default-features = false
@@ -30,10 +29,10 @@ tracing.default-features = false
 tracing-subscriber.workspace = true
 tracing-subscriber.default-features = false
 
-reqwest.version = "0.11"
+reqwest.workspace = true
 reqwest.default-features = false
 
 weather-underground.version = "0.1"
 weather-underground.default-features = false
 
-drmem-api = { path = "../../drmem-api", version = "0.7" }
+drmem-api = { path = "../../drmem-api", version = "0.8" }

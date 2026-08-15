@@ -58,9 +58,9 @@ impl Instance {
         self.values
             .binary_search_by(|e| {
                 if idx < *e.0.start() {
-                    Ordering::Less
-                } else if idx > *e.0.end() {
                     Ordering::Greater
+                } else if idx > *e.0.end() {
+                    Ordering::Less
                 } else {
                     Ordering::Equal
                 }
@@ -109,7 +109,7 @@ impl<R: Reporter> driver::API<R> for Instance {
 
 #[cfg(test)]
 mod tests {
-    use super::config;
+    use super::{config, Instance};
     use drmem_api::{device, driver::DriverConfig, Error, Result};
 
     // Tries to build an `InstanceConfig` from a `&str`.
@@ -295,5 +295,28 @@ values = [{ start = 4, end = 7, value = \"there\" },
                 ]
             );
         }
+    }
+
+    #[test]
+    fn test_looking_up_values() {
+        let cfg = make_cfg(
+            "default = 100
+values = [{ start = 4, end = 7, value = \"there\" },
+          { start = 8, end = 11, value = \"world\" },
+          { start = 12, value = \"!\" },
+          { start = 0, end = 3, value = \"hello\" }]",
+        )
+        .unwrap();
+        let inst = Instance::new(&cfg).unwrap();
+
+        assert_eq!(inst.map_to(-1), device::Value::Int(100));
+        assert_eq!(inst.map_to(0), device::Value::Str("hello".into()));
+        assert_eq!(inst.map_to(3), device::Value::Str("hello".into()));
+        assert_eq!(inst.map_to(4), device::Value::Str("there".into()));
+        assert_eq!(inst.map_to(7), device::Value::Str("there".into()));
+        assert_eq!(inst.map_to(8), device::Value::Str("world".into()));
+        assert_eq!(inst.map_to(11), device::Value::Str("world".into()));
+        assert_eq!(inst.map_to(12), device::Value::Str("!".into()));
+        assert_eq!(inst.map_to(13), device::Value::Int(100));
     }
 }

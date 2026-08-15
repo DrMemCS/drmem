@@ -5,6 +5,12 @@ use serde::{
 };
 use std::{convert::TryFrom, fmt, sync::Arc};
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ColorType {
+    Rgba { color: palette::LinSrgba<u8> },
+    Ccta { kelvin: u16, a: u8 }, // Correlated Color Temperature + Alpha
+}
+
 /// Defines fundamental types that can be associated with a device.
 /// Drivers set the type for each device they manage and, for devices
 /// that can be set, only accept values of the correct type.
@@ -36,7 +42,7 @@ pub enum Value {
     Str(Arc<str>),
 
     /// For devices that render color values.
-    Color(palette::LinSrgba<u8>),
+    Color(ColorType),
 }
 
 impl Value {
@@ -59,10 +65,21 @@ impl fmt::Display for Value {
             Value::Int(v) => write!(f, "{v}"),
             Value::Flt(v) => write!(f, "{v}"),
             Value::Str(v) => write!(f, "\"{v}\""),
-            Value::Color(v) => {
-                write!(f, "\"#{:02x}{:02x}{:02x}", v.red, v.green, v.blue)?;
-                if v.alpha < 255 {
-                    write!(f, "{:02x}", v.alpha)?;
+            Value::Color(ColorType::Rgba { color }) => {
+                write!(
+                    f,
+                    "\"#{:02x}{:02x}{:02x}",
+                    color.red, color.green, color.blue
+                )?;
+                if color.alpha < 255 {
+                    write!(f, "{:02x}", color.alpha)?;
+                }
+                write!(f, "\"")
+            }
+            Value::Color(ColorType::Ccta { kelvin, a }) => {
+                write!(f, "\"#{:04x}K", kelvin)?;
+                if *a < 255 {
+                    write!(f, "@{a}")?;
                 }
                 write!(f, "\"")
             }
@@ -243,7 +260,7 @@ impl ReadCompat for &str {}
 
 impl From<palette::LinSrgba<u8>> for Value {
     fn from(value: palette::LinSrgba<u8>) -> Self {
-        Value::Color(value)
+        Value::Color(ColorType::Rgba { color: value })
     }
 }
 
@@ -251,8 +268,8 @@ impl TryFrom<Value> for palette::LinSrgba<u8> {
     type Error = Error;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        if let Value::Color(v) = value {
-            Ok(v)
+        if let Value::Color(ColorType::Rgba { color }) = value {
+            Ok(color)
         } else {
             Err(Error::TypeError)
         }
@@ -289,12 +306,14 @@ fn parse_color(s: &[u8]) -> Option<Value> {
         result = (result << 8) + 255;
     }
 
-    Some(Value::Color(palette::LinSrgba::new(
-        (result >> 24) as u8,
-        (result >> 16) as u8,
-        (result >> 8) as u8,
-        result as u8,
-    )))
+    Some(Value::Color(ColorType::Rgba {
+        color: palette::LinSrgba::new(
+            (result >> 24) as u8,
+            (result >> 16) as u8,
+            (result >> 8) as u8,
+            result as u8,
+        ),
+    }))
 }
 
 impl TryFrom<&toml::value::Value> for Value {
@@ -424,7 +443,9 @@ col_val = \"#ff00ff\"
         assert_eq!(cfg.str_val, Value::Str("hello".into()));
         assert_eq!(
             cfg.col_val,
-            Value::Color(palette::LinSrgba::new(255, 0, 255, 255))
+            Value::Color(ColorType::Rgba {
+                color: palette::LinSrgba::new(255, 0, 255, 255)
+            })
         );
     }
 
@@ -441,11 +462,21 @@ col_val = \"#ff00ff\"
 
         assert_eq!(
             "\"#010203\"",
-            format!("{}", Value::Color(palette::LinSrgba::new(1, 2, 3, 255)))
+            format!(
+                "{}",
+                Value::Color(ColorType::Rgba {
+                    color: palette::LinSrgba::new(1, 2, 3, 255)
+                })
+            )
         );
         assert_eq!(
             "\"#01020304\"",
-            format!("{}", Value::Color(palette::LinSrgba::new(1, 2, 3, 4)))
+            format!(
+                "{}",
+                Value::Color(ColorType::Rgba {
+                    color: palette::LinSrgba::new(1, 2, 3, 4)
+                })
+            )
         );
     }
 
@@ -473,7 +504,9 @@ col_val = \"#ff00ff\"
             let a: u8 = ii ^ 0x81u8;
 
             assert_eq!(
-                Value::Color(palette::LinSrgba::new(r, g, b, a)),
+                Value::Color(ColorType::Rgba {
+                    color: palette::LinSrgba::new(r, g, b, a)
+                }),
                 Value::from(palette::LinSrgba::new(r, g, b, a))
             );
         }
@@ -628,7 +661,9 @@ col_val = \"#ff00ff\"
                     r, g, b
                 )))
                 .unwrap(),
-                Value::Color(palette::LinSrgba::new(r, g, b, 255))
+                Value::Color(ColorType::Rgba {
+                    color: palette::LinSrgba::new(r, g, b, 255)
+                })
             );
             assert_eq!(
                 Value::try_from(&toml::value::Value::String(format!(
@@ -636,7 +671,9 @@ col_val = \"#ff00ff\"
                     r, g, b
                 )))
                 .unwrap(),
-                Value::Color(palette::LinSrgba::new(r, g, b, 255))
+                Value::Color(ColorType::Rgba {
+                    color: palette::LinSrgba::new(r, g, b, 255)
+                })
             );
             assert_eq!(
                 Value::try_from(&toml::value::Value::String(format!(
@@ -644,7 +681,9 @@ col_val = \"#ff00ff\"
                     r, g, b, a
                 )))
                 .unwrap(),
-                Value::Color(palette::LinSrgba::new(r, g, b, a))
+                Value::Color(ColorType::Rgba {
+                    color: palette::LinSrgba::new(r, g, b, a)
+                })
             );
             assert_eq!(
                 Value::try_from(&toml::value::Value::String(format!(
@@ -652,7 +691,9 @@ col_val = \"#ff00ff\"
                     r, g, b, a
                 )))
                 .unwrap(),
-                Value::Color(palette::LinSrgba::new(r, g, b, a))
+                Value::Color(ColorType::Rgba {
+                    color: palette::LinSrgba::new(r, g, b, a)
+                })
             );
         }
 

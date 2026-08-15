@@ -41,10 +41,16 @@ _test-redis-graphql: test-api
 test-drmemd: _test-simple _test-simple-graphql _test-redis-graphql
 
 build mode="dev":
-	@echo "🔧 Building {{ mode }}"
-	nice cargo build \
-	    {{ if mode == "rel" { "--release" } else { "" } }} \
-	    --features simple-backend,graphql,all-drivers
+	#!/usr/bin/env sh
+	if [ "{{ mode }}" = "dev" ]; then \
+	    FEATURES="simple-backend"; \
+	    RELEASE_FLAG=""; \
+	else \
+	    FEATURES="redis-backend"; \
+	    RELEASE_FLAG="--release "; \
+	fi; \
+	( echo "🔧 Building {{ mode }} with ${FEATURES}"; \
+	    nice cargo build ${RELEASE_FLAG}--features ${FEATURES},graphql,all-drivers );
 
 # This section has the targets for checking the syntax and
 # correctness. These commands run faster than the tests because they
@@ -56,11 +62,11 @@ _check-simple:
 
 _check-simple-graphql:
 	@echo "🤔 Checking simple-backend, with GraphQL"; \
-	nice cargo check --features simple-backend,graphql,all-drivers
+	nice cargo check --features simple-backend,graphiql,all-drivers
 
 _check-redis-graphql:
 	@echo "🤔 Checking redis-backend, with GraphQL"; \
-	nice cargo check --features redis-backend,graphql,all-drivers
+	nice cargo check --features redis-backend,graphiql,all-drivers
 
 check: _check-simple _check-simple-graphql _check-redis-graphql
 	@echo "🎉 DrMem source was checked successfully!"

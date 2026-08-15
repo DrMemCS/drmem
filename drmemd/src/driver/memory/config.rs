@@ -85,9 +85,9 @@ vars = [{name = \"v1\", initial = true},
                 (
                     "clr-val",
                     Value::String("#ffffff".into()),
-                    device::Value::Color(palette::LinSrgba::new(
-                        255, 255, 255, 255,
-                    )),
+                    device::Value::Color(device::ColorType::Rgba {
+                        color: palette::LinSrgba::new(255, 255, 255, 255),
+                    }),
                 ),
             ];
 

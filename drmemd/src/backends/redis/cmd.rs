@@ -60,10 +60,10 @@ impl Builder {
                 &buf[..]
             }
 
-            // Colors start with a 'C', followed by 4 u8 values,
+            // RGB Colors start with a 'C', followed by 4 u8 values,
             // representing red, green, blue, and alpha intensities,
             // respectively.
-            device::Value::Color(v) => {
+            device::Value::Color(device::ColorType::Rgba { color: v }) => {
                 buf.clear();
                 buf.reserve(5usize.saturating_sub(buf.capacity()));
 
@@ -72,6 +72,21 @@ impl Builder {
                 buf.push(v.green);
                 buf.push(v.blue);
                 buf.push(v.alpha);
+                &buf[..]
+            }
+
+            // Temperature Colors start with a 'C', followed by 2 u8
+            // values, representing temperature (K) and alpha,
+            // respectively. To fit the temperature in an u8, we
+            // divide by 100. We'll have to test to see if this is too
+            // granular.
+            device::Value::Color(device::ColorType::Ccta { kelvin: k, a }) => {
+                buf.clear();
+                buf.reserve(3usize.saturating_sub(buf.capacity()));
+
+                buf.push(b'C');
+                buf.push((k / 100) as u8);
+                buf.push(*a);
                 &buf[..]
             }
         }
@@ -173,7 +188,7 @@ mod tests {
         }
     }
 
-    const COLOR_TEST_CASES: &[((u8, u8, u8, u8), [u8; 5])] = &[
+    const RGB_COLOR_TEST_CASES: &[((u8, u8, u8, u8), [u8; 5])] = &[
         ((0, 0, 0, 0), [b'C', 0, 0, 0, 0]),
         ((4, 2, 1, 100), [b'C', 4, 2, 1, 100]),
         ((8, 4, 2, 200), [b'C', 8, 4, 2, 200]),
@@ -186,16 +201,46 @@ mod tests {
     ];
 
     #[test]
-    fn test_color_encoder() {
+    fn test_rgb_color_encoder() {
         let mut buf = vec![];
 
-        for ((r, g, b, a), rv) in COLOR_TEST_CASES {
+        for ((r, g, b, a), rv) in RGB_COLOR_TEST_CASES {
             assert_eq!(
                 &rv[..],
                 Builder::to_redis(
-                    &device::Value::Color(palette::LinSrgba::new(
-                        *r, *g, *b, *a
-                    )),
+                    &device::Value::Color(device::ColorType::Rgba {
+                        color: palette::LinSrgba::new(*r, *g, *b, *a)
+                    }),
+                    &mut buf
+                )
+            );
+        }
+    }
+
+    const TEMP_COLOR_TEST_CASES: &[((u16, u8), [u8; 3])] = &[
+        ((0, 0), [b'C', 0, 0]),
+        ((400, 100), [b'C', 4, 100]),
+        ((800, 200), [b'C', 8, 200]),
+        ((1200, 30), [b'C', 12, 30]),
+        ((1600, 255), [b'C', 16, 255]),
+        ((2000, 255), [b'C', 20, 255]),
+        ((2400, 80), [b'C', 24, 80]),
+        ((2800, 90), [b'C', 28, 90]),
+        ((3200, 0), [b'C', 32, 0]),
+    ];
+
+    #[test]
+    fn test_temp_color_encoder() {
+        let mut buf = vec![];
+
+        for ((kelvin, a), rv) in TEMP_COLOR_TEST_CASES {
+            assert_eq!(
+                &rv[..],
+                Builder::to_redis(
+                    &device::Value::Color(device::ColorType::Ccta {
+                        kelvin: *kelvin,
+                        a: *a
+                    }),
                     &mut buf
                 )
             );

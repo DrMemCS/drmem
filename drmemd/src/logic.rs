@@ -1,6 +1,6 @@
 use drmem_api::{client, device, driver, Result};
 use futures::future::{join_all, pending};
-use std::{borrow::Cow, collections::HashMap, convert::Infallible, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 use tokio::{
     sync::{broadcast, oneshot, Barrier},
     task::JoinHandle,
@@ -476,7 +476,6 @@ impl Node {
                 .for_each(|compile::Program(expr, idx)| {
                     self.inputs[*idx] =
                         compile::eval(expr, &self.inputs, &time, solar.as_ref())
-                            .map(Cow::into_owned)
                 });
 
             // Calculate each of the final expressions. If there are
@@ -486,7 +485,7 @@ impl Node {
             join_all(self.exprs.iter_mut().filter_map(
                 |(compile::Program(expr, _), out)| {
                     compile::eval(expr, &self.inputs, &time, solar.as_ref())
-                        .map(|v| out.send(v.into_owned()))
+                        .map(|v| out.send(v))
                 },
             ))
             .await;

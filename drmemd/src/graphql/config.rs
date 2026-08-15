@@ -21,7 +21,7 @@ fn def_pref_port() -> u16 {
     3000
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Security {
     pub clients: Arc<[String]>,
     pub cert_file: Arc<Path>,

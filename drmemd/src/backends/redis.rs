@@ -104,15 +104,19 @@ fn decode_string(buf: &[u8]) -> Result<device::Value> {
 
 fn decode_color(buf: &[u8]) -> Result<device::Value> {
     match *buf {
+        [k, a] => Ok(device::Value::Color(device::ColorType::Ccta {
+            kelvin: (k as u16) * 100,
+            a,
+        })),
         [r, g, b] => {
             let rgb = palette::LinSrgba::new(r, g, b, 255);
 
-            Ok(device::Value::Color(rgb))
+            Ok(device::Value::Color(device::ColorType::Rgba { color: rgb }))
         }
         [r, g, b, a] => {
             let rgb = palette::LinSrgba::new(r, g, b, a);
 
-            Ok(device::Value::Color(rgb))
+            Ok(device::Value::Color(device::ColorType::Rgba { color: rgb }))
         }
         _ => Err(Error::TypeError),
     }
@@ -1206,7 +1210,7 @@ mod tests {
         }
     }
 
-    const COLOR_TEST_CASES: &[((u8, u8, u8, u8), [u8; 5])] = &[
+    const RGB_COLOR_TEST_CASES: &[((u8, u8, u8, u8), [u8; 5])] = &[
         ((0, 0, 0, 0), [b'C', 0, 0, 0, 0]),
         ((4, 2, 1, 100), [b'C', 4, 2, 1, 100]),
         ((8, 4, 2, 200), [b'C', 8, 4, 2, 200]),
@@ -1219,11 +1223,38 @@ mod tests {
     ];
 
     #[test]
-    fn test_color_decoder() {
-        for ((r, g, b, a), rv) in COLOR_TEST_CASES {
+    fn test_rgb_color_decoder() {
+        for ((r, g, b, a), rv) in RGB_COLOR_TEST_CASES {
             assert_eq!(
                 from_value(&redis::Value::BulkString(rv.to_vec())).unwrap(),
-                device::Value::Color(palette::LinSrgba::new(*r, *g, *b, *a))
+                device::Value::Color(device::ColorType::Rgba {
+                    color: palette::LinSrgba::new(*r, *g, *b, *a)
+                })
+            );
+        }
+    }
+
+    const TEMP_COLOR_TEST_CASES: &[((u16, u8), [u8; 3])] = &[
+        ((0, 0), [b'C', 0, 0]),
+        ((400, 100), [b'C', 4, 100]),
+        ((800, 200), [b'C', 8, 200]),
+        ((1200, 30), [b'C', 12, 30]),
+        ((1600, 255), [b'C', 16, 255]),
+        ((2000, 255), [b'C', 20, 255]),
+        ((2400, 80), [b'C', 24, 80]),
+        ((2800, 90), [b'C', 28, 90]),
+        ((3200, 0), [b'C', 32, 0]),
+    ];
+
+    #[test]
+    fn test_temp_color_decoder() {
+        for ((kelvin, a), rv) in TEMP_COLOR_TEST_CASES {
+            assert_eq!(
+                from_value(&redis::Value::BulkString(rv.to_vec())).unwrap(),
+                device::Value::Color(device::ColorType::Ccta {
+                    kelvin: *kelvin,
+                    a: *a
+                })
             );
         }
     }

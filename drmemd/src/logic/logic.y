@@ -22,6 +22,9 @@
 %epp KW_THEN "then"
 %epp KW_ELSE "else"
 %epp KW_COALESCE "coalesce"
+%epp KW_WITH_ALPHA "with_alpha"
+%epp KW_BRIGHTNESS "brightness"
+%epp KW_BLEND "blend"
 %epp COMMA ","
 %epp ADD "+"
 %epp SUB "-"
@@ -137,14 +140,23 @@ Factor -> Result<Expr>:
       "B_NOT" Factor { Ok(Expr::Not(Box::new($2?))) }
     | "(" TopExpr ")" { $2 }
     | "KW_COALESCE" "(" ExprList ")" { Ok(Expr::Coalesce($3?)) }
+    | "KW_BLEND" "(" ExprList ")" { Ok(Expr::Blend($3?)) }
+    | "KW_WITH_ALPHA" "(" TopExpr "COMMA" TopExpr ")"
+      {
+        Ok(Expr::WithAlpha(Box::new($3?), Box::new($5?)))
+      }
+    | "KW_BRIGHTNESS" "(" Expr ")"
+      {
+        Ok(Expr::Brightness(Box::new($3?)))
+      }
     | Conditional { $1 }
     | "TRUE" { Ok(Expr::Lit(device::Value::Bool(true))) }
     | "FALSE" { Ok(Expr::Lit(device::Value::Bool(false))) }
     | "INT"
       {
-	  let s = get_str("literal integer", $1, $lexer)?;
+	    let s = get_str("literal integer", $1, $lexer)?;
 
-          parse_int(s)
+        parse_int(s)
       }
     | "FLT"
       {
@@ -158,26 +170,39 @@ Factor -> Result<Expr>:
 
 	Ok(Expr::Lit(device::Value::Str(s[1..s.len() - 1].into())))
     }
+    | "TEMPERATURE"
+    {
+        let s = get_str("literal temperature", $1, $lexer)?;
+
+        if let Some(cct_state) = parse_cct(s) {
+	        Ok(Expr::Lit(device::Value::Color(cct_state)))
+	    } else {
+            Err(Error::ParseError(
+			    format!("invalid temperature '{s}'")
+		    ))
+        }
+    }
     | "COLOR"
     {
 	let s = get_str("literal color", $1, $lexer)?;
 
 	match LinSrgba::<u8>::from_str(s) {
-	    Ok(v) => Ok(Expr::Lit(device::Value::Color(v))),
+	    Ok(v) => Ok(Expr::Lit(device::Value::Color(device::ColorType::Rgba { color: v }))),
 	    Err(_) =>
 		match LinSrgb::<u8>::from_str(s) {
 		    Ok(v) =>
-		        Ok(Expr::Lit(device::Value::Color(v.with_alpha(255u8)))),
+		        Ok(Expr::Lit(device::Value::Color(device::ColorType::Rgba { color: v.with_alpha(255u8) }))),
 		    Err(_) =>
 		        match named::from_str(s) {
 		            Some(v) => Ok(Expr::Lit(device::Value::Color(
-		                Srgb::<f32>::from_format(v)
-			            .into_linear()
-			            .into_format::<u8>()
-			            .with_alpha(255u8)
-		            ))),
+                        device::ColorType::Rgba { color:
+		                    Srgb::<f32>::from_format(v)
+			                .into_linear()
+			                .into_format::<u8>()
+			                .with_alpha(255u8)
+                    }))),
 		            None => Err(Error::ParseError(
-			        format!("invalid color '{s}'")
+			            format!("invalid color '{s}'")
 		            ))
 		        }
 	        }
@@ -278,6 +303,39 @@ fn parse_device(name: &str, env: &[String]) -> Result<usize> {
 	}
     }
     Err(Error::ParseError(format!("variable '{}' is not defined", &name)))
+}
+
+fn parse_cct(s: &str) -> Option<device::ColorType> {
+    // Matches patterns like "4000K", "4000K@128", or "4000K@50%"
+    // Note: The leading '#' is stripped by the lexer state transition.
+ 
+    let k_pos = s.find('K')?;
+    let kelvin = s[..k_pos]
+        .parse::<u16>()
+        .ok()
+        .filter(|v| (2000..=6500).contains(v))?;
+    let remainder = &s[k_pos + 1..];
+
+    let alpha = if remainder.is_empty() {
+        255
+    } else if remainder.starts_with('@') {
+        let alpha_str = &remainder[1..];
+        if let Some(pct_str) = alpha_str.strip_suffix('%') {
+            let pct = pct_str.parse::<u32>().ok()?;
+            
+            if !(0..=100).contains(&pct) {
+                return None;
+            }
+
+            ((pct.min(100) * 255) / 100) as u8
+        } else {
+            alpha_str.parse::<u8>().ok()?
+        }
+    } else {
+        return None;
+    };
+
+    Some(device::ColorType::Ccta { kelvin, a: alpha })
 }
 
 const CAT_UTC: &str = "utc";
