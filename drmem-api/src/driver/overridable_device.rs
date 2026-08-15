@@ -57,7 +57,7 @@ enum State<T: device::ReadWriteCompat> {
     Overridden {
         setting: T,
         r#override: T,
-        tmo: tokio::time::Instant,
+        deadline: tokio::time::Instant,
     },
 }
 
@@ -98,6 +98,11 @@ where
     #[inline(never)]
     #[instrument(skip(self))]
     pub async fn report_update(&mut self, new_value: T) {
+        let next_deadline = self
+            .override_duration
+            .map(|duration| tokio::time::Instant::now() + duration)
+            .unwrap_or_else(tokio::time::Instant::now);
+
         match &mut self.state {
             State::Unknown => {
                 self.reporter.report_value(new_value.clone().into()).await;
@@ -122,13 +127,13 @@ where
             State::Overridden {
                 r#override: value,
                 setting,
-                ..
+                deadline: _,
             } => {
                 // The settings are currently overridden. If the value
                 // is the same as the saved setting, we're back in
                 // sync. If it's different than the last overridden
-                // value, report it, reset the timer, and save the new
-                // reading.
+                // value, report it, refresh the absolute timer, and
+                // save the new reading.
 
                 if setting == &new_value {
                     info!("value matches setting, transitioning to Synced");
@@ -140,7 +145,7 @@ where
                     info!("value differs from setting, transitioning to Overridden");
                     self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Overridden {
-                        tmo: tokio::time::Instant::now(),
+                        deadline: next_deadline,
                         setting: value.clone(),
                         r#override: new_value,
                     };
@@ -154,7 +159,7 @@ where
                 if value != &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Overridden {
-                        tmo: tokio::time::Instant::now(),
+                        deadline: next_deadline,
                         setting: value.clone(),
                         r#override: new_value,
                     };
@@ -226,7 +231,7 @@ where
                     self.reporter.report_value(value.clone().into()).await;
                     self.reporter.report_value(new_value.clone().into()).await;
                     self.state = State::Overridden {
-                        tmo: tokio::time::Instant::now(),
+                        deadline: next_deadline,
                         setting: value.clone(),
                         r#override: new_value,
                     };
@@ -372,23 +377,34 @@ where
                 }
 
                 State::Overridden {
-                    tmo,
+                    deadline,
                     setting,
                     r#override,
-                } =>
-                // Being in the overridden state is a little more
-                // complicated. It has an optional timeout for when
-                // the override should switch back to the last
-                // setting.
-                {
-                    if let Some(duration) = self.override_duration {
-                        let delay = duration
-                            .checked_sub(tmo.elapsed())
-                            .unwrap_or(tokio::time::Duration::new(0, 0));
+                } => {
+                    // Being in the overridden state is a little more
+                    // complicated. It has an optional timeout for when
+                    // the override should switch back to the last
+                    // setting.
+                    if self.override_duration.is_some() {
+                        let now = tokio::time::Instant::now();
+
+                        if *deadline <= now {
+                            self.state = if setting != r#override {
+                                State::SettingTrans {
+                                    value: (setting.clone(), None),
+                                }
+                            } else {
+                                State::Synced {
+                                    value: r#override.clone(),
+                                }
+                            };
+                            continue;
+                        }
+
+                        let delay = deadline.saturating_duration_since(now);
 
                         // Wait for a setting or for when the override
                         // timeout occurs.
-
                         #[rustfmt::skip]
                         tokio::select! {
                             reply = self.set_stream.next() => {
@@ -503,6 +519,35 @@ mod tests {
             rrrx,
             OverridableDevice::new(MockReporter(rrtx), srrx, init, tmo),
         )
+    }
+
+    #[tokio::test]
+    async fn test_override_deadline_is_absolute() {
+        let (tx_set, mut rx_rdg, mut dev) =
+            mk_device::<bool>(Some(true), Some(Duration::from_secs(60)));
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(25);
+
+        dev.state = State::Overridden {
+            setting: true,
+            r#override: false,
+            deadline,
+        };
+
+        let start = tokio::time::Instant::now();
+        assert!(matches!(
+            timeout(Duration::from_millis(200), dev.next_setting()).await,
+            Ok(Some((true, None)))
+        ));
+        assert!(matches!(
+            timeout(Duration::from_secs(0), rx_rdg.recv()).await,
+            Ok(Some(device::Value::Bool(true)))
+        ));
+        assert!(
+            tokio::time::Instant::now().duration_since(start)
+                >= Duration::from_millis(25)
+        );
+
+        std::mem::drop(tx_set);
     }
 
     #[tokio::test]
@@ -622,11 +667,15 @@ mod tests {
         // Now force a timeout to see if the new setting is reasserted.
 
         {
-            // Adjust the timeout so that we guarantee it times out
-            // right away.
+            // Force the override to expire immediately.
+            sh_dev.override_duration = Some(Duration::ZERO);
 
-            if let State::Overridden { tmo, .. } = &sh_dev.state {
-                sh_dev.override_duration = Some(tmo.elapsed())
+            if let State::Overridden { .. } = &sh_dev.state {
+                sh_dev.state = State::Overridden {
+                    setting: 1,
+                    r#override: 2,
+                    deadline: tokio::time::Instant::now(),
+                };
             } else {
                 panic!(
                     "in wrong state: {:?}",
@@ -1065,11 +1114,15 @@ mod tests {
         // Now force a timeout to see if the setting is reasserted.
 
         {
-            // Adjust the timeout so that we guarantee it times out
-            // right away.
+            // Force the override to expire immediately.
+            sh_dev.override_duration = Some(Duration::ZERO);
 
-            if let State::Overridden { tmo, .. } = &sh_dev.state {
-                sh_dev.override_duration = Some(tmo.elapsed())
+            if let State::Overridden { .. } = &sh_dev.state {
+                sh_dev.state = State::Overridden {
+                    setting: true,
+                    r#override: false,
+                    deadline: tokio::time::Instant::now(),
+                };
             } else {
                 panic!(
                     "in wrong state: {:?}",
