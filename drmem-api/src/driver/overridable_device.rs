@@ -15,16 +15,8 @@
 /// - after setting the hardware to a new value, a poll should
 ///   immediately be done followed by a `.report_update()`
 ///
-/// `OverridableDevice`s implement a simple state machine to know how to handle
-/// incoming settings. Some hardware (e.g. a Philips Hue bridge) can optimistic-
-/// ally confirm a setting before the physical device actually has it applied,
-/// and later revert to the stale, real reading if the device never became
-/// reachable. To tolerate this, a device can be given an "envelope": a settle
-/// period, started when a setting is applied, during which polled readings are
-/// compared against the setting but don't yet commit to `Synced` or
-/// `Overridden`. Mismatches during the envelope reassert the setting and extend
-/// the envelope; when it finally elapses, the last polled reading decides the
-/// outcome.
+/// `OverridableDevice`s implement a simple state machine to know how
+/// to handle incoming settings.
 use crate::{
     device,
     driver::{rw_device, Reporter, RxDeviceSetting, SettingResponder},
