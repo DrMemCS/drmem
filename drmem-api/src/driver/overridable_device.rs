@@ -203,10 +203,7 @@ where
 
                 if setting == &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
-                    debug!("entering Synced state with value {:?}", &new_value);
-                    self.state = State::Synced {
-                        value: setting.clone(),
-                    };
+                    self.state = State::Synced { value: new_value };
                 } else if value != &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
                     debug!(
