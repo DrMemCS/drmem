@@ -160,7 +160,7 @@ where
     #[inline(never)]
     #[instrument(skip(self), fields(state = ?self.state))]
     pub async fn report_update(&mut self, new_value: T) {
-        debug!("waiting for the next report in state {:?}", self.state);
+        debug!("reporting new value: {:?}", &new_value);
 
         let next_deadline = self
             .override_duration
@@ -176,7 +176,6 @@ where
                 // reading, we switch to the synced state. If a
                 // setting comes it, it can further modify the state.
 
-                debug!("entering Synced state with value {:?}", &new_value);
                 self.state = State::Synced { value: new_value }
             }
 
@@ -203,13 +202,10 @@ where
 
                 if setting == &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
+                    info!("value was resynced to last setting");
                     self.state = State::Synced { value: new_value };
                 } else if value != &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
-                    debug!(
-                        "reset Overridden state with new value {:?}",
-                        &new_value
-                    );
                     self.state = State::Overridden {
                         deadline: next_deadline,
                         setting: value.clone(),
@@ -224,7 +220,7 @@ where
 
                 if value != &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
-                    debug!("value differs from previous, transitioning to Overridden");
+                    info!("value was overridden: {:?}", &new_value);
                     self.state = State::Overridden {
                         deadline: next_deadline,
                         setting: value.clone(),
@@ -247,7 +243,6 @@ where
                 } else {
                     let setting = setting.clone();
 
-                    warn!("reasserting setting, via ApplyingTrans");
                     self.state = State::ApplyingTrans {
                         setting: setting.clone(),
                         last_seen: new_value,
@@ -281,7 +276,6 @@ where
                         resp.ok(new_value);
                     }
 
-                    info!("has envelope, transitioning to Applying");
                     self.state = State::Applying {
                         last_seen: setting.clone(),
                         setting,
@@ -296,7 +290,10 @@ where
             State::SyncedTrans { value } => {
                 if value != &new_value {
                     self.reporter.report_value(new_value.clone().into()).await;
-                    info!("value differs from previous, transitioning to Overridden");
+                    info!(
+                        "value was overridden while reporting setting: {:?}",
+                        &new_value
+                    );
                     self.state = State::Overridden {
                         deadline: next_deadline,
                         setting: value.clone(),
@@ -305,6 +302,7 @@ where
                 }
             }
         }
+        debug!("done handling reported value")
     }
 
     /// Gets the last value of the device. If DrMem is built with
@@ -329,8 +327,9 @@ where
     #[inline(never)]
     #[instrument(skip(self), fields(state = ?self.state))]
     pub async fn next_setting(&mut self) -> Option<SettingTransaction<T>> {
-        debug!("waiting for the next setting in state {:?}", self.state);
-        let result = loop {
+        loop {
+            debug!("waiting for the next setting in state {:?}", self.state);
+
             match &mut self.state {
                 // At this point, we have no known state. If a setting comes in,
                 // we're going to assume it's different from the hardware's
@@ -338,9 +337,6 @@ where
                 State::Unknown => {
                     let reply = self.set_stream.next().await?;
 
-                    debug!(
-                        "received new setting, transitioning to UnknownTrans"
-                    );
                     self.state = State::UnknownTrans {
                         value: reply.0,
                         report: Some(reply.1),
@@ -358,7 +354,6 @@ where
                     let deadline = tokio::time::Instant::now() + self.envelope;
                     let report = report.take();
 
-                    debug!("transitioning to Applying");
                     self.state = State::Applying {
                         setting: value.clone(),
                         last_seen: value.clone(),
@@ -372,7 +367,6 @@ where
                     let reply = self.set_stream.next().await?;
 
                     self.state = if reply.0 != *value {
-                        debug!("value differs from previous, transitioning to ApplyingTrans");
                         State::ApplyingTrans {
                             setting: reply.0.clone(),
                             last_seen: value.clone(),
@@ -383,14 +377,12 @@ where
                         }
                     } else {
                         reply.1.ok(reply.0.clone());
-                        debug!("value matches previous, transitioning to SyncedTrans");
                         State::SyncedTrans { value: reply.0 }
                     };
                 }
 
                 State::SyncedTrans { value } => {
                     self.reporter.report_value(value.clone().into()).await;
-                    debug!("transitioning from SyncedTrans to Synced");
                     self.state = State::Synced {
                         value: value.clone(),
                     };
@@ -404,9 +396,10 @@ where
                     deadline,
                     needs_reaffirm,
                 } => {
-                    // The setting needs to be reasserted.
-                    // Re-report it to the backend (without bothering the
-                    // driver again) before doing anything else.
+                    // The setting needs to be reasserted. Re-report
+                    // it to the backend (without bothering the driver
+                    // again) before doing anything else.
+
                     if *needs_reaffirm {
                         self.reporter
                             .report_value(setting.clone().into())
@@ -418,18 +411,18 @@ where
 
                     if *deadline <= now {
                         if last_seen == setting {
-                            debug!("deadline reached and last_seen matches setting, transitioning to Synced");
                             self.state = State::Synced {
                                 value: setting.clone(),
                             };
                         } else {
-                            // The backend never saw this reading while we were
-                            // waiting out the envelope, so report it now or
-                            // clients are stuck seeing the stale setting.
+                            // The backend never saw this reading
+                            // while we were waiting out the envelope,
+                            // so report it now or clients are stuck
+                            // seeing the stale setting.
+
                             self.reporter
                                 .report_value(last_seen.clone().into())
                                 .await;
-                            debug!("deadline reached and last_seen differs from setting, transitioning to Overridden");
                             self.state = State::Overridden {
                                 setting: setting.clone(),
                                 r#override: last_seen.clone(),
@@ -452,7 +445,6 @@ where
                             match reply {
                                 Some(r) => {
                                     if r.0 != *setting {
-                                        debug!("new setting differs from current, transitioning to ApplyingTrans");
                                         self.state = State::ApplyingTrans {
                                             setting: r.0.clone(),
                                             last_seen: last_seen.clone(),
@@ -470,14 +462,13 @@ where
                         }
                         _ = tokio::time::sleep(delay) => {
                             if last_seen == setting {
-                                debug!("TIMEOUT : last seen matches setting, transitioning to Synced");
                                 self.state = State::Synced { value: setting.clone() };
                             } else {
                                 // Same as above: report the real
                                 // reading before committing to
                                 // `Overridden`.
+
                                 self.reporter.report_value(last_seen.clone().into()).await;
-                                info!("TIMEOUT : last seen differs from setting, transitioning to Overridden");
                                 self.state = State::Overridden {
                                     setting: setting.clone(),
                                     r#override: last_seen.clone(),
@@ -512,10 +503,6 @@ where
                     let deadline = *deadline;
                     let result = (to_send.0.clone(), to_send.1.take());
 
-                    debug!(
-                        "transitioning to Applying with setting {:?}",
-                        setting
-                    );
                     self.state = State::Applying {
                         setting,
                         last_seen,
@@ -534,12 +521,12 @@ where
                     // complicated. It has an optional timeout for when
                     // the override should switch back to the last
                     // setting.
+
                     if self.override_duration.is_some() {
                         let now = tokio::time::Instant::now();
 
                         if *deadline <= now {
                             self.state = if setting != r#override {
-                                debug!("override deadline reached, transitioning to ApplyingTrans");
                                 State::ApplyingTrans {
                                     setting: setting.clone(),
                                     last_seen: r#override.clone(),
@@ -548,7 +535,6 @@ where
                                     needs_report: true,
                                 }
                             } else {
-                                debug!("override deadline reached, transitioning to Synced");
                                 State::Synced {
                                     value: r#override.clone(),
                                 }
@@ -599,7 +585,6 @@ where
                                 // setting).
 
                                 self.state = if setting != r#override {
-                                    debug!("override deadline reached, transitioning to ApplyingTrans");
                                     State::ApplyingTrans {
                                         setting: setting.clone(),
                                         last_seen: r#override.clone(),
@@ -609,7 +594,6 @@ where
                                         needs_report: true,
                                     }
                                 } else {
-                                    debug!("override deadline reached, transitioning to Synced");
                                     State::Synced {
                                         value: r#override.clone()
                                     }
@@ -625,8 +609,7 @@ where
                     }
                 }
             }
-        };
-        result
+        }
     }
 }
 
@@ -653,6 +636,10 @@ mod tests {
         sync::{mpsc, oneshot},
         time::{timeout, Duration},
     };
+
+    // Creates a reporter type that sends to a `mpsc::Sender`
+    // handle. We can verify reports were sent by reading the
+    // `mpsc::Receiver` handle.
 
     struct MockReporter(mpsc::Sender<device::Value>);
 
@@ -689,11 +676,35 @@ mod tests {
         )
     }
 
+    // This test verifies that, when in the `Override` state and when
+    // the deadline is reached, the last setting is reasserted and
+    // reported.
+    //
+    // State            Action                  Result
+    //
+    // Override         deadline timeout        Return last setting,
+    //                                          Report last setting
+
     #[tokio::test]
     async fn test_override_deadline_is_absolute() {
         let (tx_set, mut rx_rdg, mut dev) =
             mk_device::<bool>(Some(true), Some(Duration::from_secs(60)), None);
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(25);
+
+        // Nothing should be in the queue of messages going to the
+        // backend.
+
+        assert!(timeout(Duration::from_secs(0), rx_rdg.recv())
+            .await
+            .is_err());
+
+        // Set the deadline for 25ms from now.
+
+        let start = tokio::time::Instant::now();
+        let deadline = start + Duration::from_millis(25);
+
+        // Force the state machine into the `Override` state. This
+        // mimicks where the state machine was `Synced` as `true` but
+        // some external command made it `false`.
 
         dev.state = State::Overridden {
             setting: true,
@@ -701,19 +712,30 @@ mod tests {
             deadline,
         };
 
-        let start = tokio::time::Instant::now();
+        // Wait up to 200ms. This should return with the setting
+        // `true`.
+
         assert!(matches!(
             timeout(Duration::from_millis(200), dev.next_setting()).await,
             Ok(Some((true, None)))
         ));
+
+        // The setting should have been reported.
+
         assert!(matches!(
             timeout(Duration::from_secs(0), rx_rdg.recv()).await,
             Ok(Some(device::Value::Bool(true)))
         ));
+
+        // At least 25ms should have elapsed.
+
         assert!(
             tokio::time::Instant::now().duration_since(start)
                 >= Duration::from_millis(25)
         );
+
+        // This makes `tx_set` last for the whole function and
+        // prevents it from being dropped too early.
 
         std::mem::drop(tx_set);
     }
@@ -852,7 +874,7 @@ mod tests {
                 );
             }
 
-            // The previous setting (true) should be returned.
+            // The previous setting (1) should be returned.
 
             assert!(matches!(
                 timeout(Duration::from_secs(0), sh_dev.next_setting()).await,
@@ -1328,29 +1350,34 @@ mod tests {
 
         // The initial desired value is delivered to the driver and
         // reported to the backend, same as without an envelope.
+
         assert!(matches!(
             timeout(Duration::from_secs(0), sh_dev.next_setting()).await,
             Ok(Some((true, None)))
         ));
+
         assert!(matches!(
             timeout(Duration::from_secs(0), rx_rdg.recv()).await,
             Ok(Some(device::Value::Bool(true)))
         ));
 
-        // A matching poll arrives right away. With the bridge-staleness
-        // bug this feature fixes, this is exactly the situation that
-        // must NOT be trusted immediately.
+        // A matching poll arrives right away. With the bridge-
+        // staleness bug this feature fixes, this is exactly the
+        // situation that must NOT be trusted immediately.
+
         sh_dev.report_update(true).await;
 
-        // Nothing new should be reported, and the device must not have
-        // committed to `Synced` yet.
+        // Nothing new should be reported, and the device must not
+        // have committed to `Synced` yet.
+
         assert!(timeout(Duration::from_secs(0), rx_rdg.recv())
             .await
             .is_err());
         assert!(matches!(&sh_dev.state, State::Applying { .. }));
 
-        // `.next_setting()` must stay pending -- the envelope is still
-        // open and no client setting has arrived.
+        // `.next_setting()` must stay pending -- the envelope is
+        // still open and no client setting has arrived.
+
         assert!(timeout(Duration::from_millis(20), sh_dev.next_setting())
             .await
             .is_err());
@@ -1370,6 +1397,7 @@ mod tests {
             timeout(Duration::from_secs(0), sh_dev.next_setting()).await,
             Ok(Some((true, None)))
         ));
+
         assert!(matches!(
             timeout(Duration::from_secs(0), rx_rdg.recv()).await,
             Ok(Some(device::Value::Bool(true)))
@@ -1377,6 +1405,7 @@ mod tests {
 
         // A mismatched poll arrives. It must be remembered, but never
         // pushed to the backend.
+
         sh_dev.report_update(false).await;
         assert!(timeout(Duration::from_secs(0), rx_rdg.recv())
             .await
@@ -1385,6 +1414,7 @@ mod tests {
         // The reassert is handed straight back to the driver (no
         // responder, since it's not a fresh client request) with no
         // extra backend report.
+
         assert!(matches!(
             timeout(Duration::from_secs(0), sh_dev.next_setting()).await,
             Ok(Some((true, None)))
@@ -1416,6 +1446,7 @@ mod tests {
         // Wait most of the way through the original envelope, then
         // cause a mismatch. The deadline must be pushed out by a
         // fresh envelope measured from now, not from the start.
+
         tokio::time::sleep(Duration::from_millis(100)).await;
         sh_dev.report_update(false).await;
         assert!(matches!(
@@ -1425,12 +1456,14 @@ mod tests {
 
         // At the *original* deadline (~50ms from here) the device must
         // still be waiting -- proving the mismatch reset the timer.
+
         assert!(timeout(Duration::from_millis(60), sh_dev.next_setting())
             .await
             .is_err());
 
         // Let the hardware settle on the right value so the extended
         // envelope can resolve cleanly once it elapses.
+
         sh_dev.report_update(true).await;
         assert!(timeout(Duration::from_millis(200), sh_dev.next_setting())
             .await
@@ -1455,6 +1488,7 @@ mod tests {
         // Deadline already elapsed and the last reading matches, so
         // this must resolve to `Synced` (and then just wait for a
         // setting that never comes).
+
         assert!(timeout(Duration::from_millis(50), sh_dev.next_setting())
             .await
             .is_err());
@@ -1480,6 +1514,7 @@ mod tests {
 
         // Deadline already elapsed and the last reading still doesn't
         // match, so we must give up and call it an override.
+
         assert!(timeout(Duration::from_millis(50), sh_dev.next_setting())
             .await
             .is_err());
@@ -1517,6 +1552,7 @@ mod tests {
         // setting forever, since a later poll of the *same* value
         // never triggers `report_update()`'s own Overridden-mismatch
         // report.
+
         assert!(timeout(Duration::from_millis(50), sh_dev.next_setting())
             .await
             .is_err());
@@ -1554,6 +1590,7 @@ mod tests {
         // Same as above, but let the envelope elapse naturally through
         // the `tokio::select!` sleep arm instead of the "already
         // expired" fast path.
+
         assert!(timeout(Duration::from_millis(200), sh_dev.next_setting())
             .await
             .is_err());
@@ -1592,6 +1629,7 @@ mod tests {
 
         // Several mismatch/reassert cycles in a row. Each one extends
         // the envelope and none of them touch the backend.
+
         for _ in 0..3 {
             sh_dev.report_update(false).await;
             assert!(matches!(
@@ -1606,6 +1644,7 @@ mod tests {
         // Finally the hardware settles on the right value. Once the
         // full (most recent) envelope elapses with no further
         // mismatch, we commit to `Synced`.
+
         sh_dev.report_update(true).await;
         assert!(timeout(Duration::from_millis(300), sh_dev.next_setting())
             .await
@@ -1631,12 +1670,15 @@ mod tests {
 
         // A client sends a different setting (2) while we're still
         // waiting out the envelope for 1.
+
         let (os_tx, mut os_rx) = oneshot::channel();
+
         assert!(matches!(tx_set.send((2.into(), os_tx)).await, Ok(())));
 
         // The driver is handed the new target, along with the
         // responder -- it's the driver's job to ack the client once
         // the hardware is actually set.
+
         assert!(matches!(
             timeout(Duration::from_secs(0), sh_dev.next_setting()).await,
             Ok(Some((2, Some(_))))
@@ -1666,16 +1708,20 @@ mod tests {
         ));
 
         // A client re-sends the value we're already applying.
+
         let (os_tx, mut os_rx) = oneshot::channel();
+
         assert!(matches!(tx_set.send((1.into(), os_tx)).await, Ok(())));
 
         // It's ack'd immediately without bothering the driver again...
+
         assert!(timeout(Duration::from_secs(0), sh_dev.next_setting())
             .await
             .is_err());
         assert_eq!(os_rx.try_recv(), Ok(Ok(device::Value::Int(1))));
 
         // ...but it does get re-reported to the backend.
+
         assert!(matches!(
             timeout(Duration::from_secs(0), rx_rdg.recv()).await,
             Ok(Some(device::Value::Int(1)))
@@ -1690,12 +1736,13 @@ mod tests {
         let (srtx, srrx) = mpsc::channel(20);
 
         // Pre-fill the backend channel so the pending report blocks.
+
         assert!(matches!(rrtx.send(device::Value::Int(0)).await, Ok(())));
 
         let mut sh_dev: OverridableDevice<i32, MockReporter> =
             OverridableDevice::new(MockReporter(rrtx), srrx, None, None, None);
-
         let (os_tx, mut os_rx) = oneshot::channel();
+
         assert!(matches!(srtx.send((1.into(), os_tx)).await, Ok(())));
 
         let waker = noop_waker();
@@ -1703,6 +1750,7 @@ mod tests {
 
         // First poll: Unknown -> UnknownTrans. The setting is consumed
         // from the stream, but no report has been attempted yet.
+
         {
             let fut = sh_dev.next_setting();
             tokio::pin!(fut);
@@ -1714,6 +1762,7 @@ mod tests {
         // full, so this must return `Pending` without mutating state
         // any further. Dropping this future (end of the block)
         // simulates a cancellation.
+
         {
             let fut = sh_dev.next_setting();
             tokio::pin!(fut);
@@ -1723,11 +1772,13 @@ mod tests {
         assert!(os_rx.try_recv().is_err());
 
         // Drain the dummy value so the retried report can proceed.
+
         assert_eq!(rrrx.try_recv(), Ok(device::Value::Int(0)));
 
         // Retry: the setting is handed to the driver and exactly one
         // (correct) value was reported -- nothing lost, nothing
         // duplicated.
+
         assert!(matches!(
             timeout(Duration::from_secs(0), sh_dev.next_setting()).await,
             Ok(Some((1, Some(_))))
@@ -1756,10 +1807,13 @@ mod tests {
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
 
-        // First poll: Synced -> ApplyingTrans. The report is attempted
-        // inside `ApplyingTrans`, so it hasn't happened yet.
+        // First poll: Synced -> ApplyingTrans. The report is
+        // attempted inside `ApplyingTrans`, so it hasn't happened
+        // yet.
+
         {
             let fut = sh_dev.next_setting();
+
             tokio::pin!(fut);
             assert!(fut.poll(&mut cx).is_pending());
         }
@@ -1768,8 +1822,10 @@ mod tests {
         // Second poll: the report is attempted, but the channel is
         // full. Dropping this future simulates a cancellation; state
         // must be untouched.
+
         {
             let fut = sh_dev.next_setting();
+
             tokio::pin!(fut);
             assert!(fut.poll(&mut cx).is_pending());
         }
@@ -1813,6 +1869,7 @@ mod tests {
         // Nothing is ready yet (no incoming setting, envelope not
         // elapsed). Poll once and drop the future mid-`select!` to
         // simulate a cancellation.
+
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
         {
@@ -1822,6 +1879,7 @@ mod tests {
         }
 
         // The deadline (and the rest of the state) must be untouched.
+
         assert!(matches!(
             &sh_dev.state,
             State::Applying { deadline: d, .. } if *d == deadline
@@ -1830,6 +1888,7 @@ mod tests {
         // Re-poll: it must still resolve against the *original*
         // deadline (proving the cancellation didn't reset the timer),
         // eventually committing to `Synced`.
+
         assert!(timeout(Duration::from_millis(300), sh_dev.next_setting())
             .await
             .is_err());
@@ -1856,8 +1915,10 @@ mod tests {
         // The channel is full, so the report inside `report_update()`
         // can't complete. Dropping this future simulates a
         // cancellation; state must stay untouched.
+
         {
             let fut = sh_dev.report_update(2);
+
             tokio::pin!(fut);
             assert!(fut.poll(&mut cx).is_pending());
         }
@@ -1865,6 +1926,7 @@ mod tests {
 
         // Drain the dummy and retry -- the end state must match an
         // uninterrupted call, with exactly one reported value.
+
         assert_eq!(rrrx.try_recv(), Ok(device::Value::Int(0)));
         sh_dev.report_update(2).await;
 
