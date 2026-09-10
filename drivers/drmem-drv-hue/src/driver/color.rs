@@ -78,6 +78,19 @@ pub fn color_to_bridge(color: &ColorType) -> BridgeState {
     }
 }
 
+/// The bridge echoes back XY coordinates with enough floating-point
+/// round-off that a value we just sent won't compare exactly equal to
+/// what comes back in the next poll. Two coordinates within this
+/// distance of each other are treated as "the same" reading.
+pub const XY_ECHO_TOLERANCE: f32 = 0.001;
+
+/// True if two CIE xy coordinates are close enough to be considered the
+/// same reading (see `XY_ECHO_TOLERANCE`).
+pub fn xy_is_close(a: (f32, f32), b: (f32, f32)) -> bool {
+    (a.0 - b.0).abs() < XY_ECHO_TOLERANCE
+        && (a.1 - b.1).abs() < XY_ECHO_TOLERANCE
+}
+
 /// Merges the (possibly partial) on/off, brightness, and XY state
 /// reported by the bridge into a new `ColorType`, using `prev` to fill
 /// in any component that wasn't reported. The bridge only ever echoes
@@ -316,5 +329,84 @@ mod tests {
                 color: LinSrgba::new(200, 100, 50, 255)
             }
         );
+    }
+
+    #[test]
+    fn test_xy_is_close() {
+        let a = (0.4578, 0.4101);
+
+        // Well within tolerance, including exact equality.
+        assert!(xy_is_close(a, a));
+        assert!(xy_is_close(
+            a,
+            (
+                a.0 + XY_ECHO_TOLERANCE / 10.0,
+                a.1 - XY_ECHO_TOLERANCE / 10.0
+            )
+        ));
+        assert!(xy_is_close(
+            a,
+            (a.0 + XY_ECHO_TOLERANCE, a.1 - XY_ECHO_TOLERANCE)
+        ));
+
+        // Outside tolerance on just one axis is still a mismatch.
+        assert!(!xy_is_close(a, (a.0 + XY_ECHO_TOLERANCE * 10.0, a.1)));
+        assert!(!xy_is_close(a, (a.0, a.1 - XY_ECHO_TOLERANCE * 10.0)));
+    }
+
+    // Round-off in the RGB <-> XY conversion means a setting's XY, sent
+    // to the bridge, won't come back bit-for-bit identical on the next
+    // poll. `apply_update` relies on `xy_is_close` to recognize the
+    // bridge is just echoing the setting (rather than reporting a real
+    // override), which lets `merge_bridge_update` reconstruct the exact
+    // original setting instead of a lossy round trip through XY. These
+    // tests simulate that whole path for both `ColorType` variants.
+
+    #[test]
+    fn test_rgba_setting_matches_its_own_close_echo() {
+        let setting = ColorType::Rgba {
+            color: LinSrgba::new(200, 100, 50, 200),
+        };
+        let sent = color_to_bridge(&setting);
+
+        // The bridge's echo is within tolerance of, but not bit-for-bit
+        // identical to, what was sent.
+        let echoed_xy = (sent.xy.0 + 0.0001, sent.xy.1 - 0.0001);
+        assert!(xy_is_close(sent.xy, echoed_xy));
+
+        // Since the echo is "close", the caller filters it to `None`
+        // before merging.
+        let merged = merge_bridge_update(
+            &setting,
+            Some(sent.on),
+            Some(sent.brightness),
+            None,
+        );
+
+        assert_eq!(merged, setting);
+    }
+
+    #[test]
+    fn test_ccta_setting_matches_its_own_close_echo() {
+        let setting = ColorType::Ccta {
+            kelvin: 2700,
+            a: 200,
+        };
+        let sent = color_to_bridge(&setting);
+
+        let echoed_xy = (sent.xy.0 - 0.0001, sent.xy.1 + 0.0001);
+        assert!(xy_is_close(sent.xy, echoed_xy));
+
+        let merged = merge_bridge_update(
+            &setting,
+            Some(sent.on),
+            Some(sent.brightness),
+            None,
+        );
+
+        // The merge must preserve the `Ccta` variant (and its kelvin),
+        // not collapse it into an `Rgba` that could never compare equal
+        // to the original setting.
+        assert_eq!(merged, setting);
     }
 }

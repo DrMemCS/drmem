@@ -216,10 +216,10 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
             .as_ref()
             .and_then(|c| c.xy.as_ref())
             .map(|xy| (xy.x, xy.y))
-            .filter(|&(x, y)| {
-                !self.last_xy.is_some_and(|(last_x, last_y)| {
-                    (last_x - x).abs() < 0.001 && (last_y - y).abs() < 0.001
-                })
+            .filter(|&xy| {
+                !self
+                    .last_xy
+                    .is_some_and(|last_xy| color::xy_is_close(last_xy, xy))
             });
 
         if on.is_none() && brightness.is_none() && xy.is_none() {
@@ -284,6 +284,267 @@ impl<R: Reporter> DeviceWrapper<R> {
             Self::Switch(d) => d.reset(),
             Self::Dimmer(d) => d.reset(),
             Self::ColorBulb(d) => d.reset(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use drmem_api::{
+        device::Value,
+        driver::{OverridableDevice, ReadOnlyDevice, TxDeviceSetting},
+    };
+    use tokio::{
+        sync::{mpsc, oneshot},
+        time::{Duration, advance, timeout},
+    };
+
+    // Same as the envelope in `Set::from_devcfg`.
+    const ENVELOPE: Duration = Duration::from_secs(30);
+    const POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+    struct MockReporter(mpsc::Sender<Value>);
+
+    impl Reporter for MockReporter {
+        async fn report_value(&mut self, v: Value) {
+            self.0.send(v).await.unwrap()
+        }
+    }
+
+    // Models how the bridge stores a light: brightness in 254 steps (reported
+    // as a percentage) and xy to 4 decimal places, so what it reports back is
+    // never bit-for-bit what was sent.
+    struct FakeBridge {
+        on: bool,
+        level: u8,
+        xy: (f32, f32),
+    }
+
+    impl FakeBridge {
+        fn apply(&mut self, cmd: &payload::LightCommand) {
+            let round4 = |v: f32| (v * 10_000.0).round() / 10_000.0;
+
+            if let Some(on) = &cmd.on {
+                self.on = on.on;
+            }
+            if let Some(dim) = &cmd.dimming {
+                self.level = (dim.brightness / 100.0 * 254.0)
+                    .round()
+                    .clamp(1.0, 254.0) as u8;
+            }
+            if let Some(xy) = cmd.color.as_ref().and_then(|c| c.xy.as_ref()) {
+                self.xy = (round4(xy.x), round4(xy.y));
+            }
+        }
+
+        fn poll(&self) -> payload::ResourceData {
+            payload::ResourceData {
+                id: "test".into(),
+                on: Some(payload::On { on: self.on }),
+                dimming: Some(payload::Dimming {
+                    brightness: (self.level as f32 / 254.0 * 10_000.0).round()
+                        / 100.0,
+                }),
+                color: Some(payload::Color {
+                    xy: Some(payload::XyCoordinates {
+                        x: self.xy.0,
+                        y: self.xy.1,
+                    }),
+                }),
+            }
+        }
+    }
+
+    // A `ColorBulbDevice` wired to a `FakeBridge` the way the driver's
+    // device loop wires it to a real one.
+    struct Rig {
+        tx_set: TxDeviceSetting,
+        rx_rdg: mpsc::Receiver<Value>,
+        dev: ColorBulbDevice<MockReporter>,
+        bridge: FakeBridge,
+    }
+
+    impl Rig {
+        async fn new() -> Self {
+            let (rdg_tx, rx_rdg) = mpsc::channel(20);
+            let (tx_set, rx_set) = mpsc::channel(20);
+            let mut rig = Rig {
+                tx_set,
+                rx_rdg,
+                dev: ColorBulbDevice::new(
+                    classes::ColorBulb {
+                        error: ReadOnlyDevice::new(MockReporter(
+                            mpsc::channel(1).0,
+                        )),
+                        color: OverridableDevice::new(
+                            MockReporter(rdg_tx),
+                            rx_set,
+                            None,
+                            None,
+                            Some(ENVELOPE),
+                        ),
+                    },
+                    false,
+                ),
+                bridge: FakeBridge {
+                    on: false,
+                    level: 254,
+                    xy: (0.5, 0.4),
+                },
+            };
+
+            // The driver's first poll reports the light's initial state.
+            rig.poll().await;
+            while rig.rx_rdg.try_recv().is_ok() {}
+            rig
+        }
+
+        async fn poll(&mut self) {
+            let update = self.bridge.poll();
+
+            self.dev.apply_update(&update).await;
+        }
+
+        // Sends `setting` to the device and feeds the bridge's polled state
+        // back until the envelope has elapsed. A faithful bridge should
+        // leave the device settled: one command, one backend report, no
+        // reassertions and no override.
+        async fn set(
+            &mut self,
+            setting: &ColorType,
+        ) -> std::result::Result<(), String> {
+            let (os_tx, _os_rx) = oneshot::channel();
+
+            self.tx_set
+                .send((setting.clone().into(), os_tx))
+                .await
+                .unwrap();
+
+            let cmd = timeout(Duration::ZERO, self.dev.next_setting())
+                .await
+                .map_err(|_| "no command was issued")?
+                .ok_or("setting stream closed")?;
+
+            self.bridge.apply(&cmd);
+
+            for _ in 0..3 {
+                self.poll().await;
+
+                if timeout(Duration::ZERO, self.dev.next_setting())
+                    .await
+                    .is_ok()
+                {
+                    return Err("setting was re-sent after a poll".into());
+                }
+                advance(POLL_INTERVAL).await;
+            }
+
+            if timeout(ENVELOPE * 2, self.dev.next_setting()).await.is_ok() {
+                return Err("setting was re-sent after the envelope".into());
+            }
+
+            let mut seen = vec![];
+
+            while let Ok(v) = self.rx_rdg.try_recv() {
+                seen.push(v);
+            }
+
+            if seen != [Value::Color(setting.clone())] {
+                return Err(format!("backend saw {seen:?}"));
+            }
+            Ok(())
+        }
+    }
+
+    fn rgba(r: u8, g: u8, b: u8, a: u8) -> ColorType {
+        ColorType::Rgba {
+            color: LinSrgba::new(r, g, b, a),
+        }
+    }
+
+    fn assert_no_failures(failures: Vec<String>) {
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_rgba_brightness_settles() {
+        let mut failures = vec![];
+
+        for alpha in 0..=255 {
+            if let Err(e) =
+                Rig::new().await.set(&rgba(200, 100, 50, alpha)).await
+            {
+                failures.push(format!("alpha {alpha}: {e}"));
+            }
+        }
+        assert_no_failures(failures);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_rgba_colors_settle() {
+        let mut failures = vec![];
+
+        for r in (0..=255).step_by(51) {
+            for g in (0..=255).step_by(51) {
+                for b in (0..=255).step_by(51) {
+                    if let Err(e) =
+                        Rig::new().await.set(&rgba(r, g, b, 255)).await
+                    {
+                        failures.push(format!("rgb({r},{g},{b}): {e}"));
+                    }
+                }
+            }
+        }
+        assert_no_failures(failures);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_ccta_settles() {
+        let mut failures = vec![];
+
+        for a in 0..=255 {
+            if let Err(e) = Rig::new()
+                .await
+                .set(&ColorType::Ccta { kelvin: 2700, a })
+                .await
+            {
+                failures.push(format!("2700K alpha {a}: {e}"));
+            }
+        }
+        for kelvin in (2000..=6500).step_by(500) {
+            if let Err(e) = Rig::new()
+                .await
+                .set(&ColorType::Ccta { kelvin, a: 255 })
+                .await
+            {
+                failures.push(format!("{kelvin}K: {e}"));
+            }
+        }
+        assert_no_failures(failures);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_successive_settings_settle() {
+        let mut rig = Rig::new().await;
+
+        for setting in [
+            rgba(255, 0, 0, 255),
+            rgba(255, 0, 0, 127),
+            ColorType::Ccta {
+                kelvin: 2700,
+                a: 200,
+            },
+            rgba(0, 0, 255, 0),
+            rgba(10, 200, 30, 255),
+            ColorType::Ccta {
+                kelvin: 6500,
+                a: 255,
+            },
+        ] {
+            if let Err(e) = rig.set(&setting).await {
+                panic!("{setting:?}: {e}");
+            }
         }
     }
 }
