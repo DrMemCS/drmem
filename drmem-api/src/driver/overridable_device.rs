@@ -22,7 +22,7 @@ use crate::{
     driver::{rw_device, Reporter, RxDeviceSetting, SettingResponder},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument};
 
 pub type SettingTransaction<T> = (T, Option<SettingResponder<T>>);
 
@@ -43,14 +43,19 @@ pub struct OverrideConfig {
 // settings and polled readings.
 
 enum State<T: device::ReadWriteCompat> {
+
+    // The initial state. Either the restored setting or the first
+    // poll reading will determine to which state it will transition.
     Unknown,
-    UnknownTrans {
-        value: T,
-        report: Option<SettingResponder<T>>,
-    },
+
+    // When we're in this state, the hardware and the latest setting
+    // value are the same. This is the "stable" state in which the
+    // driver should spend most of its time.
     Synced {
         value: T,
     },
+
+    // Another state used to make the methods cancel-safe.
     SyncedTrans {
         value: T,
     },
@@ -84,6 +89,10 @@ enum State<T: device::ReadWriteCompat> {
         needs_report: bool,
     },
 
+    // This state is entered when the state was `Synced` and then the
+    // hardware returned a new, different value. It means some
+    // external controller changed the hardware's state. While in this
+    // mode, we remember incoming settings until we exit this state.
     Overridden {
         setting: T,
         r#override: T,
@@ -95,9 +104,6 @@ impl<T: device::ReadWriteCompat> std::fmt::Debug for State<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             State::Unknown => write!(f, "<<Unknown>>"),
-            State::UnknownTrans { .. } => {
-                write!(f, "<<UnknownTrans>>")
-            }
             State::Synced { .. } => write!(f, "<<Synced>>"),
             State::SyncedTrans { .. } => {
                 write!(f, "<<SyncedTrans>>")
@@ -177,16 +183,6 @@ where
                 // setting comes it, it can further modify the state.
 
                 self.state = State::Synced { value: new_value }
-            }
-
-            // If we're in this state, then we are in the process of
-            // applying a setting from the Unknown state. We ignore
-            // this spurious polled value so we can complete the
-            // setting.
-            //
-            // This situation will probably never happen.
-            State::UnknownTrans { .. } => {
-                warn!("in UnknownTrans state ... ignoring reading");
             }
 
             State::Overridden {
@@ -312,8 +308,7 @@ where
     pub fn get_last(&self) -> Option<&T> {
         match &self.state {
             State::Unknown => None,
-            State::UnknownTrans { value, .. }
-            | State::Synced { value }
+            State::Synced { value }
             | State::SyncedTrans { value }
             | State::Applying { setting: value, .. }
             | State::ApplyingTrans { setting: value, .. } => Some(value),
@@ -328,39 +323,23 @@ where
     #[instrument(skip(self), fields(state = ?self.state))]
     pub async fn next_setting(&mut self) -> Option<SettingTransaction<T>> {
         loop {
-            debug!("waiting for the next setting in state {:?}", self.state);
+            debug!("waiting for the next setting");
 
             match &mut self.state {
                 // At this point, we have no known state. If a setting comes in,
                 // we're going to assume it's different from the hardware's
-                // state so we switch to Applying (via UnknownTrans).
+                // state so we switch to Applying (via ApplyingTrans).
                 State::Unknown => {
                     let reply = self.set_stream.next().await?;
-
-                    self.state = State::UnknownTrans {
-                        value: reply.0,
-                        report: Some(reply.1),
-                    };
-                }
-
-                // This is a transition state between Unknown and Applying.
-                // This was needed to break up the Unknown state so that each
-                // state has one future to await. This makes the function
-                // "cancel safe".
-                State::UnknownTrans { value, report } => {
-                    self.reporter.report_value(value.clone().into()).await;
-
-                    let value = value.clone();
                     let deadline = tokio::time::Instant::now() + self.envelope;
-                    let report = report.take();
 
-                    self.state = State::Applying {
-                        setting: value.clone(),
-                        last_seen: value.clone(),
+                    self.state = State::ApplyingTrans {
+                        setting: reply.0.clone(),
+                        last_seen: reply.0.clone(),
                         deadline,
-                        needs_reaffirm: false,
+                        to_send: (reply.0, Some(reply.1)),
+                        needs_report: true,
                     };
-                    break Some((value, report));
                 }
 
                 State::Synced { value } => {
@@ -1748,7 +1727,7 @@ mod tests {
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
 
-        // First poll: Unknown -> UnknownTrans. The setting is consumed
+        // First poll: Unknown -> ApplyingTrans. The setting is consumed
         // from the stream, but no report has been attempted yet.
 
         {
@@ -1756,7 +1735,7 @@ mod tests {
             tokio::pin!(fut);
             assert!(fut.poll(&mut cx).is_pending());
         }
-        assert!(matches!(&sh_dev.state, State::UnknownTrans { .. }));
+        assert!(matches!(&sh_dev.state, State::ApplyingTrans { .. }));
 
         // Second poll: tries to report, but the backend channel is
         // full, so this must return `Pending` without mutating state
@@ -1768,7 +1747,7 @@ mod tests {
             tokio::pin!(fut);
             assert!(fut.poll(&mut cx).is_pending());
         }
-        assert!(matches!(&sh_dev.state, State::UnknownTrans { .. }));
+        assert!(matches!(&sh_dev.state, State::ApplyingTrans { .. }));
         assert!(os_rx.try_recv().is_err());
 
         // Drain the dummy value so the retried report can proceed.
