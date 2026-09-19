@@ -441,17 +441,24 @@ where
                         }
                         _ = tokio::time::sleep(delay) => {
                             if last_seen == setting {
-                                self.state = State::Synced { value: setting.clone() };
+                                self.state = State::Synced {
+                                    value: setting.clone()
+                                };
                             } else {
                                 // Same as above: report the real
                                 // reading before committing to
                                 // `Overridden`.
 
-                                self.reporter.report_value(last_seen.clone().into()).await;
+                                self.reporter
+                                    .report_value(last_seen.clone().into())
+                                    .await;
                                 self.state = State::Overridden {
                                     setting: setting.clone(),
                                     r#override: last_seen.clone(),
-                                    deadline: tokio::time::Instant::now() + self.override_duration.unwrap_or_default(),
+                                    deadline: tokio::time::Instant::now() +
+                                        self
+                                        .override_duration
+                                        .unwrap_or_default(),
                                 };
                             }
                         }
