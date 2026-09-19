@@ -1093,8 +1093,10 @@ fn cors_layer() -> CorsLayer {
         .max_age(Duration::from_secs(3_600))
 }
 
-// Builds the complete application router with all GraphQL routes nested
-// under the base path. This is the production route configuration.
+// Builds the complete application router with all GraphQL routes
+// nested under the base path. This is the production route
+// configuration.
+
 fn build_app<R: Reporter + Clone>(
     schema: Schema<R>,
     context: ConfigDb<R>,

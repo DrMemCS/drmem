@@ -180,7 +180,7 @@ where
 
                 // If we are in the unknown state and we get a polled
                 // reading, we switch to the synced state. If a
-                // setting comes it, it can further modify the state.
+                // setting comes in, it can further modify the state.
 
                 self.state = State::Synced { value: new_value }
             }
@@ -726,7 +726,11 @@ mod tests {
         std::mem::drop(tx_set);
     }
 
-    #[tokio::test]
+    // This tests the initialization of an `OverridableDevice` when
+    // the system provides its previous value. In this case, it's
+    // being initialized with `1i32`.
+
+    #[tokio::test] //
     async fn test_initialized_shared_device() {
         let (tx_set, mut rx_rdg, mut sh_dev) =
             mk_device::<i32>(Some(1), None, None);
@@ -873,6 +877,12 @@ mod tests {
                 timeout(Duration::from_secs(0), rx_rdg.recv()).await,
                 Ok(Some(device::Value::Int(1)))
             ));
+
+            // Nothing further should have been reported.
+
+            assert!(timeout(Duration::from_secs(0), rx_rdg.recv())
+                .await
+                .is_err());
         }
 
         std::mem::drop(tx_set)
