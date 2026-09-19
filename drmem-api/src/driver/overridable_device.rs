@@ -43,7 +43,6 @@ pub struct OverrideConfig {
 // settings and polled readings.
 
 enum State<T: device::ReadWriteCompat> {
-
     // The initial state. Either the restored setting or the first
     // poll reading will determine to which state it will transition.
     Unknown,
@@ -168,11 +167,12 @@ where
     pub async fn report_update(&mut self, new_value: T) {
         debug!("reporting new value: {:?}", &new_value);
 
+        let now = tokio::time::Instant::now();
         let next_deadline = self
             .override_duration
-            .map(|duration| tokio::time::Instant::now() + duration)
-            .unwrap_or_else(tokio::time::Instant::now);
-        let next_envelope = tokio::time::Instant::now() + self.envelope;
+            .map(|duration| now + duration)
+            .unwrap_or(now);
+        let next_envelope = now + self.envelope;
 
         match &mut self.state {
             State::Unknown => {
