@@ -14,12 +14,12 @@ keywords = ["control-system", "automation"]
 maintenance = { status = "actively-developed" }
 
 [build-dependencies]
-cfgrammar = "0.14"
-lrlex = "0.14"
-lrpar = "0.14"
+cfgrammar = "0.15"
+lrlex = "0.15"
+lrpar = "0.15"
 
 [dependencies]
-cfgrammar.version = "0.14"
+cfgrammar.version = "0.15"
 cfgrammar.default-features = false
 
 chrono.workspace = true
@@ -36,10 +36,10 @@ futures.workspace = true
 futures.default-features = false
 futures.features = ["alloc", "std"]
 
-lrlex.version = "0.14"
+lrlex.version = "0.15"
 lrlex.default-features = false
 
-lrpar.version = "0.14"
+lrpar.version = "0.15"
 lrpar.default-features = false
 
 palette.workspace = true
