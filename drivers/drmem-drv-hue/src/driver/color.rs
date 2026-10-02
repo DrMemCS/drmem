@@ -2,6 +2,8 @@
 use drmem_api::device::ColorType;
 use palette::{IntoColor, LinSrgb, LinSrgba, Yxy};
 
+use super::payload::Gamut;
+
 /// Convert Hue CIE XY coordinates to RGBA
 pub fn cie_xy_to_rgba(x: f32, y: f32) -> LinSrgba<u8> {
     let yxy = Yxy::new(x, y, 1.0);
@@ -91,6 +93,78 @@ pub fn xy_is_close(a: (f32, f32), b: (f32, f32)) -> bool {
         && (a.1 - b.1).abs() < XY_ECHO_TOLERANCE
 }
 
+/// The bridge holds brightness in 254 steps (about 0.4% each), so a
+/// reading within this many percent of what was sent is the same
+/// brightness.
+pub const BRIGHTNESS_TOLERANCE: f32 = 1.0;
+
+/// What the bridge has reported for a light so far. A component the
+/// bridge hasn't reported (yet) is `None` and doesn't count against a
+/// match.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Observed {
+    on: Option<bool>,
+    brightness: Option<f32>,
+    xy: Option<(f32, f32)>,
+}
+
+impl Observed {
+    /// Folds a (possibly partial) bridge update into what's known.
+    pub fn update(
+        &mut self,
+        on: Option<bool>,
+        brightness: Option<f32>,
+        xy: Option<(f32, f32)>,
+    ) {
+        self.on = on.or(self.on);
+        self.brightness = brightness.or(self.brightness);
+        self.xy = xy.or(self.xy);
+    }
+
+    /// True if this is what the bridge reports for a light after it was
+    /// sent `sent`, allowing for how it quantizes brightness and xy. An
+    /// off light has no meaningful brightness or color.
+    pub fn matches(&self, sent: &BridgeState) -> bool {
+        self.on.is_none_or(|on| on == sent.on)
+            && (!sent.on
+                || (self.brightness.is_none_or(|b| {
+                    (b - sent.brightness).abs() <= BRIGHTNESS_TOLERANCE
+                }) && self.xy.is_none_or(|xy| xy_is_close(xy, sent.xy))))
+    }
+}
+
+/// Returns `xy` if it's inside the light's gamut, otherwise the closest
+/// point on the gamut's edge, which is what the bridge would turn it into.
+pub fn clamp_to_gamut(xy: (f32, f32), gamut: &Gamut) -> (f32, f32) {
+    let v = [
+        (gamut.red.x, gamut.red.y),
+        (gamut.green.x, gamut.green.y),
+        (gamut.blue.x, gamut.blue.y),
+    ];
+    let edges = [(v[0], v[1]), (v[1], v[2]), (v[2], v[0])];
+    let sides = edges
+        .map(|(a, b)| (b.0 - a.0) * (xy.1 - a.1) - (b.1 - a.1) * (xy.0 - a.0));
+
+    if sides.iter().all(|&s| s >= 0.0) || sides.iter().all(|&s| s <= 0.0) {
+        return xy;
+    }
+
+    let dist2 = |p: (f32, f32)| (p.0 - xy.0).powi(2) + (p.1 - xy.1).powi(2);
+
+    edges
+        .into_iter()
+        .map(|(a, b)| {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let t = (((xy.0 - a.0) * dx + (xy.1 - a.1) * dy)
+                / (dx * dx + dy * dy))
+                .clamp(0.0, 1.0);
+
+            (a.0 + t * dx, a.1 + t * dy)
+        })
+        .min_by(|&p, &q| dist2(p).total_cmp(&dist2(q)))
+        .unwrap_or(xy)
+}
+
 /// Merges the (possibly partial) on/off, brightness, and XY state
 /// reported by the bridge into a new `ColorType`, using `prev` to fill
 /// in any component that wasn't reported. The bridge only ever echoes
@@ -144,6 +218,7 @@ pub fn merge_bridge_update(
 
 #[cfg(test)]
 mod tests {
+    use super::super::payload::XyCoordinates;
     use super::*;
 
     #[test]
@@ -408,5 +483,91 @@ mod tests {
         // not collapse it into an `Rgba` that could never compare equal
         // to the original setting.
         assert_eq!(merged, setting);
+    }
+
+    fn sent(on: bool, brightness: f32) -> BridgeState {
+        BridgeState {
+            on,
+            brightness,
+            xy: (0.4578, 0.4101),
+        }
+    }
+
+    fn observed(
+        on: Option<bool>,
+        brightness: Option<f32>,
+        xy: Option<(f32, f32)>,
+    ) -> Observed {
+        let mut o = Observed::default();
+
+        o.update(on, brightness, xy);
+        o
+    }
+
+    #[test]
+    fn test_observed_matches_quantized_reading() {
+        let sent = sent(true, 78.431);
+
+        // One 254-step brightness quantum and a 4-decimal xy still match.
+        assert!(
+            observed(Some(true), Some(78.74), Some((0.4579, 0.4100)))
+                .matches(&sent)
+        );
+
+        // A visibly different brightness, xy or power state doesn't.
+        assert!(
+            !observed(Some(true), Some(70.0), Some(sent.xy)).matches(&sent)
+        );
+        assert!(
+            !observed(Some(true), Some(78.431), Some((0.30, 0.41)))
+                .matches(&sent)
+        );
+        assert!(!observed(Some(false), None, None).matches(&sent));
+    }
+
+    #[test]
+    fn test_observed_off_ignores_brightness_and_xy() {
+        let sent = sent(false, 0.0);
+
+        assert!(
+            observed(Some(false), Some(100.0), Some((0.1, 0.1))).matches(&sent)
+        );
+        assert!(!observed(Some(true), None, None).matches(&sent));
+    }
+
+    #[test]
+    fn test_observed_remembers_partial_updates() {
+        let sent = sent(true, 50.0);
+        let mut o = observed(Some(true), Some(50.0), Some(sent.xy));
+
+        // A later update that only changes brightness keeps the rest.
+        o.update(None, Some(20.0), None);
+        assert!(!o.matches(&sent));
+        o.update(None, Some(50.0), None);
+        assert!(o.matches(&sent));
+
+        // Components never reported don't count against a match.
+        assert!(observed(None, None, None).matches(&sent));
+    }
+
+    #[test]
+    fn test_clamp_to_gamut() {
+        let gamut = Gamut {
+            red: XyCoordinates { x: 0.675, y: 0.322 },
+            green: XyCoordinates { x: 0.409, y: 0.518 },
+            blue: XyCoordinates { x: 0.167, y: 0.04 },
+        };
+
+        // Inside the gamut is untouched.
+        assert_eq!(clamp_to_gamut((0.4, 0.3), &gamut), (0.4, 0.3));
+
+        // Outside (sRGB green) moves into the gamut, and stays put when
+        // clamped again.
+        let green = (0.30, 0.60);
+        let clamped = clamp_to_gamut(green, &gamut);
+
+        assert_ne!(clamped, green);
+        assert!(clamped.1 <= 0.518 + 1e-4);
+        assert!(xy_is_close(clamped, clamp_to_gamut(clamped, &gamut)));
     }
 }

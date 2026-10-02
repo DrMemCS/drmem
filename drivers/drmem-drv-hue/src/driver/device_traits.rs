@@ -149,6 +149,13 @@ pub struct ColorBulbDevice<R: Reporter> {
     /// merging partial bridge updates (on/dimming/color can each
     /// arrive independently).
     last_color: ColorType,
+    /// The last command, as the bridge was given it, and the setting it
+    /// came from.
+    sent: Option<(color::BridgeState, ColorType)>,
+    /// What the bridge has reported so far.
+    observed: color::Observed,
+    /// The light's gamut, once the bridge has reported it.
+    gamut: Option<payload::Gamut>,
 }
 
 impl<R: Reporter> ColorBulbDevice<R> {
@@ -164,6 +171,9 @@ impl<R: Reporter> ColorBulbDevice<R> {
             last_color: ColorType::Rgba {
                 color: LinSrgba::new(255, 255, 255, 0),
             },
+            sent: None,
+            observed: color::Observed::default(),
+            gamut: None,
         }
     }
 }
@@ -182,14 +192,21 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
             r.ok(val.clone());
         }
 
-        let bridge = color::color_to_bridge(&val);
+        let mut bridge = color::color_to_bridge(&val);
+
+        // The bridge moves a color outside the light's gamut, so send the
+        // closest one it can show or its readings never match.
+        if let Some(gamut) = &self.gamut {
+            bridge.xy = color::clamp_to_gamut(bridge.xy, gamut);
+        }
 
         // Store the XY coordinates we're sending to the bridge, and the
         // setting itself so `apply_update` knows which `ColorType`
         // variant (`Rgba` or `Ccta`) to preserve when the bridge just
         // echoes back the xy we sent.
         self.last_xy = Some(bridge.xy);
-        self.last_color = val;
+        self.last_color = val.clone();
+        self.sent = Some((bridge, val));
 
         Some(payload::LightCommand {
             on: Some(payload::On { on: bridge.on }),
@@ -201,6 +218,7 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
                     x: bridge.xy.0,
                     y: bridge.xy.1,
                 }),
+                gamut: None,
             }),
         })
     }
@@ -208,19 +226,44 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
     async fn apply_update(&mut self, update: &payload::ResourceData) {
         let on = update.on.as_ref().map(|on| on.on);
         let brightness = update.dimming.as_ref().map(|dim| dim.brightness);
-
-        // Ignore XY coordinates that just echo what we last sent, to
-        // avoid round-off errors from the RGB <-> XY conversion.
-        let xy = update
+        let reported_xy = update
             .color
             .as_ref()
             .and_then(|c| c.xy.as_ref())
-            .map(|xy| (xy.x, xy.y))
-            .filter(|&xy| {
-                !self
-                    .last_xy
-                    .is_some_and(|last_xy| color::xy_is_close(last_xy, xy))
-            });
+            .map(|xy| (xy.x, xy.y));
+
+        if let Some(gamut) = update.color.as_ref().and_then(|c| c.gamut) {
+            self.gamut = Some(gamut);
+        }
+        self.observed.update(on, brightness, reported_xy);
+
+        if on.is_none() && brightness.is_none() && reported_xy.is_none() {
+            return;
+        }
+
+        // The bridge only reports a quantized copy of what it was sent, so
+        // when it matches, report the setting itself rather than a lossy
+        // conversion of the reading.
+        if let Some((sent, setting)) = self
+            .sent
+            .clone()
+            .filter(|(sent, _)| self.observed.matches(sent))
+        {
+            debug!("colorbulb: reading matches setting: {:?}", setting);
+
+            self.last_xy = Some(sent.xy);
+            self.last_color = setting.clone();
+            self.inner.color.report_update(setting).await;
+            return;
+        }
+
+        // Ignore XY coordinates that just echo what we last sent, to
+        // avoid round-off errors from the RGB <-> XY conversion.
+        let xy = reported_xy.filter(|&xy| {
+            !self
+                .last_xy
+                .is_some_and(|last_xy| color::xy_is_close(last_xy, xy))
+        });
 
         if on.is_none() && brightness.is_none() && xy.is_none() {
             return;
@@ -244,6 +287,8 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
         self.last_color = ColorType::Rgba {
             color: LinSrgba::new(255, 255, 255, 0),
         };
+        self.sent = None;
+        self.observed = color::Observed::default();
     }
 }
 
@@ -304,6 +349,24 @@ mod tests {
     const ENVELOPE: Duration = Duration::from_secs(30);
     const POLL_INTERVAL: Duration = Duration::from_secs(5);
 
+    const fn xy(x: f32, y: f32) -> payload::XyCoordinates {
+        payload::XyCoordinates { x, y }
+    }
+
+    // Older bulbs. Pure sRGB green is outside this gamut.
+    const GAMUT_B: payload::Gamut = payload::Gamut {
+        red: xy(0.675, 0.322),
+        green: xy(0.409, 0.518),
+        blue: xy(0.167, 0.04),
+    };
+
+    // Current bulbs. Every sRGB color is inside this gamut.
+    const GAMUT_C: payload::Gamut = payload::Gamut {
+        red: xy(0.6915, 0.3083),
+        green: xy(0.17, 0.7),
+        blue: xy(0.1532, 0.0475),
+    };
+
     struct MockReporter(mpsc::Sender<Value>);
 
     impl Reporter for MockReporter {
@@ -313,12 +376,13 @@ mod tests {
     }
 
     // Models how the bridge stores a light: brightness in 254 steps (reported
-    // as a percentage) and xy to 4 decimal places, so what it reports back is
-    // never bit-for-bit what was sent.
+    // as a percentage), xy to 4 decimal places and clamped to the light's
+    // gamut, so what it reports back is never bit-for-bit what was sent.
     struct FakeBridge {
         on: bool,
         level: u8,
         xy: (f32, f32),
+        gamut: payload::Gamut,
     }
 
     impl FakeBridge {
@@ -334,7 +398,9 @@ mod tests {
                     .clamp(1.0, 254.0) as u8;
             }
             if let Some(xy) = cmd.color.as_ref().and_then(|c| c.xy.as_ref()) {
-                self.xy = (round4(xy.x), round4(xy.y));
+                let (x, y) = color::clamp_to_gamut((xy.x, xy.y), &self.gamut);
+
+                self.xy = (round4(x), round4(y));
             }
         }
 
@@ -347,10 +413,8 @@ mod tests {
                         / 100.0,
                 }),
                 color: Some(payload::Color {
-                    xy: Some(payload::XyCoordinates {
-                        x: self.xy.0,
-                        y: self.xy.1,
-                    }),
+                    xy: Some(xy(self.xy.0, self.xy.1)),
+                    gamut: Some(self.gamut),
                 }),
             }
         }
@@ -366,7 +430,7 @@ mod tests {
     }
 
     impl Rig {
-        async fn new() -> Self {
+        async fn new(gamut: payload::Gamut) -> Self {
             let (rdg_tx, rx_rdg) = mpsc::channel(20);
             let (tx_set, rx_set) = mpsc::channel(20);
             let mut rig = Rig {
@@ -391,6 +455,7 @@ mod tests {
                     on: false,
                     level: 254,
                     xy: (0.5, 0.4),
+                    gamut,
                 },
             };
 
@@ -472,8 +537,10 @@ mod tests {
         let mut failures = vec![];
 
         for alpha in 0..=255 {
-            if let Err(e) =
-                Rig::new().await.set(&rgba(200, 100, 50, alpha)).await
+            if let Err(e) = Rig::new(GAMUT_C)
+                .await
+                .set(&rgba(200, 100, 50, alpha))
+                .await
             {
                 failures.push(format!("alpha {alpha}: {e}"));
             }
@@ -485,13 +552,17 @@ mod tests {
     async fn test_rgba_colors_settle() {
         let mut failures = vec![];
 
-        for r in (0..=255).step_by(51) {
-            for g in (0..=255).step_by(51) {
-                for b in (0..=255).step_by(51) {
-                    if let Err(e) =
-                        Rig::new().await.set(&rgba(r, g, b, 255)).await
-                    {
-                        failures.push(format!("rgb({r},{g},{b}): {e}"));
+        for (name, gamut) in [("B", GAMUT_B), ("C", GAMUT_C)] {
+            for r in (0..=255).step_by(51) {
+                for g in (0..=255).step_by(51) {
+                    for b in (0..=255).step_by(51) {
+                        if let Err(e) =
+                            Rig::new(gamut).await.set(&rgba(r, g, b, 255)).await
+                        {
+                            failures.push(format!(
+                                "gamut {name} rgb({r},{g},{b}): {e}"
+                            ));
+                        }
                     }
                 }
             }
@@ -504,7 +575,7 @@ mod tests {
         let mut failures = vec![];
 
         for a in 0..=255 {
-            if let Err(e) = Rig::new()
+            if let Err(e) = Rig::new(GAMUT_C)
                 .await
                 .set(&ColorType::Ccta { kelvin: 2700, a })
                 .await
@@ -513,7 +584,7 @@ mod tests {
             }
         }
         for kelvin in (2000..=6500).step_by(500) {
-            if let Err(e) = Rig::new()
+            if let Err(e) = Rig::new(GAMUT_C)
                 .await
                 .set(&ColorType::Ccta { kelvin, a: 255 })
                 .await
@@ -526,7 +597,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn test_successive_settings_settle() {
-        let mut rig = Rig::new().await;
+        let mut rig = Rig::new(GAMUT_C).await;
 
         for setting in [
             rgba(255, 0, 0, 255),
