@@ -33,12 +33,24 @@ pub struct Dimming {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Color {
     pub xy: Option<XyCoordinates>,
+
+    // Reported by the bridge but never part of a command.
+    #[serde(default, skip_serializing)]
+    pub gamut: Option<Gamut>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct XyCoordinates {
     pub x: f32,
     pub y: f32,
+}
+
+/// The triangle of xy coordinates a light can actually display.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct Gamut {
+    pub red: XyCoordinates,
+    pub green: XyCoordinates,
+    pub blue: XyCoordinates,
 }
 
 #[derive(Debug, Deserialize)]

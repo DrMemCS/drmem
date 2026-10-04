@@ -66,9 +66,10 @@ currently supported features:
   - A back-end which writes device information to a Redis server
 - A client API which uses GraphQL
 - Drivers which implement devices
-  - 6 built-in drivers
+  - 7 built-in drivers
     - Counting device
 	  - Cycling device
+	  - Integrator device
     - Latch device
 	  - Map device (maps ranges of integers to values)
     - Memory devices
