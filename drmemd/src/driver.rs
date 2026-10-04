@@ -11,6 +11,7 @@ use tracing::{error, field, info, info_span, warn, Instrument};
 
 mod counter;
 mod cycle;
+mod integrate;
 mod latch;
 mod map;
 mod memory;
@@ -164,6 +165,19 @@ impl<R: Reporter> DriverDb<R> {
 
         {
             use cycle::Instance;
+
+            table.insert(
+                Instance::NAME.into(),
+                (
+                    Instance::SUMMARY,
+                    Instance::DESCRIPTION,
+                    manage_instance::<Instance, R>,
+                ),
+            );
+        }
+
+        {
+            use integrate::Instance;
 
             table.insert(
                 Instance::NAME.into(),
