@@ -28,7 +28,7 @@ mod ro_device;
 mod rw_device;
 
 pub use config::DriverConfig;
-pub use overridable_device::OverridableDevice;
+pub use overridable_device::{OverridableDevice, OverrideConfig};
 pub use ro_device::ReadOnlyDevice;
 pub use rw_device::{
     ReadWriteDevice, RxDeviceSetting, SettingRequest, SettingResponder,
@@ -265,6 +265,7 @@ impl<R: Reporter> RequestChan<R> {
         subpath: Option<&Path>,
         units: Option<&str>,
         override_duration: Option<Duration>,
+        envelope: Option<Duration>,
         max_history: Option<usize>,
     ) -> Result<OverridableDevice<T, R>>
     where
@@ -292,6 +293,7 @@ impl<R: Reporter> RequestChan<R> {
                         rs,
                         prev.and_then(|v| T::try_from(v).ok()),
                         override_duration,
+                        envelope,
                     )
                 });
             }
