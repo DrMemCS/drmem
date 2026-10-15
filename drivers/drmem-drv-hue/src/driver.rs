@@ -196,9 +196,9 @@ impl Instance {
         let mut poll_timer = tokio::time::interval(poll_interval);
 
         loop {
+            #[rustfmt::skip]
             tokio::select! {
-                _ = poll_timer.tick() => {
-                }
+                _ = poll_timer.tick() => {}
 
                 opt_cmd = dev.next_setting() => {
                     if let Some(cmd) = opt_cmd {

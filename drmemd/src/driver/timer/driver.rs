@@ -170,13 +170,13 @@ impl<R: Reporter> driver::API<R> for Instance {
                 // future to the list of futures to await.
 
                 _ = time::sleep_until(timeout), if self.timing() => {
-		    debug!("state {:?} : timeout occurred", &self.state);
+		            debug!("state {:?} : timeout occurred", &self.state);
 
-		    // If the timeout occurs, update the state and set
-		    // the output to the inactive value.
+        		    // If the timeout occurs, update the state and set
+		            // the output to the inactive value.
 
-		    self.time_expired();
-		    devices
+        		    self.time_expired();
+		            devices
                         .d_output
                         .report_update(self.inactive_value.clone())
                         .await;
@@ -196,13 +196,13 @@ impl<R: Reporter> driver::API<R> for Instance {
                     debug!("state {:?} : new input -> {}", &self.state, b);
 
                     if let Some(tmo) = tmo {
-			timeout = tmo
+			            timeout = tmo
                     }
 
                     devices.d_enable.report_update(b).await;
 
                     if let Some(out) = out {
-			devices.d_output.report_update(out).await;
+			            devices.d_output.report_update(out).await;
                     }
                 }
             }

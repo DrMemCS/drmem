@@ -27,6 +27,7 @@ impl<R: Reporter> DimmerWithIndicator<R> {
     }
 
     pub async fn next_setting(&mut self) -> Option<Setting> {
+        #[rustfmt::skip]
         tokio::select! {
             Some(res) = self.dimmer.next_setting() => {
                 Some(Setting::Dimmer(res))
