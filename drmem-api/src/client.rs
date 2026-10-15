@@ -34,7 +34,7 @@
 
 use crate::{
     driver,
-    types::{device, ipc::Transaction, Error},
+    types::{device, error::Error, ipc::Transaction},
     Result,
 };
 use chrono::*;
