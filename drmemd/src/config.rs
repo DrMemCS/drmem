@@ -23,9 +23,9 @@ pub struct Config {
     #[serde(default)]
     pub graphql: super::graphql::config::Config,
     pub backend: Option<store::config::Config>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_drivers")]
     pub driver: Vec<Driver>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_logic")]
     pub logic: Vec<Logic>,
 }
 
@@ -67,6 +67,79 @@ impl Default for Config {
             logic: vec![],
         }
     }
+}
+
+// Expands a single config entry. An entry containing only a `template`
+// field (with `vars` and `body` subfields) yields one table per
+// expansion. Any other entry is yielded unchanged.
+
+fn expand_entry(
+    entry: &toml::Table,
+) -> Box<dyn Iterator<Item = std::result::Result<toml::Table, String>> + '_> {
+    use std::iter::once;
+
+    match entry.get("template") {
+        Some(tmpl) if entry.len() == 1 => {
+            let parts = tmpl
+                .as_table()
+                .filter(|t| t.len() == 2)
+                .and_then(|t| Some((t.get("vars")?, t.get("body")?.as_str()?)))
+                .ok_or_else(|| {
+                    "'template' must be a table with only 'vars' and a string 'body'"
+                        .to_owned()
+                })
+                .and_then(|(vars, body)| template::process(vars, body));
+
+            match parts {
+                Ok(iter) => Box::new(iter),
+                Err(e) => Box::new(once(Err(e))),
+            }
+        }
+        _ => Box::new(once(Ok(entry.clone()))),
+    }
+}
+
+// Deserializes the entries of a `[[section]]` array, expanding any
+// templates. The expansion is a single lazy pipeline which is
+// collected into the final `Vec`.
+
+fn expand_section<'de, D, T>(
+    section: &'static str,
+    deserializer: D,
+) -> std::result::Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    Vec::<toml::Table>::deserialize(deserializer).and_then(|entries| {
+        entries
+            .iter()
+            .enumerate()
+            .flat_map(|(idx, entry)| {
+                expand_entry(entry).map(move |res| {
+                    res.and_then(|tbl| {
+                        tbl.try_into::<T>().map_err(|e| e.to_string())
+                    })
+                    .map_err(|e| format!("{section}[{idx}]: {e}"))
+                })
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(serde::de::Error::custom)
+    })
+}
+
+fn de_drivers<'de, D>(d: D) -> std::result::Result<Vec<Driver>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    expand_section("driver", d)
+}
+
+fn de_logic<'de, D>(d: D) -> std::result::Result<Vec<Logic>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    expand_section("logic", d)
 }
 
 #[derive(Deserialize)]
@@ -892,6 +965,74 @@ dbn = 3
                 assert_eq!(cfg.get_backend().get_dbn(), 3);
             }
             Err(e) => panic!("TOML parse error: {}", e),
+        }
+    }
+
+    fn parse(sections: &str) -> std::result::Result<Config, toml::de::Error> {
+        toml::from_str(&format!("latitude = 0.0\nlongitude = 0.0\n{sections}"))
+    }
+
+    #[test]
+    fn test_templates() {
+        let cfg = parse(
+            r#"
+[[driver]]
+name = "plain"
+prefix = "a"
+
+[[driver]]
+template = { vars = { p = ["x", "y"] }, body = '''
+name = "tpl"
+prefix = ${p}
+cfg = { n = 1 }
+''' }
+
+[[driver]]
+name = "last"
+prefix = "z"
+
+[[logic]]
+template = { vars = { n = ["blk-a", "blk-b"], d = ["dev:a", "dev:b"] }, body = '''
+name = ${n}
+exprs = ["{o} -> {o}"]
+outputs = { o = ${d} }
+''' }
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            cfg.driver
+                .iter()
+                .map(|d| (d.name.as_str(), d.prefix.to_string()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("plain", "a".into()),
+                ("tpl", "x".into()),
+                ("tpl", "y".into()),
+                ("last", "z".into())
+            ]
+        );
+        assert_eq!(
+            cfg.logic.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(),
+            vec!["blk-a", "blk-b"]
+        );
+    }
+
+    #[test]
+    fn test_bad_templates() {
+        // Bad variables, bad TOML body, wrong shape, and an expansion that
+        // isn't a valid driver must all be config errors.
+
+        for entry in [
+            r#"template = { vars = 1, body = "name = 'a'" }"#,
+            r#"template = { vars = { p = ["x"] }, body = "= ${p}" }"#,
+            r#"template = { vars = { p = ["x"] } }"#,
+            r#"template = { vars = { p = ["x"] }, body = "x = ${p}" }"#,
+        ] {
+            let res = parse(&format!("[[driver]]\n{entry}\n"));
+
+            assert!(res.is_err(), "accepted: {entry}");
         }
     }
 }
