@@ -5,12 +5,18 @@
 // The language supports the following primitive types:
 //
 //     true/false        booleans
-//     ##                integers
-//     #.##              floating point numbers
-//     "TEXT"            strings
+//     ##                32-bit integers
+//     #.##, .#, #e#     64-bit floating point numbers
+//     "TEXT"            strings (no escape sequences)
 //     {NAME}            variable named NAME (from config params)
 //     #rrggbb[aa]       RGB color values with optional alpha channel
-//     #tttK		     White color temperature in Kelvin
+//                       (#rgb and #rgba shorthands are also accepted)
+//     #name             a named color (e.g. #red)
+//     #tttK[@a[%]]      White color temperature in Kelvin (2000..6500)
+//                       with an optional alpha (0..255 or 0%..100%)
+//
+// A leading `-` is a unary minus operator. Keywords (including `not`,
+// `and`, `or`, `true` and `false`) are case-insensitive.
 //
 // There are two built-in types, "utc" and "local", which can be used
 // to obtain time-of-day values. Use the {} notation to access them:
@@ -19,35 +25,24 @@
 //     {utc:minute}
 //     {utc:hour}
 //     {utc:day}
-//     {utc:month}
+//     {utc:month}      1 to 12
 //     {utc:year}
-//     {utc:DOW}	day of week (Monday = 0, Sunday = 6)
-//     {utc:DOY}	day of year from 0 to 364 -- this ignores leap
+//     {utc:DOW}        day of week (Monday = 0, Sunday = 6)
+//     {utc:DOY}        day of year from 0 to 364 -- this ignores leap
 //                      years and treats Feb 29th as Feb 28th
 //     {utc:SOM}        the Nth day of week from the start of the month (1..)
 //     {utc:EOM}        the Nth day of week from the end of the month (1..)
-//     {utc:LY}		true if it's a leap year
+//     {utc:LY}         true if it's a leap year
 //
-//     {local:second}
-//     {local:minute}
-//     {local:hour}
-//     {local:day}
-//     {local:month}
-//     {local:year}
-//     {local:DOW}	day of week (Monday = 0, Sunday = 6)
-//     {local:DOY}	day of year from 0 to 364 -- this ignores leap
-//                      years and treats Feb 29th as Feb 28th
-//     {local:SOM}      the Nth day of week from the start of the month (1..)
-//     {local:EOM}      the Nth day of week from the end of the month (1..)
-//     {local:LY}	true if it's a leap year
+// The "local" type has the same fields as "utc".
 //
 // There is a built-in type, "solar", that provides solar position in
 // the sky.
 //
-//     {solar:alt}	altitude of sun (< 0 is below horizon, > 0 is above)
-//     {solar:az}	azimuth of sun
-//     {solar:ra}	right ascension of sun
-//     {solar:dec}	declination of sun
+//     {solar:alt}      altitude of sun (< 0 is below horizon, > 0 is above)
+//     {solar:az}       azimuth of sun
+//     {solar:ra}       right ascension of sun
+//     {solar:dec}      declination of sun
 //
 // The token "->" represents assignment. The only item that can be on
 // the right hand side of the arrow is a variable referring to a
@@ -62,16 +57,23 @@
 //     if EXPR then EXPR [else EXPR] end
 //
 //     =,<>,<,<=,>,>=    Perform the comparison and return a boolean
+//                       (comparisons can't be chained)
 //
+//     -EXPR             Negates a numeric expression
 //     +,-,*,/,%         Perform addition, subtraction, multiplication,
-//                       division, and modulo operations
+//                       division, and modulo operations.
+//
+// `and`, `or` and the arithmetic operators are left-associative:
+// `a - b - c` is `(a - b) - c`.
+//
 // Functions
 //
 //     brightness(COLOR)              Returns the perceived brightness of the
 //                                    color
 //     coalesce(EXPR1, EXPR2, ...)    Returns the first non-null expression
+//     blend(COLOR1, COLOR2, ...)     Composites colors (first is the top layer)
 //     with_alpha(COLOR, ALPHA)       Returns a new color with the specified
-//                                    alpha value
+//                                    alpha value (0.0 to 1.0)
 
 use super::solar;
 use super::tod;
@@ -394,13 +396,59 @@ impl Expr {
             write!(f, "{}", &e)
         }
     }
+
+    // Like `fmt_subexpr()`, but also parenthesizes operands with the
+    // same precedence. This is needed for operands that the parser
+    // wouldn't group that way without parentheses: the right operand
+    // of a left-associative operator (arithmetic, `and`, `or`) and
+    // either operand of a non-associative operator (comparisons).
+
+    fn fmt_strict_subexpr(
+        &self,
+        e: &Expr,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        if self.precedence() >= e.precedence() {
+            write!(f, "({})", &e)
+        } else {
+            write!(f, "{}", &e)
+        }
+    }
+}
+
+// Writes a literal using the syntax of the expression language so the
+// text can be parsed back into the same literal. (The `Display` impl of
+// `device::Value` is meant for log messages. It prints floats without a
+// decimal point and colors as quoted strings.)
+
+fn fmt_literal(v: &device::Value, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match v {
+        device::Value::Flt(v) => write!(f, "{v:?}"),
+        device::Value::Color(ColorType::Rgba { color }) => {
+            write!(f, "#{:02x}{:02x}{:02x}", color.red, color.green, color.blue)?;
+
+            if color.alpha < 255 {
+                write!(f, "{:02x}", color.alpha)?;
+            }
+            Ok(())
+        }
+        device::Value::Color(ColorType::Ccta { kelvin, a }) => {
+            write!(f, "#{kelvin}K")?;
+
+            if *a < 255 {
+                write!(f, "@{a}")?;
+            }
+            Ok(())
+        }
+        v => write!(f, "{v}"),
+    }
 }
 
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Nothing => write!(f, "!"),
-            Expr::Lit(v) => write!(f, "{}", &v),
+            Expr::Lit(v) => fmt_literal(v, f),
             Expr::Var(v) => write!(f, "inp[{}]", &v),
 
             Expr::TimeVal(cat, fld) => write!(f, "{{{cat}:{fld}}}"),
@@ -415,61 +463,61 @@ impl fmt::Display for Expr {
             Expr::And(a, b) => {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " and ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::Or(a, b) => {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " or ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::Eq(a, b) => {
-                self.fmt_subexpr(a, f)?;
+                self.fmt_strict_subexpr(a, f)?;
                 write!(f, " = ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::Lt(a, b) => {
-                self.fmt_subexpr(a, f)?;
+                self.fmt_strict_subexpr(a, f)?;
                 write!(f, " < ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::LtEq(a, b) => {
-                self.fmt_subexpr(a, f)?;
+                self.fmt_strict_subexpr(a, f)?;
                 write!(f, " <= ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::Add(a, b) => {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " + ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::Sub(a, b) => {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " - ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::Mul(a, b) => {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " * ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::Div(a, b) => {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " / ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::Rem(a, b) => {
                 self.fmt_subexpr(a, f)?;
                 write!(f, " % ")?;
-                self.fmt_subexpr(b, f)
+                self.fmt_strict_subexpr(b, f)
             }
 
             Expr::Brightness(e) => {
@@ -1006,9 +1054,10 @@ fn eval_as_with_alpha_expr(
         Some(device::Value::Flt(alpha)) => {
             (alpha.clamp(0.0, 1.0) * 255.0) as u8
         }
+        Some(device::Value::Int(alpha)) => (alpha.clamp(0, 1) * 255) as u8,
         Some(v) => {
             error!(
-                    "second argument to WITH_ALPHA must be between 0.0 and 1.0, got {}",
+                    "second argument to WITH_ALPHA must be a number between 0 and 1, got {}",
                     &v
                 );
             return None;
@@ -1555,6 +1604,114 @@ mod tests {
     }
 
     #[test]
+    fn test_left_associativity() {
+        fn int(v: i32) -> Box<Expr> {
+            Box::new(Expr::Lit(device::Value::Int(v)))
+        }
+
+        fn bool(v: bool) -> Box<Expr> {
+            Box::new(Expr::Lit(device::Value::Bool(v)))
+        }
+
+        // Each entry is a chain of three operands. The expected tree
+        // must group the first two operands.
+
+        let tests: &[(&str, Expr)] = &[
+            (
+                "10 - 3 - 2",
+                Expr::Sub(Box::new(Expr::Sub(int(10), int(3))), int(2)),
+            ),
+            (
+                "10 + 3 + 2",
+                Expr::Add(Box::new(Expr::Add(int(10), int(3))), int(2)),
+            ),
+            (
+                "10 + 3 - 2",
+                Expr::Sub(Box::new(Expr::Add(int(10), int(3))), int(2)),
+            ),
+            (
+                "10 - 3 + 2",
+                Expr::Add(Box::new(Expr::Sub(int(10), int(3))), int(2)),
+            ),
+            (
+                "100 / 10 / 5",
+                Expr::Div(Box::new(Expr::Div(int(100), int(10))), int(5)),
+            ),
+            (
+                "2 * 3 * 4",
+                Expr::Mul(Box::new(Expr::Mul(int(2), int(3))), int(4)),
+            ),
+            (
+                "2 * 7 % 4",
+                Expr::Rem(Box::new(Expr::Mul(int(2), int(7))), int(4)),
+            ),
+            (
+                "20 / 5 * 2",
+                Expr::Mul(Box::new(Expr::Div(int(20), int(5))), int(2)),
+            ),
+            (
+                "true and false and true",
+                Expr::And(
+                    Box::new(Expr::And(bool(true), bool(false))),
+                    bool(true),
+                ),
+            ),
+            (
+                "true or false or true",
+                Expr::Or(
+                    Box::new(Expr::Or(bool(true), bool(false))),
+                    bool(true),
+                ),
+            ),
+            (
+                "true or false and true or false",
+                Expr::Or(
+                    Box::new(Expr::Or(
+                        bool(true),
+                        Box::new(Expr::And(bool(false), bool(true))),
+                    )),
+                    bool(false),
+                ),
+            ),
+            (
+                "true and (false and true)",
+                Expr::And(
+                    bool(true),
+                    Box::new(Expr::And(bool(false), bool(true))),
+                ),
+            ),
+            (
+                "true or (false or true)",
+                Expr::Or(
+                    bool(true),
+                    Box::new(Expr::Or(bool(false), bool(true))),
+                ),
+            ),
+            // Mixed precedence: `*` groups tighter than `-`, and the
+            // subtractions still group left.
+            (
+                "1 - 2 * 3 - 4",
+                Expr::Sub(
+                    Box::new(Expr::Sub(
+                        int(1),
+                        Box::new(Expr::Mul(int(2), int(3))),
+                    )),
+                    int(4),
+                ),
+            ),
+            // Parentheses override the grouping.
+            (
+                "10 - (3 - 2)",
+                Expr::Sub(int(10), Box::new(Expr::Sub(int(3), int(2)))),
+            ),
+        ];
+
+        for (src, expected) in tests {
+            assert_eq!(&to_expr(src), expected, "wrong tree for {}", src);
+        }
+    }
+
+    #[test]
     fn test_parser() {
         let env: Env = (
             &[String::from("switch"), String::from("on_time")],
@@ -1588,6 +1745,14 @@ mod tests {
             "#4000K@256 -> {bulb}",  // Alpha out of range
             "#4000K@101% -> {bulb}", // Percentage > 100
             "#4000K@% -> {bulb}",    // Missing percentage value
+            // Bad hex characters and unknown color names
+            "#abc_ -> {bulb}",
+            "#fffff -> {bulb}",
+            "#notacolor -> {bulb}",
+            // Comparisons don't chain
+            "1 < 2 < 3 -> {bulb}",
+            "-2147483649 -> {bulb}",
+            "- -2147483648 -> {bulb}",
         ];
 
         for entry in BAD_EXPR.iter() {
@@ -1633,6 +1798,18 @@ mod tests {
             "#5000K@255 -> {bulb}",
             "#4500K@50% -> {bulb}",
             "#6000K@100% -> {bulb}",
+            // Named colors, any case
+            "#red -> {bulb}",
+            "#AliceBlue -> {bulb}",
+            // Subtraction and unary minus
+            "{on_time} -1 -> {bulb}",
+            "-{on_time} -> {bulb}",
+            // Keywords are case-insensitive
+            "NOT TRUE -> {bulb}",
+            "{switch} AND {switch} OR FALSE -> {bulb}",
+            // brightness() takes any expression
+            "brightness(coalesce({switch}, #fff)) -> {bulb}",
+            "with_alpha(#fff, 1) -> {bulb}",
         ];
 
         for entry in GOOD_EXPR.iter() {
@@ -3455,6 +3632,19 @@ mod tests {
                 "{a} + {b} + {b} -> {c}",
                 "inp[0] + inp[1] + inp[1] -> out[1]",
             ),
+            (
+                "{a} - ({b} - {a}) -> {c}",
+                "inp[0] - (inp[1] - inp[0]) -> out[1]",
+            ),
+            (
+                "({a} - {b}) - {a} -> {c}",
+                "inp[0] - inp[1] - inp[0] -> out[1]",
+            ),
+            (
+                "{a} / ({b} * {a}) -> {c}",
+                "inp[0] / (inp[1] * inp[0]) -> out[1]",
+            ),
+            ("-{a} -> {c}", "0 - inp[0] -> out[1]"),
             ("{a} - {b} -> {c}", "inp[0] - inp[1] -> out[1]"),
             ("{a} * {b} -> {c}", "inp[0] * inp[1] -> out[1]"),
             ("{a} / {b} -> {c}", "inp[0] / inp[1] -> out[1]"),
@@ -3493,8 +3683,13 @@ mod tests {
             ),
             (
                 "if ({a} > 0.0) then (5 + 3) else false end -> {c}",
-                "if 0 < inp[0] then 5 + 3 else false end -> out[1]",
+                "if 0.0 < inp[0] then 5 + 3 else false end -> out[1]",
             ),
+            ("1.0 -> {c}", "1.0 -> out[1]"),
+            ("#ff8000 -> {c}", "#ff8000 -> out[1]"),
+            ("#ff800080 -> {c}", "#ff800080 -> out[1]"),
+            ("#2700K -> {c}", "#2700K -> out[1]"),
+            ("#4000K@128 -> {c}", "#4000K@128 -> out[1]"),
         ];
 
         for (in_val, out_val) in TESTS {
@@ -3507,6 +3702,325 @@ mod tests {
                 ),
                 Err(e) => panic!("{}", &e),
             }
+        }
+    }
+
+    // Converts the expression to a string and parses it. The `Display`
+    // impl prints variables as `inp[N]`, which isn't valid syntax, so
+    // they're mapped back to the names used in the environment.
+
+    fn reparse(expr: &Expr) -> Expr {
+        let env: Env = (
+            &[String::from("a"), String::from("b")],
+            &[String::from("c")],
+        );
+        let text = expr
+            .to_string()
+            .replace("inp[0]", "{a}")
+            .replace("inp[1]", "{b}");
+
+        match Program::compile(&format!("{} -> {{c}}", &text), &env) {
+            Ok(Program(expr, _)) => expr,
+            Err(e) => panic!("couldn't reparse '{}': {}", &text, &e),
+        }
+    }
+
+    // Parse each source string. Converting the resulting expression to
+    // a string and parsing that must yield the same expression.
+
+    #[test]
+    fn test_round_trip_parsed() {
+        const SOURCES: &[&str] = &[
+            "{a}",
+            "true",
+            "false",
+            "0",
+            "42",
+            "-42",
+            "-2147483648",
+            "2147483647",
+            "1.0",
+            "-1.5",
+            "0.1",
+            ".5",
+            "1e3",
+            "1e21",
+            "2.75e-10",
+            "123456789.0",
+            "\"\"",
+            "\"Hello, world!\"",
+            "#123",
+            "#1234",
+            "#7f8081",
+            "#7f808182",
+            "#red",
+            "#AliceBlue",
+            "#2000K",
+            "#6500K",
+            "#4000K@0",
+            "#4000K@128",
+            "#4000K@50%",
+            "{utc:second}",
+            "{utc:minute}",
+            "{utc:hour}",
+            "{utc:day}",
+            "{utc:month}",
+            "{utc:year}",
+            "{utc:DOW}",
+            "{utc:DOY}",
+            "{utc:SOM}",
+            "{utc:EOM}",
+            "{utc:LY}",
+            "{local:second}",
+            "{local:minute}",
+            "{local:hour}",
+            "{local:day}",
+            "{local:month}",
+            "{local:year}",
+            "{local:DOW}",
+            "{local:DOY}",
+            "{local:SOM}",
+            "{local:EOM}",
+            "{local:LY}",
+            "{solar:alt}",
+            "{solar:az}",
+            "{solar:ra}",
+            "{solar:dec}",
+            // Boolean operators and their grouping
+            "not {a}",
+            "not not {a}",
+            "not ({a} = {b})",
+            "(not {a}) = {b}",
+            "{a} and {b}",
+            "{a} or {b}",
+            "{a} and {b} and true",
+            "({a} and {b}) and true",
+            "{a} or {b} or true",
+            "({a} or {b}) or true",
+            "{a} or {b} and true",
+            "({a} or {b}) and true",
+            "{a} and {b} or true",
+            "{a} and ({b} or true)",
+            "not ({a} and {b})",
+            // Comparisons
+            "{a} = {b}",
+            "{a} <> {b}",
+            "{a} < {b}",
+            "{a} <= {b}",
+            "{a} > {b}",
+            "{a} >= {b}",
+            "({a} = {b}) = true",
+            "true = ({a} = {b})",
+            "({a} < {b}) = ({b} < {a})",
+            "({a} and {b}) = ({b} or {a})",
+            "{a} + 1 < {b} * 2",
+            // Arithmetic and unary minus
+            "{a} + {b}",
+            "{a} - {b}",
+            "{a} * {b}",
+            "{a} / {b}",
+            "{a} % {b}",
+            "{a} - {b} - 1",
+            "{a} - ({b} - 1)",
+            "{a} + {b} + 1",
+            "{a} + ({b} + 1)",
+            "{a} * {b} * 2",
+            "{a} * ({b} * 2)",
+            "{a} / {b} / 2",
+            "{a} / ({b} / 2)",
+            "{a} % {b} % 2",
+            "{a} % ({b} % 2)",
+            "{a} - {b} + 1",
+            "{a} - ({b} + 1)",
+            "{a} / {b} * 2",
+            "{a} / ({b} * 2)",
+            "({a} + {b}) * 2",
+            "{a} + {b} * 2",
+            "1 - 2 * 3 - 4",
+            "-{a}",
+            "-({a} + {b})",
+            "- -{a}",
+            "{a} - -{b}",
+            "-{a} * {b}",
+            "-(1 + 2)",
+            "{a} * -1",
+            "{a} - -1.5",
+            "-{a} - -{b}",
+            "not -{a}",
+            // Conditionals and functions
+            "if {a} then {b} end",
+            "if {a} then {b} else 1 end",
+            "if {a} then if {b} then 1 else 2 end else 3 end",
+            "if {a} then 1 else if {b} then 2 else 3 end end",
+            "if if {a} then {b} else true end then 1 else 2 end",
+            "1 + if {a} then 1 else 2 end",
+            "(if {a} then 1 else 2 end) * 3",
+            "not if {a} then true else false end",
+            "if {a} and {b} or {a} then {a} + 1 else {b} * 2 end",
+            "coalesce({a})",
+            "coalesce({a}, {b}, 1)",
+            "coalesce(if {a} then 1 end, {b} + 1, 2)",
+            "blend(#fff)",
+            "blend({a}, #ff000080, #2700K@50%)",
+            "with_alpha({a}, 0.5)",
+            "with_alpha(#fff, {a} / 100.0)",
+            "with_alpha(if {a} then #fff else #000 end, 1)",
+            "brightness({a})",
+            "brightness(with_alpha(#fff, 0.5))",
+            "brightness(coalesce({a}, #fff))",
+            "brightness({a}) + 1.0",
+        ];
+
+        for src in SOURCES {
+            let expr = to_expr(src);
+
+            assert_eq!(
+                reparse(&expr),
+                expr,
+                "'{}' became '{}' which parses differently",
+                src,
+                &expr
+            );
+        }
+    }
+
+        // These trees are built by hand to cover shapes that need
+    // parentheses to survive (same-precedence operands, `and`/`or`
+    // mixes, nested conditionals) and extreme literals. The `Display`
+    // impl must print them in a way that parses back into the same
+    // tree.
+
+    #[test]
+    fn test_round_trip_constructed() {
+        fn bx(e: Expr) -> Box<Expr> {
+            Box::new(e)
+        }
+        fn int(v: i32) -> Expr {
+            Expr::Lit(device::Value::Int(v))
+        }
+        fn flt(v: f64) -> Expr {
+            Expr::Lit(device::Value::Flt(v))
+        }
+
+        let a = || Expr::Var(0);
+        let b = || Expr::Var(1);
+
+        let exprs = vec![
+            Expr::Or(bx(Expr::Or(bx(a()), bx(b()))), bx(a())),
+            Expr::Or(bx(a()), bx(Expr::Or(bx(b()), bx(a())))),
+            Expr::And(bx(Expr::And(bx(a()), bx(b()))), bx(a())),
+            Expr::And(bx(Expr::Or(bx(a()), bx(b()))), bx(a())),
+            Expr::Or(bx(Expr::And(bx(a()), bx(b()))), bx(a())),
+            Expr::Eq(bx(Expr::Eq(bx(a()), bx(b()))), bx(a())),
+            Expr::Eq(bx(a()), bx(Expr::Eq(bx(a()), bx(b())))),
+            Expr::Lt(bx(Expr::Lt(bx(a()), bx(b()))), bx(a())),
+            Expr::LtEq(bx(a()), bx(Expr::LtEq(bx(a()), bx(b())))),
+            Expr::Lt(bx(Expr::Eq(bx(a()), bx(b()))), bx(Expr::LtEq(bx(b()), bx(a())))),
+            Expr::Not(bx(Expr::Eq(bx(a()), bx(b())))),
+            Expr::Not(bx(Expr::Lt(bx(a()), bx(b())))),
+            Expr::Not(bx(Expr::Not(bx(a())))),
+            Expr::Not(bx(Expr::And(bx(a()), bx(b())))),
+            Expr::Sub(bx(Expr::Sub(bx(a()), bx(b()))), bx(a())),
+            Expr::Sub(bx(a()), bx(Expr::Sub(bx(b()), bx(a())))),
+            Expr::Sub(bx(a()), bx(Expr::Add(bx(b()), bx(a())))),
+            Expr::Add(bx(a()), bx(Expr::Sub(bx(b()), bx(a())))),
+            Expr::Mul(bx(a()), bx(Expr::Mul(bx(b()), bx(a())))),
+            Expr::Div(bx(a()), bx(Expr::Div(bx(b()), bx(a())))),
+            Expr::Rem(bx(a()), bx(Expr::Mul(bx(b()), bx(a())))),
+            Expr::Mul(bx(Expr::Add(bx(a()), bx(b()))), bx(a())),
+            Expr::Add(bx(a()), bx(Expr::Mul(bx(b()), bx(a())))),
+            Expr::Add(
+                bx(Expr::If(bx(a()), bx(b()), None)),
+                bx(Expr::If(bx(a()), bx(b()), Some(bx(a())))),
+            ),
+            Expr::If(
+                bx(Expr::If(bx(a()), bx(b()), None)),
+                bx(Expr::Or(bx(a()), bx(b()))),
+                Some(bx(Expr::If(bx(a()), bx(b()), None))),
+            ),
+            Expr::Not(bx(Expr::If(bx(a()), bx(b()), None))),
+            // Negative literals and subtraction from zero
+            Expr::Sub(bx(int(0)), bx(a())),
+            Expr::Sub(bx(int(0)), bx(Expr::Add(bx(a()), bx(b())))),
+            Expr::Sub(bx(a()), bx(int(-1))),
+            Expr::Mul(bx(int(-1)), bx(a())),
+            Expr::Mul(bx(a()), bx(flt(-1.5))),
+            Expr::Not(bx(int(-1))),
+            Expr::Lit(device::Value::Int(i32::MIN)),
+            Expr::Lit(device::Value::Int(i32::MAX)),
+            // Floats that print without a decimal point or with an exponent
+            flt(0.0),
+            flt(1.0),
+            flt(-1.0),
+            flt(1e21),
+            flt(-1e21),
+            flt(1.5e-7),
+            flt(f64::MAX),
+            flt(f64::MIN_POSITIVE),
+            flt(0.1 + 0.2),
+            // Strings and colors
+            Expr::Lit(device::Value::Str("".into())),
+            Expr::Lit(device::Value::Str("a b # {c} -> d".into())),
+            Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(0, 0, 0, 0),
+            })),
+            Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(1, 2, 3, 254),
+            })),
+            Expr::Lit(device::Value::Color(device::ColorType::Rgba {
+                color: LinSrgba::new(255, 255, 255, 255),
+            })),
+            Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 2000,
+                a: 0,
+            })),
+            Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 4000,
+                a: 254,
+            })),
+            Expr::Lit(device::Value::Color(device::ColorType::Ccta {
+                kelvin: 6500,
+                a: 255,
+            })),
+            // Time and solar values with every zone
+            Expr::TimeVal(Zone::Utc, TimeField::SoM),
+            Expr::TimeVal(Zone::Local, TimeField::LeapYear),
+            Expr::SolarVal(SolarField::RightAscension),
+            // Functions
+            Expr::Coalesce(vec![a(), Expr::If(bx(a()), bx(b()), None), int(1)]),
+            Expr::Blend(vec![a(), b()]),
+            Expr::WithAlpha(bx(a()), bx(Expr::Div(bx(b()), bx(flt(100.0))))),
+            Expr::WithAlpha(
+                bx(Expr::If(bx(a()), bx(b()), None)),
+                bx(Expr::Add(bx(a()), bx(b()))),
+            ),
+            Expr::Brightness(bx(Expr::Add(bx(a()), bx(b())))),
+            Expr::Brightness(bx(Expr::Or(bx(a()), bx(b())))),
+        ];
+
+        for expr in exprs {
+            assert_eq!(
+                reparse(&expr),
+                expr,
+                "'{}' parses differently than the original",
+                &expr
+            );
+        }
+    }
+
+    // The text of a round-tripped expression should be stable too.
+
+    #[test]
+    fn test_round_trip_text_is_stable() {
+        for src in [
+            "{a} - ({b} - 1) * -{a} / (2 % 3)",
+            "not ({a} < {b}) and ({a} = {b}) = true or {b} >= 2.0",
+            "if {a} then #4000K@50% else with_alpha(#red, 1) end",
+        ] {
+            let expr = to_expr(src);
+            let text = expr.to_string();
+
+            assert_eq!(reparse(&expr).to_string(), text, "{}", src);
         }
     }
 
@@ -3546,6 +4060,29 @@ mod tests {
 
         const EXPR_TESTS: &[(&'static str, Option<device::Value>)] = &[
             ("1 / 0", None),
+            ("10 - 3 - 2", Some(device::Value::Int(5))),
+            ("100 / 10 / 5", Some(device::Value::Int(2))),
+            ("2 * 7 % 4", Some(device::Value::Int(2))),
+            ("10 - (3 - 2)", Some(device::Value::Int(9))),
+            ("3-1", Some(device::Value::Int(2))),
+            ("-3 + 5", Some(device::Value::Int(2))),
+            ("- -3", Some(device::Value::Int(3))),
+            ("-(1 + 2) * 2", Some(device::Value::Int(-6))),
+            ("-2147483648", Some(device::Value::Int(i32::MIN))),
+            ("-1.5", Some(device::Value::Flt(-1.5))),
+            ("-(1.5 + 1.0)", Some(device::Value::Flt(-2.5))),
+            (".5 + 1", Some(device::Value::Flt(1.5))),
+            ("1e3", Some(device::Value::Flt(1000.0))),
+            ("1.5E+2", Some(device::Value::Flt(150.0))),
+            ("NOT FALSE AND True", Some(device::Value::Bool(true))),
+            (
+                "1 + brightness(#4000K@100)",
+                Some(device::Value::Flt(101.0)),
+            ),
+            (
+                "brightness(with_alpha(#fff, 0))",
+                Some(device::Value::Flt(0.0)),
+            ),
             ("5 > true", None),
             ("1 + 2 * 3", Some(device::Value::Int(7))),
             ("1 + (2 * 3)", Some(device::Value::Int(7))),
@@ -3997,6 +4534,22 @@ mod tests {
                 color: palette::LinSrgba::new(255u8, 0u8, 0u8, 127u8),
             }))
         );
+
+        // Integer alphas are accepted (and clamped to 0..1.)
+
+        for (alpha, expected) in [(0, 0u8), (1, 255), (5, 255), (-5, 0)] {
+            let expr = Expr::WithAlpha(
+                Box::new(Expr::Var(0)),
+                Box::new(Expr::Lit(device::Value::Int(alpha))),
+            );
+
+            assert_eq!(
+                eval(&expr, &inputs, &time, solar),
+                Some(device::Value::Color(device::ColorType::Rgba {
+                    color: palette::LinSrgba::new(255u8, 0u8, 0u8, expected),
+                }))
+            );
+        }
     }
 
     #[test]
