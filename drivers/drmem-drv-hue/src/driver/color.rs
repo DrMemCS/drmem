@@ -1,5 +1,8 @@
 /// Color conversion utilities for Hue CIE XY color space
+use drmem_api::device::ColorType;
 use palette::{IntoColor, LinSrgb, LinSrgba, Yxy};
+
+use super::payload::Gamut;
 
 /// Convert Hue CIE XY coordinates to RGBA
 pub fn cie_xy_to_rgba(x: f32, y: f32) -> LinSrgba<u8> {
@@ -25,8 +28,197 @@ pub fn rgba_to_cie_xy(rgba: &LinSrgba<u8>) -> (f32, f32) {
     (yxy.x, yxy.y)
 }
 
+/// Approximates a color temperature (in Kelvin) as CIE xy coordinates
+/// using the Kim et al. polynomial fit to the Planckian locus. Valid
+/// over the range of colors Hue bulbs can produce (roughly
+/// 1667K-25000K).
+pub fn kelvin_to_cie_xy(kelvin: u16) -> (f32, f32) {
+    let t = kelvin as f64;
+    let (t2, t3) = (t * t, t * t * t);
+
+    let x = if t <= 4000.0 {
+        -0.2661239e9 / t3 - 0.2343589e6 / t2 + 0.8776956e3 / t + 0.179910
+    } else {
+        -3.0258469e9 / t3 + 2.1070379e6 / t2 + 0.2226347e3 / t + 0.24039
+    };
+    let (x2, x3) = (x * x, x * x * x);
+
+    let y = if t <= 2222.0 {
+        -1.1063814 * x3 - 1.34811020 * x2 + 2.18555832 * x - 0.20219683
+    } else if t <= 4000.0 {
+        -0.9549476 * x3 - 1.37418593 * x2 + 2.09137015 * x - 0.16748867
+    } else {
+        3.0817580 * x3 - 5.87338670 * x2 + 3.75112997 * x - 0.37001483
+    };
+
+    (x as f32, y as f32)
+}
+
+/// The three parameters the Hue bridge needs to represent a light's
+/// setting: whether it's on, its brightness (0.0-100.0), and its
+/// chromaticity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BridgeState {
+    pub on: bool,
+    pub brightness: f32,
+    pub xy: (f32, f32),
+}
+
+/// Breaks a `ColorType` down into the on/off, brightness, and XY
+/// coordinates the Hue bridge needs. Brightness is conveyed by the
+/// color's alpha channel: 0 is off and 255 is full brightness.
+pub fn color_to_bridge(color: &ColorType) -> BridgeState {
+    let (alpha, xy) = match color {
+        ColorType::Rgba { color } => (color.alpha, rgba_to_cie_xy(color)),
+        ColorType::Ccta { kelvin, a } => (*a, kelvin_to_cie_xy(*kelvin)),
+    };
+
+    BridgeState {
+        on: alpha > 0,
+        brightness: alpha as f32 / 255.0 * 100.0,
+        xy,
+    }
+}
+
+/// The bridge echoes back XY coordinates with enough floating-point
+/// round-off that a value we just sent won't compare exactly equal to
+/// what comes back in the next poll. Two coordinates within this
+/// distance of each other are treated as "the same" reading.
+pub const XY_ECHO_TOLERANCE: f32 = 0.001;
+
+/// True if two CIE xy coordinates are close enough to be considered the
+/// same reading (see `XY_ECHO_TOLERANCE`).
+pub fn xy_is_close(a: (f32, f32), b: (f32, f32)) -> bool {
+    (a.0 - b.0).abs() < XY_ECHO_TOLERANCE
+        && (a.1 - b.1).abs() < XY_ECHO_TOLERANCE
+}
+
+/// The bridge holds brightness in 254 steps (about 0.4% each), so a
+/// reading within this many percent of what was sent is the same
+/// brightness.
+pub const BRIGHTNESS_TOLERANCE: f32 = 1.0;
+
+/// What the bridge has reported for a light so far. A component the
+/// bridge hasn't reported (yet) is `None` and doesn't count against a
+/// match.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Observed {
+    on: Option<bool>,
+    brightness: Option<f32>,
+    xy: Option<(f32, f32)>,
+}
+
+impl Observed {
+    /// Folds a (possibly partial) bridge update into what's known.
+    pub fn update(
+        &mut self,
+        on: Option<bool>,
+        brightness: Option<f32>,
+        xy: Option<(f32, f32)>,
+    ) {
+        self.on = on.or(self.on);
+        self.brightness = brightness.or(self.brightness);
+        self.xy = xy.or(self.xy);
+    }
+
+    /// True if this is what the bridge reports for a light after it was
+    /// sent `sent`, allowing for how it quantizes brightness and xy. An
+    /// off light has no meaningful brightness or color.
+    pub fn matches(&self, sent: &BridgeState) -> bool {
+        self.on.is_none_or(|on| on == sent.on)
+            && (!sent.on
+                || (self.brightness.is_none_or(|b| {
+                    (b - sent.brightness).abs() <= BRIGHTNESS_TOLERANCE
+                }) && self.xy.is_none_or(|xy| xy_is_close(xy, sent.xy))))
+    }
+}
+
+/// Returns `xy` if it's inside the light's gamut, otherwise the closest
+/// point on the gamut's edge, which is what the bridge would turn it into.
+pub fn clamp_to_gamut(xy: (f32, f32), gamut: &Gamut) -> (f32, f32) {
+    let v = [
+        (gamut.red.x, gamut.red.y),
+        (gamut.green.x, gamut.green.y),
+        (gamut.blue.x, gamut.blue.y),
+    ];
+    let edges = [(v[0], v[1]), (v[1], v[2]), (v[2], v[0])];
+    let sides = edges
+        .map(|(a, b)| (b.0 - a.0) * (xy.1 - a.1) - (b.1 - a.1) * (xy.0 - a.0));
+
+    if sides.iter().all(|&s| s >= 0.0) || sides.iter().all(|&s| s <= 0.0) {
+        return xy;
+    }
+
+    let dist2 = |p: (f32, f32)| (p.0 - xy.0).powi(2) + (p.1 - xy.1).powi(2);
+
+    edges
+        .into_iter()
+        .map(|(a, b)| {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let t = (((xy.0 - a.0) * dx + (xy.1 - a.1) * dy)
+                / (dx * dx + dy * dy))
+                .clamp(0.0, 1.0);
+
+            (a.0 + t * dx, a.1 + t * dy)
+        })
+        .min_by(|&p, &q| dist2(p).total_cmp(&dist2(q)))
+        .unwrap_or(xy)
+}
+
+/// Merges the (possibly partial) on/off, brightness, and XY state
+/// reported by the bridge into a new `ColorType`, using `prev` to fill
+/// in any component that wasn't reported. The bridge only ever echoes
+/// XY coordinates, so a reported `xy` always yields a `ColorType::Rgba`.
+/// But when `xy` is `None` (the caller filters out echoes that just
+/// match what was last sent), `prev`'s representation -- `Rgba` or
+/// `Ccta` -- is preserved. This matters because a `Ccta` setting can
+/// never compare equal to the `Rgba` the bridge would otherwise force
+/// it into, which would make `OverridableDevice` treat every polled
+/// reading as a mismatch and re-send the setting forever.
+pub fn merge_bridge_update(
+    prev: &ColorType,
+    on: Option<bool>,
+    brightness: Option<f32>,
+    xy: Option<(f32, f32)>,
+) -> ColorType {
+    let prev_alpha = match prev {
+        ColorType::Rgba { color } => color.alpha,
+        ColorType::Ccta { a, .. } => *a,
+    };
+    let is_on = on.unwrap_or(prev_alpha > 0);
+
+    let alpha = if !is_on {
+        0
+    } else if let Some(brightness) = brightness {
+        (brightness.clamp(0.0, 100.0) / 100.0 * 255.0).round() as u8
+    } else if on == Some(true) {
+        // Just turned on with no explicit brightness: default to 100%.
+        255
+    } else {
+        prev_alpha
+    };
+
+    match (xy, prev) {
+        (None, ColorType::Ccta { kelvin, .. }) => ColorType::Ccta {
+            kelvin: *kelvin,
+            a: alpha,
+        },
+        (None, ColorType::Rgba { color }) => ColorType::Rgba {
+            color: LinSrgba::new(color.red, color.green, color.blue, alpha),
+        },
+        (Some((x, y)), _) => {
+            let rgb = cie_xy_to_rgba(x, y);
+
+            ColorType::Rgba {
+                color: LinSrgba::new(rgb.red, rgb.green, rgb.blue, alpha),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::payload::XyCoordinates;
     use super::*;
 
     #[test]
@@ -85,5 +277,297 @@ mod tests {
             let converted = cie_xy_to_rgba(x, y);
             assert_eq!(converted.alpha, 255);
         }
+    }
+
+    #[test]
+    fn test_color_to_bridge_alpha_is_brightness() {
+        let rgb = LinSrgba::new(255, 128, 64, 0);
+
+        // alpha == 0 means off, and brightness reads as 0%.
+        let off = color_to_bridge(&ColorType::Rgba { color: rgb });
+        assert!(!off.on);
+        assert_eq!(off.brightness, 0.0);
+
+        // alpha == 255 means fully on, brightness reads as 100%.
+        let full = color_to_bridge(&ColorType::Rgba {
+            color: LinSrgba::new(255, 128, 64, 255),
+        });
+        assert!(full.on);
+        assert_eq!(full.brightness, 100.0);
+
+        // A mid-range alpha is on, with a proportional brightness.
+        let half = color_to_bridge(&ColorType::Rgba {
+            color: LinSrgba::new(255, 128, 64, 128),
+        });
+        assert!(half.on);
+        assert!((half.brightness - 50.196).abs() < 0.01);
+
+        // XY is derived only from RGB, independent of alpha.
+        assert_eq!(off.xy, full.xy);
+        assert_eq!(off.xy, half.xy);
+    }
+
+    #[test]
+    fn test_color_to_bridge_ccta() {
+        let bright = color_to_bridge(&ColorType::Ccta {
+            kelvin: 2700,
+            a: 255,
+        });
+        assert!(bright.on);
+        assert_eq!(bright.brightness, 100.0);
+
+        let off = color_to_bridge(&ColorType::Ccta { kelvin: 2700, a: 0 });
+        assert!(!off.on);
+
+        // xy should match a direct kelvin conversion.
+        assert_eq!(bright.xy, kelvin_to_cie_xy(2700));
+    }
+
+    #[test]
+    fn test_kelvin_to_cie_xy_known_white_points() {
+        // D65 (~6500K) and a warm-white (~2700K) sanity check, using a
+        // generous tolerance for the polynomial approximation.
+        let (x, y) = kelvin_to_cie_xy(6500);
+        assert!((x - 0.3127).abs() < 0.01, "x={x}");
+        assert!((y - 0.3290).abs() < 0.02, "y={y}");
+
+        let (x, y) = kelvin_to_cie_xy(2700);
+        assert!((x - 0.4578).abs() < 0.01, "x={x}");
+        assert!((y - 0.4101).abs() < 0.01, "y={y}");
+    }
+
+    #[test]
+    fn test_merge_bridge_update_on_off_only() {
+        let prev = ColorType::Rgba {
+            color: LinSrgba::new(200, 100, 50, 255),
+        };
+
+        // Turning off keeps the RGB hue but zeroes the alpha.
+        let merged = merge_bridge_update(&prev, Some(false), None, None);
+        assert_eq!(
+            merged,
+            ColorType::Rgba {
+                color: LinSrgba::new(200, 100, 50, 0)
+            }
+        );
+    }
+
+    #[test]
+    fn test_merge_bridge_update_dimming_only() {
+        let prev = ColorType::Rgba {
+            color: LinSrgba::new(200, 100, 50, 255),
+        };
+
+        // A brightness-only update preserves the RGB hue.
+        let merged = merge_bridge_update(&prev, None, Some(50.0), None);
+        assert_eq!(
+            merged,
+            ColorType::Rgba {
+                color: LinSrgba::new(200, 100, 50, 128)
+            }
+        );
+    }
+
+    #[test]
+    fn test_merge_bridge_update_xy_only() {
+        let prev = ColorType::Rgba {
+            color: LinSrgba::new(200, 100, 50, 128),
+        };
+        let (x, y) = rgba_to_cie_xy(&LinSrgba::new(10, 20, 30, 255));
+
+        // An XY-only update changes the RGB hue but keeps the alpha.
+        let merged = merge_bridge_update(&prev, None, None, Some((x, y)));
+        assert_eq!(
+            merged,
+            ColorType::Rgba {
+                color: LinSrgba::new(
+                    cie_xy_to_rgba(x, y).red,
+                    cie_xy_to_rgba(x, y).green,
+                    cie_xy_to_rgba(x, y).blue,
+                    128
+                )
+            }
+        );
+    }
+
+    #[test]
+    fn test_merge_bridge_update_turned_on_defaults_to_full_brightness() {
+        let prev = ColorType::Rgba {
+            color: LinSrgba::new(200, 100, 50, 0),
+        };
+
+        // Turning on with no explicit brightness defaults to 100%.
+        let merged = merge_bridge_update(&prev, Some(true), None, None);
+        assert_eq!(
+            merged,
+            ColorType::Rgba {
+                color: LinSrgba::new(200, 100, 50, 255)
+            }
+        );
+    }
+
+    #[test]
+    fn test_xy_is_close() {
+        let a = (0.4578, 0.4101);
+
+        // Well within tolerance, including exact equality.
+        assert!(xy_is_close(a, a));
+        assert!(xy_is_close(
+            a,
+            (
+                a.0 + XY_ECHO_TOLERANCE / 10.0,
+                a.1 - XY_ECHO_TOLERANCE / 10.0
+            )
+        ));
+        assert!(xy_is_close(
+            a,
+            (a.0 + XY_ECHO_TOLERANCE, a.1 - XY_ECHO_TOLERANCE)
+        ));
+
+        // Outside tolerance on just one axis is still a mismatch.
+        assert!(!xy_is_close(a, (a.0 + XY_ECHO_TOLERANCE * 10.0, a.1)));
+        assert!(!xy_is_close(a, (a.0, a.1 - XY_ECHO_TOLERANCE * 10.0)));
+    }
+
+    // Round-off in the RGB <-> XY conversion means a setting's XY, sent
+    // to the bridge, won't come back bit-for-bit identical on the next
+    // poll. `apply_update` relies on `xy_is_close` to recognize the
+    // bridge is just echoing the setting (rather than reporting a real
+    // override), which lets `merge_bridge_update` reconstruct the exact
+    // original setting instead of a lossy round trip through XY. These
+    // tests simulate that whole path for both `ColorType` variants.
+
+    #[test]
+    fn test_rgba_setting_matches_its_own_close_echo() {
+        let setting = ColorType::Rgba {
+            color: LinSrgba::new(200, 100, 50, 200),
+        };
+        let sent = color_to_bridge(&setting);
+
+        // The bridge's echo is within tolerance of, but not bit-for-bit
+        // identical to, what was sent.
+        let echoed_xy = (sent.xy.0 + 0.0001, sent.xy.1 - 0.0001);
+        assert!(xy_is_close(sent.xy, echoed_xy));
+
+        // Since the echo is "close", the caller filters it to `None`
+        // before merging.
+        let merged = merge_bridge_update(
+            &setting,
+            Some(sent.on),
+            Some(sent.brightness),
+            None,
+        );
+
+        assert_eq!(merged, setting);
+    }
+
+    #[test]
+    fn test_ccta_setting_matches_its_own_close_echo() {
+        let setting = ColorType::Ccta {
+            kelvin: 2700,
+            a: 200,
+        };
+        let sent = color_to_bridge(&setting);
+
+        let echoed_xy = (sent.xy.0 - 0.0001, sent.xy.1 + 0.0001);
+        assert!(xy_is_close(sent.xy, echoed_xy));
+
+        let merged = merge_bridge_update(
+            &setting,
+            Some(sent.on),
+            Some(sent.brightness),
+            None,
+        );
+
+        // The merge must preserve the `Ccta` variant (and its kelvin),
+        // not collapse it into an `Rgba` that could never compare equal
+        // to the original setting.
+        assert_eq!(merged, setting);
+    }
+
+    fn sent(on: bool, brightness: f32) -> BridgeState {
+        BridgeState {
+            on,
+            brightness,
+            xy: (0.4578, 0.4101),
+        }
+    }
+
+    fn observed(
+        on: Option<bool>,
+        brightness: Option<f32>,
+        xy: Option<(f32, f32)>,
+    ) -> Observed {
+        let mut o = Observed::default();
+
+        o.update(on, brightness, xy);
+        o
+    }
+
+    #[test]
+    fn test_observed_matches_quantized_reading() {
+        let sent = sent(true, 78.431);
+
+        // One 254-step brightness quantum and a 4-decimal xy still match.
+        assert!(
+            observed(Some(true), Some(78.74), Some((0.4579, 0.4100)))
+                .matches(&sent)
+        );
+
+        // A visibly different brightness, xy or power state doesn't.
+        assert!(
+            !observed(Some(true), Some(70.0), Some(sent.xy)).matches(&sent)
+        );
+        assert!(
+            !observed(Some(true), Some(78.431), Some((0.30, 0.41)))
+                .matches(&sent)
+        );
+        assert!(!observed(Some(false), None, None).matches(&sent));
+    }
+
+    #[test]
+    fn test_observed_off_ignores_brightness_and_xy() {
+        let sent = sent(false, 0.0);
+
+        assert!(
+            observed(Some(false), Some(100.0), Some((0.1, 0.1))).matches(&sent)
+        );
+        assert!(!observed(Some(true), None, None).matches(&sent));
+    }
+
+    #[test]
+    fn test_observed_remembers_partial_updates() {
+        let sent = sent(true, 50.0);
+        let mut o = observed(Some(true), Some(50.0), Some(sent.xy));
+
+        // A later update that only changes brightness keeps the rest.
+        o.update(None, Some(20.0), None);
+        assert!(!o.matches(&sent));
+        o.update(None, Some(50.0), None);
+        assert!(o.matches(&sent));
+
+        // Components never reported don't count against a match.
+        assert!(observed(None, None, None).matches(&sent));
+    }
+
+    #[test]
+    fn test_clamp_to_gamut() {
+        let gamut = Gamut {
+            red: XyCoordinates { x: 0.675, y: 0.322 },
+            green: XyCoordinates { x: 0.409, y: 0.518 },
+            blue: XyCoordinates { x: 0.167, y: 0.04 },
+        };
+
+        // Inside the gamut is untouched.
+        assert_eq!(clamp_to_gamut((0.4, 0.3), &gamut), (0.4, 0.3));
+
+        // Outside (sRGB green) moves into the gamut, and stays put when
+        // clamped again.
+        let green = (0.30, 0.60);
+        let clamped = clamp_to_gamut(green, &gamut);
+
+        assert_ne!(clamped, green);
+        assert!(clamped.1 <= 0.518 + 1e-4);
+        assert!(xy_is_close(clamped, clamp_to_gamut(clamped, &gamut)));
     }
 }

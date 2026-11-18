@@ -11,9 +11,9 @@ The driver uses a **polling-based** architecture rather than event streaming:
 
 ## Supported Device Types
 
-- **Switch** - On/off control with indicator
-- **Dimmer/Bulb** - On/off and brightness control (0-100%) with indicator
-- **ColorBulb** - Full RGB color control and brightness
+- **Switch** - On/off control
+- **Dimmer/Bulb** - Brightness control (0-100%)
+- **ColorBulb** - Full color control, with brightness conveyed by the color's alpha channel
 - **Group** - Controls Hue groups/rooms (uses ColorBulb interface)
 
 ## Configuration
@@ -93,9 +93,9 @@ You need to create a Hue application key before using this driver. Follow the of
 
 ### State Updates
 
-- Brightness values are clamped to 0-100 range
-- A brightness of 0 turns the device off
-- For color bulbs, colors are converted between RGB and CIE XY color space
+- Dimmer/Bulb brightness values are clamped to 0-100 range; a brightness of 0 turns the device off
+- For color bulbs, brightness is conveyed by the color's alpha channel: 0 is off, 255 is 100%
+- For color bulbs, colors are converted between RGB (or color temperature) and CIE XY color space
 - Missing brightness values when a device is "on" default to 100%
 
 ### Override Timeout
@@ -120,7 +120,7 @@ This allows temporary manual control without permanently losing DrMem's automati
 ## Color Conversion
 
 For ColorBulb devices, the driver automatically converts between:
-- RGB (0-255 per channel) used by DrMem
-- CIE XY color space used by Hue devices
+- RGB (0-255 per channel), or a Kelvin color temperature, used by DrMem
+- CIE XY color space, plus separate on/off and brightness settings, used by Hue devices
 
-This conversion uses the `palette` crate for accurate color representation.
+A ColorBulb's single `color` device conveys all three bridge parameters: the RGB (or Kelvin) value maps to the bridge's on/off and XY settings, while the color's alpha channel (0-255) maps to the bridge's brightness (0-100%). This conversion uses the `palette` crate for accurate color representation.

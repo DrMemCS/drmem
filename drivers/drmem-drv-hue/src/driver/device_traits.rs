@@ -1,6 +1,14 @@
 /// Trait-based device handling for Hue devices
-use super::{constants, payload};
-use drmem_api::driver::{Reporter, ResettableState, classes};
+use super::{color, constants, payload};
+use drmem_api::{
+    Result,
+    device::{ColorType, Path},
+    driver::{
+        OverrideConfig, Registrator, Reporter, RequestChan, ResettableState,
+        classes,
+    },
+};
+use palette::LinSrgba;
 use tracing::debug;
 
 /// Common interface for all Hue device types
@@ -9,24 +17,17 @@ pub trait HueDevice<R: Reporter> {
     fn resource_type(&self) -> &'static str;
 
     /// Wait for the next setting change and return a command if one is ready
-    fn next_setting(
-        &mut self,
-    ) -> impl std::future::Future<Output = Option<payload::LightCommand>> + Send;
+    async fn next_setting(&mut self) -> Option<payload::LightCommand>;
 
     /// Apply an update from the bridge to the device
-    fn apply_update(
-        &mut self,
-        update: &payload::ResourceData,
-    ) -> impl std::future::Future<Output = ()> + Send;
+    async fn apply_update(&mut self, update: &payload::ResourceData) -> ();
 
     /// Reset the device state (called when driver restarts)
     fn reset(&mut self);
 }
 
 /// Wrapper for Switch devices
-pub struct SwitchDevice<R: Reporter> {
-    pub inner: classes::Switch<R>,
-}
+pub struct SwitchDevice<R: Reporter>(pub classes::Switch<R>);
 
 impl<R: Reporter> HueDevice<R> for SwitchDevice<R> {
     fn resource_type(&self) -> &'static str {
@@ -34,49 +35,56 @@ impl<R: Reporter> HueDevice<R> for SwitchDevice<R> {
     }
 
     async fn next_setting(&mut self) -> Option<payload::LightCommand> {
-        loop {
-            tokio::select! {
-                // Check state device
-                opt_txn = self.inner.state.next_setting() => {
-                    if let Some((val, reply)) = opt_txn {
-                        debug!("switch state setting ready: {}", val);
-                        if let Some(r) = reply {
-                            r.ok(val);
-                        }
-                        return Some(payload::LightCommand {
-                            on: Some(payload::On { on: val }),
-                            dimming: None,
-                            color: None,
-                        });
-                    }
-                }
-
-                // Check indicator device (drain but don't send command)
-                opt_txn = self.inner.indicator.next_setting() => {
-                    if let Some((val, Some(r))) = opt_txn {
-                        r.ok(val);
-                    }
-                }
+        self.0.next_setting().await.map(|val| {
+            debug!("switch state setting ready: {}", val.state);
+            payload::LightCommand {
+                on: Some(payload::On { on: val.state }),
+                dimming: None,
+                color: None,
             }
-        }
+        })
     }
 
     async fn apply_update(&mut self, update: &payload::ResourceData) {
         if let Some(on) = &update.on {
             debug!("switch: reporting state update: {}", on.on);
-            self.inner.state.report_update(on.on).await;
+            self.0
+                .report_update(classes::SwitchProperty { state: on.on })
+                .await;
         }
     }
 
     fn reset(&mut self) {
-        self.inner.state.reset_state();
-        self.inner.indicator.reset_state();
+        self.0.reset_state()
     }
 }
 
 /// Wrapper for Dimmer/Bulb devices
 pub struct DimmerDevice<R: Reporter> {
-    pub inner: classes::Dimmer<R>,
+    pub dimmer: classes::Dimmer<R>,
+}
+
+impl<R: Reporter> ResettableState for DimmerDevice<R> {}
+
+impl<R: Reporter> Registrator<R> for DimmerDevice<R> {
+    type Config = OverrideConfig;
+
+    async fn register_devices(
+        drc: &mut RequestChan<R>,
+        subpath: Option<&Path>,
+        cfg: &Self::Config,
+        max_history: Option<usize>,
+    ) -> Result<Self> {
+        Ok(DimmerDevice {
+            dimmer: classes::Dimmer::register_devices(
+                drc,
+                subpath,
+                cfg,
+                max_history,
+            )
+            .await?,
+        })
+    }
 }
 
 impl<R: Reporter> HueDevice<R> for DimmerDevice<R> {
@@ -85,74 +93,48 @@ impl<R: Reporter> HueDevice<R> for DimmerDevice<R> {
     }
 
     async fn next_setting(&mut self) -> Option<payload::LightCommand> {
-        loop {
-            tokio::select! {
-                // Check brightness device
-                opt_txn = self.inner.brightness.next_setting() => {
-                    if let Some((val, reply)) = opt_txn {
-                        let val = val.clamp(0.0, 100.0).round();
-
-                        debug!("dimmer brightness setting ready: {}", val);
-
-                        if let Some(r) = reply {
-                            r.ok(val);
-                        }
-
-                        let cmd = if val == 0.0 {
-                            payload::LightCommand {
-                                on: Some(payload::On { on: false }),
-                                dimming: None,
-                                color: None,
-                            }
-                        } else {
-                            payload::LightCommand {
-                                on: Some(payload::On { on: true }),
-                                dimming: Some(payload::Dimming {
-                                    brightness: val as f32,
-                                }),
-                                color: None,
-                            }
-                        };
-                        return Some(cmd);
-                    }
+        if let Some(brightness) = self.dimmer.next_setting().await {
+            let cmd = if brightness.brightness == 0.0 {
+                payload::LightCommand {
+                    on: Some(payload::On { on: false }),
+                    dimming: None,
+                    color: None,
                 }
-
-                // Check indicator device (drain but don't send command)
-                opt_txn = self.inner.indicator.next_setting() => {
-                    if let Some((val, Some(r))) = opt_txn {
-                        r.ok(val);
-                    }
+            } else {
+                payload::LightCommand {
+                    on: Some(payload::On { on: true }),
+                    dimming: Some(payload::Dimming {
+                        brightness: brightness.brightness as f32,
+                    }),
+                    color: None,
                 }
-            }
+            };
+            Some(cmd)
+        } else {
+            Some(payload::LightCommand {
+                on: None,
+                dimming: None,
+                color: None,
+            })
         }
     }
 
     async fn apply_update(&mut self, update: &payload::ResourceData) {
-        if let Some(on) = &update.on {
-            if !on.on {
-                debug!("dimmer: reporting brightness update: 0");
-                self.inner.brightness.report_update(0.0).await;
-            } else if let Some(dim) = &update.dimming {
-                let brightness = (dim.brightness as f64).round();
+        let brightness = match (&update.on, &update.dimming) {
+            (Some(payload::On { on: false }), _) => 0.0,
+            (Some(payload::On { on: true }), None) => 100.0,
+            (_, Some(dim)) => (dim.brightness as f64).round(),
+            (None, None) => return,
+        };
 
-                debug!("dimmer: reporting brightness update: {}", brightness);
-                self.inner.brightness.report_update(brightness).await;
-            } else {
-                // Use 100% if brightness is missing when device is on
-                debug!("dimmer: reporting brightness update: 100 (default)");
-                self.inner.brightness.report_update(100.0).await;
-            }
-        } else if let Some(dim) = &update.dimming {
-            let brightness = (dim.brightness as f64).round();
-
-            debug!("dimmer: reporting brightness update: {}", brightness);
-            self.inner.brightness.report_update(brightness).await;
-        }
+        debug!("dimmer: brightness update: {}", brightness);
+        self.dimmer
+            .report_update(classes::DimmerProperty { brightness })
+            .await;
     }
 
     fn reset(&mut self) {
-        self.inner.brightness.reset_state();
-        self.inner.indicator.reset_state();
+        self.dimmer.reset_state();
     }
 }
 
@@ -163,6 +145,17 @@ pub struct ColorBulbDevice<R: Reporter> {
     /// Stores the last XY coordinates sent to the bridge to avoid
     /// round-off errors when comparing RGB <-> XY conversions
     last_xy: Option<(f32, f32)>,
+    /// The last color reported to DrMem, used as the baseline when
+    /// merging partial bridge updates (on/dimming/color can each
+    /// arrive independently).
+    last_color: ColorType,
+    /// The last command, as the bridge was given it, and the setting it
+    /// came from.
+    sent: Option<(color::BridgeState, ColorType)>,
+    /// What the bridge has reported so far.
+    observed: color::Observed,
+    /// The light's gamut, once the bridge has reported it.
+    gamut: Option<payload::Gamut>,
 }
 
 impl<R: Reporter> ColorBulbDevice<R> {
@@ -175,6 +168,12 @@ impl<R: Reporter> ColorBulbDevice<R> {
                 constants::LIGHT_RESOURCE
             },
             last_xy: None,
+            last_color: ColorType::Rgba {
+                color: LinSrgba::new(255, 255, 255, 0),
+            },
+            sent: None,
+            observed: color::Observed::default(),
+            gamut: None,
         }
     }
 }
@@ -185,118 +184,111 @@ impl<R: Reporter> HueDevice<R> for ColorBulbDevice<R> {
     }
 
     async fn next_setting(&mut self) -> Option<payload::LightCommand> {
-        loop {
-            tokio::select! {
-                // Check brightness device
-                opt_txn = self.inner.brightness.next_setting() => {
-                    if let Some((val, reply)) = opt_txn {
-                        let val = val.clamp(0.0, 100.0).round();
-                        debug!("colorbulb brightness setting ready: {}", val);
+        let (val, reply) = self.inner.color.next_setting().await?;
 
-                        if let Some(r) = reply {
-                            r.ok(val);
-                        }
+        debug!("colorbulb color setting ready: {:?}", val);
 
-                        let cmd = if val == 0.0 {
-                            payload::LightCommand {
-                                on: Some(payload::On { on: false }),
-                                dimming: None,
-                                color: None,
-                            }
-                        } else {
-                            payload::LightCommand {
-                                on: Some(payload::On { on: true }),
-                                dimming: Some(payload::Dimming {
-                                    brightness: val as f32,
-                                }),
-                                color: None,
-                            }
-                        };
-                        return Some(cmd);
-                    }
-                }
-
-                // Check color device
-                opt_txn = self.inner.color.next_setting() => {
-                    if let Some((val, reply)) = opt_txn {
-                        debug!("colorbulb color setting ready: {:?}", val);
-
-                        if let Some(r) = reply {
-                            r.ok(val.clone());
-                        }
-
-                        let (x, y) = super::color::rgba_to_cie_xy(&val);
-
-                        // Store the XY coordinates we're sending to the bridge
-                        self.last_xy = Some((x, y));
-                        debug!("colorbulb: saved XY coordinates: ({}, {})", x, y);
-
-                        return Some(payload::LightCommand {
-                            on: Some(payload::On { on: true }),
-                            dimming: None,
-                            color: Some(payload::Color {
-                                xy: Some(payload::XyCoordinates { x, y }),
-                            }),
-                        });
-                    }
-                }
-            }
+        if let Some(r) = reply {
+            r.ok(val.clone());
         }
+
+        let mut bridge = color::color_to_bridge(&val);
+
+        // The bridge moves a color outside the light's gamut, so send the
+        // closest one it can show or its readings never match.
+        if let Some(gamut) = &self.gamut {
+            bridge.xy = color::clamp_to_gamut(bridge.xy, gamut);
+        }
+
+        // Store the XY coordinates we're sending to the bridge, and the
+        // setting itself so `apply_update` knows which `ColorType`
+        // variant (`Rgba` or `Ccta`) to preserve when the bridge just
+        // echoes back the xy we sent.
+        self.last_xy = Some(bridge.xy);
+        self.last_color = val.clone();
+        self.sent = Some((bridge, val));
+
+        Some(payload::LightCommand {
+            on: Some(payload::On { on: bridge.on }),
+            dimming: bridge.on.then_some(payload::Dimming {
+                brightness: bridge.brightness,
+            }),
+            color: Some(payload::Color {
+                xy: Some(payload::XyCoordinates {
+                    x: bridge.xy.0,
+                    y: bridge.xy.1,
+                }),
+                gamut: None,
+            }),
+        })
     }
 
     async fn apply_update(&mut self, update: &payload::ResourceData) {
-        // Handle brightness updates
-        if let Some(on) = &update.on {
-            if !on.on {
-                debug!("colorbulb: reporting brightness update: 0");
-                self.inner.brightness.report_update(0.0).await;
-            } else if let Some(dim) = &update.dimming {
-                let brightness = (dim.brightness as f64).round();
+        let on = update.on.as_ref().map(|on| on.on);
+        let brightness = update.dimming.as_ref().map(|dim| dim.brightness);
+        let reported_xy = update
+            .color
+            .as_ref()
+            .and_then(|c| c.xy.as_ref())
+            .map(|xy| (xy.x, xy.y));
 
-                debug!(
-                    "colorbulb: reporting brightness update: {}",
-                    brightness
-                );
-                self.inner.brightness.report_update(brightness).await;
-            } else {
-                // Use 100% if brightness is missing when device is on
-                debug!("colorbulb: reporting brightness update: 100 (default)");
-                self.inner.brightness.report_update(100.0).await;
-            }
-        } else if let Some(dim) = &update.dimming {
-            let brightness = (dim.brightness as f64).round();
+        if let Some(gamut) = update.color.as_ref().and_then(|c| c.gamut) {
+            self.gamut = Some(gamut);
+        }
+        self.observed.update(on, brightness, reported_xy);
 
-            debug!("colorbulb: reporting brightness update: {}", brightness);
-            self.inner.brightness.report_update(brightness).await;
+        if on.is_none() && brightness.is_none() && reported_xy.is_none() {
+            return;
         }
 
-        // Handle color updates
-        if let Some(color) = &update.color.as_ref().and_then(|c| c.xy.as_ref())
+        // The bridge only reports a quantized copy of what it was sent, so
+        // when it matches, report the setting itself rather than a lossy
+        // conversion of the reading.
+        if let Some((sent, setting)) = self
+            .sent
+            .clone()
+            .filter(|(sent, _)| self.observed.matches(sent))
         {
-            let bridge_xy = (color.x, color.y);
+            debug!("colorbulb: reading matches setting: {:?}", setting);
 
-            // Check if the bridge's XY coordinates match our last sent XY
-            // Use a tolerance to handle floating point precision
-
-            let xy_matches = self.last_xy.map_or(false, |(last_x, last_y)| {
-                (last_x - bridge_xy.0).abs() < 0.001
-                    && (last_y - bridge_xy.1).abs() < 0.001
-            });
-
-            if !xy_matches {
-                let rgba =
-                    super::color::cie_xy_to_rgba(bridge_xy.0, bridge_xy.1);
-
-                self.inner.color.report_update(rgba).await;
-                self.last_xy = Some(bridge_xy);
-            }
+            self.last_xy = Some(sent.xy);
+            self.last_color = setting.clone();
+            self.inner.color.report_update(setting).await;
+            return;
         }
+
+        // Ignore XY coordinates that just echo what we last sent, to
+        // avoid round-off errors from the RGB <-> XY conversion.
+        let xy = reported_xy.filter(|&xy| {
+            !self
+                .last_xy
+                .is_some_and(|last_xy| color::xy_is_close(last_xy, xy))
+        });
+
+        if on.is_none() && brightness.is_none() && xy.is_none() {
+            return;
+        }
+
+        let merged =
+            color::merge_bridge_update(&self.last_color, on, brightness, xy);
+
+        debug!("colorbulb: reporting color update: {:?}", merged);
+
+        if let Some(xy) = xy {
+            self.last_xy = Some(xy);
+        }
+        self.last_color = merged.clone();
+        self.inner.color.report_update(merged).await;
     }
 
     fn reset(&mut self) {
-        self.inner.brightness.reset_state();
         self.inner.color.reset_state();
         self.last_xy = None;
+        self.last_color = ColorType::Rgba {
+            color: LinSrgba::new(255, 255, 255, 0),
+        };
+        self.sent = None;
+        self.observed = color::Observed::default();
     }
 }
 
@@ -337,6 +329,293 @@ impl<R: Reporter> DeviceWrapper<R> {
             Self::Switch(d) => d.reset(),
             Self::Dimmer(d) => d.reset(),
             Self::ColorBulb(d) => d.reset(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use drmem_api::{
+        device::Value,
+        driver::{OverridableDevice, ReadOnlyDevice, TxDeviceSetting},
+    };
+    use tokio::{
+        sync::{mpsc, oneshot},
+        time::{Duration, advance, timeout},
+    };
+
+    // Same as the envelope in `Set::from_devcfg`.
+    const ENVELOPE: Duration = Duration::from_secs(30);
+    const POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+    const fn xy(x: f32, y: f32) -> payload::XyCoordinates {
+        payload::XyCoordinates { x, y }
+    }
+
+    // Older bulbs. Pure sRGB green is outside this gamut.
+    const GAMUT_B: payload::Gamut = payload::Gamut {
+        red: xy(0.675, 0.322),
+        green: xy(0.409, 0.518),
+        blue: xy(0.167, 0.04),
+    };
+
+    // Current bulbs. Every sRGB color is inside this gamut.
+    const GAMUT_C: payload::Gamut = payload::Gamut {
+        red: xy(0.6915, 0.3083),
+        green: xy(0.17, 0.7),
+        blue: xy(0.1532, 0.0475),
+    };
+
+    struct MockReporter(mpsc::Sender<Value>);
+
+    impl Reporter for MockReporter {
+        async fn report_value(&mut self, v: Value) {
+            self.0.send(v).await.unwrap()
+        }
+    }
+
+    // Models how the bridge stores a light: brightness in 254 steps (reported
+    // as a percentage), xy to 4 decimal places and clamped to the light's
+    // gamut, so what it reports back is never bit-for-bit what was sent.
+    struct FakeBridge {
+        on: bool,
+        level: u8,
+        xy: (f32, f32),
+        gamut: payload::Gamut,
+    }
+
+    impl FakeBridge {
+        fn apply(&mut self, cmd: &payload::LightCommand) {
+            let round4 = |v: f32| (v * 10_000.0).round() / 10_000.0;
+
+            if let Some(on) = &cmd.on {
+                self.on = on.on;
+            }
+            if let Some(dim) = &cmd.dimming {
+                self.level = (dim.brightness / 100.0 * 254.0)
+                    .round()
+                    .clamp(1.0, 254.0) as u8;
+            }
+            if let Some(xy) = cmd.color.as_ref().and_then(|c| c.xy.as_ref()) {
+                let (x, y) = color::clamp_to_gamut((xy.x, xy.y), &self.gamut);
+
+                self.xy = (round4(x), round4(y));
+            }
+        }
+
+        fn poll(&self) -> payload::ResourceData {
+            payload::ResourceData {
+                id: "test".into(),
+                on: Some(payload::On { on: self.on }),
+                dimming: Some(payload::Dimming {
+                    brightness: (self.level as f32 / 254.0 * 10_000.0).round()
+                        / 100.0,
+                }),
+                color: Some(payload::Color {
+                    xy: Some(xy(self.xy.0, self.xy.1)),
+                    gamut: Some(self.gamut),
+                }),
+            }
+        }
+    }
+
+    // A `ColorBulbDevice` wired to a `FakeBridge` the way the driver's
+    // device loop wires it to a real one.
+    struct Rig {
+        tx_set: TxDeviceSetting,
+        rx_rdg: mpsc::Receiver<Value>,
+        dev: ColorBulbDevice<MockReporter>,
+        bridge: FakeBridge,
+    }
+
+    impl Rig {
+        async fn new(gamut: payload::Gamut) -> Self {
+            let (rdg_tx, rx_rdg) = mpsc::channel(20);
+            let (tx_set, rx_set) = mpsc::channel(20);
+            let mut rig = Rig {
+                tx_set,
+                rx_rdg,
+                dev: ColorBulbDevice::new(
+                    classes::ColorBulb {
+                        error: ReadOnlyDevice::new(MockReporter(
+                            mpsc::channel(1).0,
+                        )),
+                        color: OverridableDevice::new(
+                            MockReporter(rdg_tx),
+                            rx_set,
+                            None,
+                            None,
+                            Some(ENVELOPE),
+                        ),
+                    },
+                    false,
+                ),
+                bridge: FakeBridge {
+                    on: false,
+                    level: 254,
+                    xy: (0.5, 0.4),
+                    gamut,
+                },
+            };
+
+            // The driver's first poll reports the light's initial state.
+            rig.poll().await;
+            while rig.rx_rdg.try_recv().is_ok() {}
+            rig
+        }
+
+        async fn poll(&mut self) {
+            let update = self.bridge.poll();
+
+            self.dev.apply_update(&update).await;
+        }
+
+        // Sends `setting` to the device and feeds the bridge's polled state
+        // back until the envelope has elapsed. A faithful bridge should
+        // leave the device settled: one command, one backend report, no
+        // reassertions and no override.
+        async fn set(
+            &mut self,
+            setting: &ColorType,
+        ) -> std::result::Result<(), String> {
+            let (os_tx, _os_rx) = oneshot::channel();
+
+            self.tx_set
+                .send((setting.clone().into(), os_tx))
+                .await
+                .unwrap();
+
+            let cmd = timeout(Duration::ZERO, self.dev.next_setting())
+                .await
+                .map_err(|_| "no command was issued")?
+                .ok_or("setting stream closed")?;
+
+            self.bridge.apply(&cmd);
+
+            for _ in 0..3 {
+                self.poll().await;
+
+                if timeout(Duration::ZERO, self.dev.next_setting())
+                    .await
+                    .is_ok()
+                {
+                    return Err("setting was re-sent after a poll".into());
+                }
+                advance(POLL_INTERVAL).await;
+            }
+
+            if timeout(ENVELOPE * 2, self.dev.next_setting()).await.is_ok() {
+                return Err("setting was re-sent after the envelope".into());
+            }
+
+            let mut seen = vec![];
+
+            while let Ok(v) = self.rx_rdg.try_recv() {
+                seen.push(v);
+            }
+
+            if seen != [Value::Color(setting.clone())] {
+                return Err(format!("backend saw {seen:?}"));
+            }
+            Ok(())
+        }
+    }
+
+    fn rgba(r: u8, g: u8, b: u8, a: u8) -> ColorType {
+        ColorType::Rgba {
+            color: LinSrgba::new(r, g, b, a),
+        }
+    }
+
+    fn assert_no_failures(failures: Vec<String>) {
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_rgba_brightness_settles() {
+        let mut failures = vec![];
+
+        for alpha in 0..=255 {
+            if let Err(e) = Rig::new(GAMUT_C)
+                .await
+                .set(&rgba(200, 100, 50, alpha))
+                .await
+            {
+                failures.push(format!("alpha {alpha}: {e}"));
+            }
+        }
+        assert_no_failures(failures);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_rgba_colors_settle() {
+        let mut failures = vec![];
+
+        for (name, gamut) in [("B", GAMUT_B), ("C", GAMUT_C)] {
+            for r in (0..=255).step_by(51) {
+                for g in (0..=255).step_by(51) {
+                    for b in (0..=255).step_by(51) {
+                        if let Err(e) =
+                            Rig::new(gamut).await.set(&rgba(r, g, b, 255)).await
+                        {
+                            failures.push(format!(
+                                "gamut {name} rgb({r},{g},{b}): {e}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert_no_failures(failures);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_ccta_settles() {
+        let mut failures = vec![];
+
+        for a in 0..=255 {
+            if let Err(e) = Rig::new(GAMUT_C)
+                .await
+                .set(&ColorType::Ccta { kelvin: 2700, a })
+                .await
+            {
+                failures.push(format!("2700K alpha {a}: {e}"));
+            }
+        }
+        for kelvin in (2000..=6500).step_by(500) {
+            if let Err(e) = Rig::new(GAMUT_C)
+                .await
+                .set(&ColorType::Ccta { kelvin, a: 255 })
+                .await
+            {
+                failures.push(format!("{kelvin}K: {e}"));
+            }
+        }
+        assert_no_failures(failures);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_successive_settings_settle() {
+        let mut rig = Rig::new(GAMUT_C).await;
+
+        for setting in [
+            rgba(255, 0, 0, 255),
+            rgba(255, 0, 0, 127),
+            ColorType::Ccta {
+                kelvin: 2700,
+                a: 200,
+            },
+            rgba(0, 0, 255, 0),
+            rgba(10, 200, 30, 255),
+            ColorType::Ccta {
+                kelvin: 6500,
+                a: 255,
+            },
+        ] {
+            if let Err(e) = rig.set(&setting).await {
+                panic!("{setting:?}: {e}");
+            }
         }
     }
 }
