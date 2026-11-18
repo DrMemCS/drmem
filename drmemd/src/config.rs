@@ -7,6 +7,8 @@ use tracing::Level;
 
 use drmem_api::device;
 
+pub mod template;
+
 fn def_log_level() -> String {
     String::from("warn")
 }
