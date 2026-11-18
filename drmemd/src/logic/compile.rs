@@ -425,7 +425,11 @@ fn fmt_literal(v: &device::Value, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match v {
         device::Value::Flt(v) => write!(f, "{v:?}"),
         device::Value::Color(ColorType::Rgba { color }) => {
-            write!(f, "#{:02x}{:02x}{:02x}", color.red, color.green, color.blue)?;
+            write!(
+                f,
+                "#{:02x}{:02x}{:02x}",
+                color.red, color.green, color.blue
+            )?;
 
             if color.alpha < 255 {
                 write!(f, "{:02x}", color.alpha)?;
@@ -3884,7 +3888,7 @@ mod tests {
         }
     }
 
-        // These trees are built by hand to cover shapes that need
+    // These trees are built by hand to cover shapes that need
     // parentheses to survive (same-precedence operands, `and`/`or`
     // mixes, nested conditionals) and extreme literals. The `Display`
     // impl must print them in a way that parses back into the same
@@ -3915,7 +3919,10 @@ mod tests {
             Expr::Eq(bx(a()), bx(Expr::Eq(bx(a()), bx(b())))),
             Expr::Lt(bx(Expr::Lt(bx(a()), bx(b()))), bx(a())),
             Expr::LtEq(bx(a()), bx(Expr::LtEq(bx(a()), bx(b())))),
-            Expr::Lt(bx(Expr::Eq(bx(a()), bx(b()))), bx(Expr::LtEq(bx(b()), bx(a())))),
+            Expr::Lt(
+                bx(Expr::Eq(bx(a()), bx(b()))),
+                bx(Expr::LtEq(bx(b()), bx(a()))),
+            ),
             Expr::Not(bx(Expr::Eq(bx(a()), bx(b())))),
             Expr::Not(bx(Expr::Lt(bx(a()), bx(b())))),
             Expr::Not(bx(Expr::Not(bx(a())))),
