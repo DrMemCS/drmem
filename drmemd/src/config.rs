@@ -983,7 +983,7 @@ prefix = "a"
 [[driver]]
 template = { vars = { p = ["x", "y"] }, body = '''
 name = "tpl"
-prefix = ${p}
+prefix = "${p}"
 cfg = { n = 1 }
 ''' }
 
@@ -993,9 +993,9 @@ prefix = "z"
 
 [[logic]]
 template = { vars = { n = ["blk-a", "blk-b"], d = ["dev:a", "dev:b"] }, body = '''
-name = ${n}
+name = "${n}"
 exprs = ["{o} -> {o}"]
-outputs = { o = ${d} }
+outputs = { o = "${d}" }
 ''' }
 "#,
         )

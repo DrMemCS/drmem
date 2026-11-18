@@ -219,6 +219,13 @@ fn validate_zip_lengths(
     }
 }
 
+fn format_value_raw(val: &Value) -> String {
+    match val {
+        Value::String(s) => s.clone(),
+        _ => val.to_string(),
+    }
+}
+
 fn expand_string(template: &str, bindings: &HashMap<String, Value>) -> String {
     let mut result = String::with_capacity(template.len());
     let mut last_idx = 0;
@@ -232,7 +239,7 @@ fn expand_string(template: &str, bindings: &HashMap<String, Value>) -> String {
             let placeholder = &template[absolute_start..=absolute_end];
 
             if let Some(val) = bindings.get(placeholder) {
-                result.push_str(&val.to_string());
+                result.push_str(&format_value_raw(val));
             } else {
                 result.push_str(placeholder);
             }
@@ -283,7 +290,7 @@ mod tests {
         assert_eq!(expand_string("no vars", &b), "no vars");
         assert_eq!(expand_string("x = ${a}", &b), "x = 5");
         assert_eq!(expand_string("${a}${a}", &b), "55");
-        assert_eq!(expand_string("n = ${s}", &b), "n = \"hi\"");
+        assert_eq!(expand_string("n = \"${s}\"", &b), "n = \"hi\"");
         // Unknown placeholders are left untouched.
         assert_eq!(expand_string("${zz} ${a}", &b), "${zz} 5");
         // Unterminated placeholders are copied verbatim.
@@ -542,7 +549,7 @@ mod tests {
             r#"
             [device.${name}]
             index = ${n}
-            label = ${name}
+            label = "${name}"
             "#,
         )
         .into_iter()
@@ -552,7 +559,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, n)| {
-                format!("[device.\"{n}\"]\nindex = {}\nlabel = \"{n}\"", i + 1)
+                format!("[device.{n}]\nindex = {}\nlabel = \"{n}\"", i + 1)
                     .parse::<toml::Table>()
                     .unwrap()
             })
@@ -568,7 +575,7 @@ mod tests {
         let v = vars_arr(
             r#"v = [{ room = ["kitchen", "den"] }, { kind = ["temp", "hum"] }]"#,
         );
-        let res = expand(&v, "room = ${room}\nkind = ${kind}\n")
+        let res = expand(&v, "room = \"${room}\"\nkind = \"${kind}\"\n")
             .into_iter()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
