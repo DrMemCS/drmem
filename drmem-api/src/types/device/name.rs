@@ -9,7 +9,7 @@
 //! In a `[[driver]]` section of `drmemd`'s configuration file, a path
 //! is specified for the driver instance and the driver provides the
 //! base names for its set of devices.
-use crate::{types::Error, Result};
+use crate::{types::error::Error, Result};
 use serde::Deserialize;
 use std::fmt;
 

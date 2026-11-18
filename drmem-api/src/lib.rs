@@ -8,7 +8,7 @@ mod types;
 // Pull types down to the `drmem-api` namespace.
 
 pub use types::device;
-pub use types::Error;
+pub use types::error::Error;
 
 /// A specialization of `std::result::Result<>` where the error value
 /// is `types::Error`.

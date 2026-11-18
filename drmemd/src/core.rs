@@ -126,17 +126,17 @@ impl State {
         loop {
             #[rustfmt::skip]
             tokio::select! {
-		Some(req) = rx_drv_req.recv() =>
+		        Some(req) = rx_drv_req.recv() =>
                     self
-		    .handle_driver_request(req)
-		    .instrument(info_span!("driver_req"))
-		    .await,
-		Some(req) = rx_clnt_req.recv() =>
+		                .handle_driver_request(req)
+		                .instrument(info_span!("driver_req"))
+		                .await,
+        		Some(req) = rx_clnt_req.recv() =>
                     self
-		    .handle_client_request(req)
-		    .instrument(info_span!("client_req"))
-		    .await,
-		else => break
+		                .handle_client_request(req)
+		                .instrument(info_span!("client_req"))
+		                .await,
+		        else => break
             }
         }
 

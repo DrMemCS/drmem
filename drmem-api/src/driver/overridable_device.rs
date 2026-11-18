@@ -1937,4 +1937,192 @@ mod tests {
         assert_eq!(rrrx.try_recv(), Ok(device::Value::Int(2)));
         assert_eq!(rrrx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
     }
+
+    fn rgba(r: u8, g: u8, b: u8, a: u8) -> device::ColorType {
+        device::ColorType::Rgba {
+            color: palette::LinSrgba::new(r, g, b, a),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_color_device() {
+        let red = rgba(255, 0, 0, 255);
+        let dim_red = rgba(255, 0, 0, 128);
+        let blue = rgba(0, 0, 255, 255);
+        let (tx_set, mut rx_rdg, mut dev) = mk_device::<device::ColorType>(
+            None,
+            Some(Duration::from_secs(60)),
+            None,
+        );
+
+        // A client's color setting goes to the driver and the backend. The
+        // client gets no reply until the driver acks it.
+
+        let (os_tx, mut os_rx) = oneshot::channel();
+        assert!(matches!(
+            tx_set.send((red.clone().into(), os_tx)).await,
+            Ok(())
+        ));
+
+        let (setting, resp) =
+            timeout(Duration::from_secs(0), dev.next_setting())
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(setting, red);
+        assert_eq!(rx_rdg.try_recv(), Ok(device::Value::Color(red.clone())));
+        assert!(os_rx.try_recv().is_err());
+
+        resp.unwrap().ok(setting);
+        assert_eq!(os_rx.try_recv(), Ok(Ok(device::Value::Color(red.clone()))));
+
+        // The hardware reports the same color. It's already in the backend
+        // so nothing more is reported.
+
+        dev.report_update(red.clone()).await;
+        assert!(timeout(Duration::from_secs(0), dev.next_setting())
+            .await
+            .is_err());
+        assert!(matches!(&dev.state, State::Synced { value } if *value == red));
+        assert_eq!(rx_rdg.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        // Same RGB but a different alpha (dimmed outside of DrMem) is an
+        // override and gets reported once.
+
+        dev.report_update(dim_red.clone()).await;
+        assert_eq!(
+            rx_rdg.try_recv(),
+            Ok(device::Value::Color(dim_red.clone()))
+        );
+        dev.report_update(dim_red.clone()).await;
+        assert_eq!(rx_rdg.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        // A setting made during the override is saved and acked, but not
+        // sent to the driver.
+
+        let (os_tx, mut os_rx) = oneshot::channel();
+        assert!(matches!(
+            tx_set.send((blue.clone().into(), os_tx)).await,
+            Ok(())
+        ));
+        assert!(timeout(Duration::from_secs(0), dev.next_setting())
+            .await
+            .is_err());
+        assert_eq!(
+            os_rx.try_recv(),
+            Ok(Ok(device::Value::Color(blue.clone())))
+        );
+        assert_eq!(rx_rdg.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        // When the override expires, the saved setting is reasserted.
+
+        let State::Overridden { deadline, .. } = &mut dev.state else {
+            panic!("in wrong state: {:?}", dev.state);
+        };
+        *deadline = tokio::time::Instant::now();
+
+        assert!(matches!(
+            timeout(Duration::from_secs(0), dev.next_setting()).await,
+            Ok(Some((c, None))) if c == blue
+        ));
+        assert_eq!(rx_rdg.try_recv(), Ok(device::Value::Color(blue.clone())));
+
+        std::mem::drop(tx_set);
+    }
+
+    #[tokio::test]
+    async fn test_color_reading_must_match_variant() {
+        let warm = device::ColorType::Ccta {
+            kelvin: 2700,
+            a: 255,
+        };
+        let (tx_set, mut rx_rdg, mut dev) =
+            mk_device::<device::ColorType>(Some(warm.clone()), None, None);
+
+        assert!(matches!(
+            timeout(Duration::from_secs(0), dev.next_setting()).await,
+            Ok(Some((c, None))) if c == warm
+        ));
+        assert_eq!(rx_rdg.try_recv(), Ok(device::Value::Color(warm.clone())));
+
+        // Readings that differ in representation, kelvin, or alpha don't
+        // satisfy the setting, so it's reasserted without touching the
+        // backend.
+
+        for reading in [
+            rgba(255, 169, 87, 255),
+            device::ColorType::Ccta {
+                kelvin: 2700,
+                a: 128,
+            },
+            device::ColorType::Ccta {
+                kelvin: 3000,
+                a: 255,
+            },
+        ] {
+            dev.report_update(reading).await;
+            assert!(matches!(
+                timeout(Duration::from_secs(0), dev.next_setting()).await,
+                Ok(Some((c, None))) if c == warm
+            ));
+            assert_eq!(
+                rx_rdg.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            );
+        }
+
+        // An identical reading closes out the setting.
+
+        dev.report_update(warm.clone()).await;
+        assert!(timeout(Duration::from_secs(0), dev.next_setting())
+            .await
+            .is_err());
+        assert!(
+            matches!(&dev.state, State::Synced { value } if *value == warm)
+        );
+        assert_eq!(rx_rdg.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        std::mem::drop(tx_set);
+    }
+
+    #[tokio::test]
+    async fn test_color_envelope_expiry_reports_reading() {
+        let red = rgba(255, 0, 0, 255);
+        let green = rgba(0, 255, 0, 255);
+        let (tx_set, mut rx_rdg, mut dev) = mk_device::<device::ColorType>(
+            Some(red.clone()),
+            Some(Duration::from_secs(60)),
+            Some(Duration::from_millis(50)),
+        );
+
+        assert!(matches!(
+            timeout(Duration::from_secs(0), dev.next_setting()).await,
+            Ok(Some((c, None))) if c == red
+        ));
+        assert_eq!(rx_rdg.try_recv(), Ok(device::Value::Color(red.clone())));
+
+        // A stale reading arrives, so the setting is reasserted.
+
+        dev.report_update(green.clone()).await;
+        assert!(matches!(
+            timeout(Duration::from_secs(0), dev.next_setting()).await,
+            Ok(Some((c, None))) if c == red
+        ));
+        assert_eq!(rx_rdg.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+
+        // No further readings, so when the envelope elapses the last
+        // reading is reported as an override.
+
+        assert!(timeout(Duration::from_millis(500), dev.next_setting())
+            .await
+            .is_err());
+        assert!(matches!(
+            &dev.state,
+            State::Overridden { setting, r#override, .. }
+                if *setting == red && *r#override == green
+        ));
+        assert_eq!(rx_rdg.try_recv(), Ok(device::Value::Color(green)));
+
+        std::mem::drop(tx_set);
+    }
 }

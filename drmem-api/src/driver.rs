@@ -3,7 +3,7 @@
 
 use crate::types::{
     device::{self, Base, Path},
-    Error,
+    error::Error,
 };
 use std::{
     convert::{Infallible, TryFrom},

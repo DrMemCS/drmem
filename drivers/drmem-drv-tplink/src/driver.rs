@@ -117,16 +117,16 @@ impl Instance {
         let out_buf = cmd.encode();
 
         #[rustfmt::skip]
-	tokio::select! {
-	    result = s.write_all(&out_buf[..]) => {
-		match result {
-		    Ok(_) => s.flush().await.map_err(ERR_F),
-		    Err(e) => Err(ERR_F(e))
-		}
-	    }
-	    _ = time::sleep(Duration::from_millis(500)) =>
-		Err(Error::TimeoutError)
-	}
+        tokio::select! {
+            result = s.write_all(&out_buf[..]) => {
+                match result {
+                    Ok(_) => s.flush().await.map_err(ERR_F),
+                    Err(e) => Err(ERR_F(e))
+                }
+            }
+            _ = time::sleep(Duration::from_millis(500)) =>
+                Err(Error::TimeoutError)
+        }
     }
 
     // Performs an "RPC" call to the device; it sends the command and
@@ -147,11 +147,11 @@ impl Instance {
                 match res {
                     Ok(()) => {
                         #[rustfmt::skip]
-			tokio::select! {
-			    result = self.read_reply(rx) => result,
-			    _ = time::sleep(Duration::from_millis(500)) =>
-				Err(Error::TimeoutError)
-			}
+			            tokio::select! {
+			                result = self.read_reply(rx) => result,
+			                _ = time::sleep(Duration::from_millis(500)) =>
+				                Err(Error::TimeoutError)
+			            }
                     }
                     Err(e) => Err(e),
                 }
