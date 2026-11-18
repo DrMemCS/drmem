@@ -1014,7 +1014,10 @@ outputs = { o = ${d} }
             ]
         );
         assert_eq!(
-            cfg.logic.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(),
+            cfg.logic
+                .iter()
+                .map(|l| l.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["blk-a", "blk-b"]
         );
     }
