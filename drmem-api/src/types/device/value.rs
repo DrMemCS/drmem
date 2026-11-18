@@ -280,6 +280,28 @@ impl ReadCompat for palette::LinSrgba<u8> {}
 
 impl ReadWriteCompat for palette::LinSrgba<u8> {}
 
+impl From<ColorType> for Value {
+    fn from(value: ColorType) -> Self {
+        Value::Color(value)
+    }
+}
+
+impl TryFrom<Value> for ColorType {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        if let Value::Color(color) = value {
+            Ok(color)
+        } else {
+            Err(Error::TypeError)
+        }
+    }
+}
+
+impl ReadCompat for ColorType {}
+
+impl ReadWriteCompat for ColorType {}
+
 // Parses a color from a string. The only forms currently supported
 // are "#RRGGBB" and "#RRGGBBAA" where the red, green, blue, and alpha
 // portions are two hex digits. Even though this function takes a

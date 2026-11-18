@@ -1,6 +1,6 @@
 [package]
 name = "drmemd"
-version = "0.7.1"
+version = "0.8.0"
 authors = ["Rich Neswold <rich.neswold@gmail.com>"]
 edition = "2021"
 description = "Main process of the DrMem control system"
@@ -14,33 +14,37 @@ keywords = ["control-system", "automation"]
 maintenance = { status = "actively-developed" }
 
 [build-dependencies]
-cfgrammar = "0.14"
-lrlex = "0.14"
-lrpar = "0.14"
+cfgrammar = "0.15"
+lrlex = "0.15"
+lrpar = "0.15"
 
 [dependencies]
+cfgrammar.version = "0.15"
+cfgrammar.default-features = false
+
+chrono.workspace = true
+chrono.default-features = false
+chrono.features = ["clock"]
+
+clap.version = "4"
+clap.default-features = false
+clap.features = ["cargo", "std"]
+
+drmem-api = { path = "../drmem-api", version = "0.8" }
+
 futures.workspace = true
 futures.default-features = false
 futures.features = ["alloc", "std"]
 
-toml.workspace = true
-toml.features = ["parse"]
+lrlex.version = "0.15"
+lrlex.default-features = false
 
-tokio.workspace = true
-tokio.default-features = false
-tokio.features = ["rt-multi-thread", "time", "fs", "macros"]
+lrpar.version = "0.15"
+lrpar.default-features = false
 
-tokio-stream.workspace = true
-tokio-stream.default-features = false
-tokio-stream.features = ["net", "sync"]
-
-tracing.workspace = true
-tracing.default-features = false
-tracing.features = ["attributes"]
-
-tracing-subscriber.workspace = true
-tracing-subscriber.default-features = false
-tracing-subscriber.features = ["ansi"]
+palette.workspace = true
+palette.default-features = false
+palette.features = ["libm", "named", "named_from_str"]
 
 serde.workspace = true
 serde.default-features = false
@@ -50,36 +54,31 @@ serde_json.workspace = true
 serde_json.default-features = false
 serde_json.features = ["std"]
 
-clap.version = "4"
-clap.default-features = false
-clap.features = ["cargo", "std"]
+tokio.workspace = true
+tokio.default-features = false
+tokio.features = ["rt-multi-thread", "time", "fs", "macros"]
 
-chrono.workspace = true
-chrono.default-features = false
-chrono.features = ["clock"]
+tokio-stream.workspace = true
+tokio-stream.default-features = false
+tokio-stream.features = ["net", "sync"]
 
-palette.workspace = true
-palette.default-features = false
-palette.features = ["libm", "named", "named_from_str"]
+toml.workspace = true
+toml.features = ["parse"]
 
-drmem-api = { path = "../drmem-api", version = "0.8" }
+tracing.workspace = true
+tracing.default-features = false
+tracing.features = ["attributes"]
 
-cfgrammar.version = "0.14"
-cfgrammar.default-features = false
-
-lrlex.version = "0.14"
-lrlex.default-features = false
-
-lrpar.version = "0.14"
-lrpar.default-features = false
+tracing-subscriber.workspace = true
+tracing-subscriber.default-features = false
+tracing-subscriber.features = ["ansi"]
 
 [dev-dependencies]
+noop-waker = "0.1"
 
 tokio-stream.workspace = true
 tokio-stream.default-features = false
 tokio-stream.features = ["sync", "time"]
-
-noop-waker = "0.1"
 
 # This section defines the driver dependencies. Most drivers are
 # optional, but a few drivers define common devices for a `drmem`

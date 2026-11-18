@@ -10,16 +10,16 @@ resolver = "2"
 [workspace.dependencies]
 chrono = { version = "0.4", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std"] }
-toml = { version = "1" }
-tokio = { version = "1", default-features = false }
-tokio-stream = { version = "0.1", default-features = false }
-tracing = { version = "0.1", default-features = false, features = ["attributes"] }
-tracing-subscriber = { version = "0.3", default-features = false }
-serde = { version = "1", default-features = false, features = ["rc"] }
-serde_json = { version = "1", default-features = false }
 palette = { version = "0.7", default-features = false }
 reqwest = { version = "0.11", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde = { version = "1", default-features = false, features = ["rc"] }
+serde_json = { version = "1", default-features = false }
+tokio = { version = "1", default-features = false }
+tokio-stream = { version = "0.1", default-features = false }
+toml = { version = "1" }
+tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+tracing-subscriber = { version = "0.3", default-features = false }
 
 # Profiles used by all binaries and packages.
 
