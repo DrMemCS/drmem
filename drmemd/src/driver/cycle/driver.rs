@@ -160,14 +160,14 @@ impl<R: Reporter> driver::API<R> for Instance {
 
                 _ = timer.tick() => {
 
-		    // If the timeout occurs, update the state and set
-		    // the output to the inactive value.
+		            // If the timeout occurs, update the state and set
+		            // the output to the inactive value.
 
-		    if let Some(v) = self.time_expired() {
-			debug!("state {:?} : timeout occurred -- output {}",
-			       &self.state, v);
-			devices.d_output.report_update(v).await;
-		    }
+        		    if let Some(v) = self.time_expired() {
+		            	debug!("state {:?} : timeout occurred -- output {}",
+			                &self.state, v);
+			            devices.d_output.report_update(v).await;
+		            }
                 }
 
                 // Always look for settings. We're pattern matching
@@ -180,18 +180,17 @@ impl<R: Reporter> driver::API<R> for Instance {
                     let (reset, out) = self.update_state(b);
 
                     if reset {
-			timer.reset()
+			            timer.reset()
                     }
 
                     reply.ok(b);
 
-                    debug!("state {:?} : new input -> {}",
-			   &self.state, b);
+                    debug!("state {:?} : new input -> {}", &self.state, b);
 
                     devices.d_enable.report_update(b).await;
 
                     if let Some(out) = out {
-			devices.d_output.report_update(out.clone()).await;
+            			devices.d_output.report_update(out.clone()).await;
                     }
                 }
             }

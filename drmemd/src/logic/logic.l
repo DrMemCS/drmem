@@ -8,9 +8,9 @@
 \(                      "("
 \)                      ")"
 
-not                     "B_NOT"
-and                     "B_AND"
-or                      "B_OR"
+[Nn][Oo][Tt]            "B_NOT"
+[Aa][Nn][Dd]            "B_AND"
+[Oo][Rr]                "B_OR"
 
 [Ii][Ff]                "KW_IF"
 [Tt][Hh][Ee][Nn]        "KW_THEN"
@@ -29,8 +29,9 @@ or                      "B_OR"
 >                       "GT"
 \<                      "LT"
 
--?[0-9]+\.[0-9]*([eE]-?[0-9]+)? "FLT"
--?[0-9]+                "INT"
+[0-9]+\.[0-9]*([eE][-+]?[0-9]+)?|\.[0-9]+([eE][-+]?[0-9]+)?|[0-9]+[eE][-+]?[0-9]+ "FLT"
+2147483648              "MIN_INT"
+[0-9]+                  "INT"
 
 \+                      "ADD"
 -                       "SUB"
@@ -38,8 +39,8 @@ or                      "B_OR"
 /                       "DIV"
 %                       "REM"
 
-true                    "TRUE"
-false                   "FALSE"
+[Tt][Rr][Uu][Ee]        "TRUE"
+[Ff][Aa][Ll][Ss][Ee]    "FALSE"
 
 \{                      <+VAR>"LBRACE"
 <VAR>\}                 <-VAR>"RBRACE"
@@ -48,7 +49,7 @@ false                   "FALSE"
 
 \#			<+COLOR>;
 <COLOR>[0-9]+K(@[0-9]+%?)?	<-COLOR>"TEMPERATURE"
-<COLOR>[0-9a-fA-f]{3,8}     <-COLOR>"COLOR"
+<COLOR>[0-9a-fA-F]{3,8}|[a-zA-Z][0-9a-zA-Z]*  <-COLOR>"COLOR"
 
 [\t\n\r ]+ ;
 

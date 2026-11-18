@@ -144,50 +144,50 @@ impl Instance {
         let mut buf = [0u8; 500];
 
         #[rustfmt::skip]
-	tokio::select! {
-	    result = self.sock.recv(&mut buf) => {
-		match result {
-		    // The packet has to be at least 12 bytes so we
-		    // can use all parts of the header without
-		    // worrying about panicking.
+	    tokio::select! {
+	        result = self.sock.recv(&mut buf) => {
+		        match result {
+		            // The packet has to be at least 12 bytes so we
+		            // can use all parts of the header without
+		            // worrying about panicking.
 
-		    Ok(len) if len < 12 => {
-			warn!(
-			    "response from ntpd < 12 bytes -> only {} bytes",
-			    len
-			)
-		    }
+		            Ok(len) if len < 12 => {
+			            warn!(
+			                "response from ntpd < 12 bytes -> only {} bytes",
+			                len
+			            );
+		            }
 
-		    Ok(len) => {
-			let total = Instance::read_u16(&buf[10..=11]) as usize;
-			let expected_len = total + 12 + (4 - total % 4) % 4;
+		            Ok(len) => {
+			            let total = Instance::read_u16(&buf[10..=11]) as usize;
+			            let expected_len = total + 12 + (4 - total % 4) % 4;
 
-			// Make sure the incoming buffer is as large
-			// as the length field says it is (so we can
-			// safely access the entire payload.)
+            			// Make sure the incoming buffer is as large
+			            // as the length field says it is (so we can
+            			// safely access the entire payload.)
 
-			if expected_len == len {
-			    for ii in buf[12..len].chunks_exact(4) {
-				if (ii[2] & 0x7) == 6 {
-				    return Some(Instance::read_u16(
-					&ii[0..=1],
-				    ));
-				}
-			    }
-			} else {
-			    warn!(
-				"bad packet length -> expected {}, got {}",
-				expected_len, len
-			    );
-			}
-		    }
-		    Err(e) => error!("couldn't receive data -> {}", e),
-		}
-	    },
-	    _ = tokio::time::sleep(Duration::from_millis(1_000)) => {
-		warn!("timed-out waiting for reply to \"get synced host\" request")
+			            if expected_len == len {
+			                for ii in buf[12..len].chunks_exact(4) {
+				                if (ii[2] & 0x7) == 6 {
+				                    return Some(Instance::read_u16(&ii[0..=1]));
+				                }
+			                }
+			            } else {
+			                warn!(
+				                "bad packet length -> expected {}, got {}",
+				                expected_len, len
+			                );
+			            }
+		            }
+		            Err(e) => error!("couldn't receive data -> {}", e),
+		        }
+	        },
+	        _ = tokio::time::sleep(Duration::from_millis(1_000)) => {
+		        warn!(
+                    "timed-out waiting for reply to \"get synced host\" request"
+                );
+	        }
 	    }
-	}
 
         None
     }
@@ -224,102 +224,104 @@ impl Instance {
 
         loop {
             #[rustfmt::skip]
-	    tokio::select! {
-		result = self.sock.recv(&mut buf) => {
-		    match result {
-			// The packet has to be at least 12 bytes so
-			// we can use all parts of the header without
-			// worrying about panicking.
+	        tokio::select! {
+		        result = self.sock.recv(&mut buf) => {
+		            match result {
+			            // The packet has to be at least 12 bytes so
+			            // we can use all parts of the header without
+			            // worrying about panicking.
 
-			Ok(len) if len < 12 => {
-			    warn!("response from ntpd < 12 bytes -> {}", len);
-			    break;
-			}
+			            Ok(len) if len < 12 => {
+			                warn!("response from ntpd < 12 bytes -> {}", len);
+			                break;
+			            }
 
-			Ok(len) => {
-			    let offset = Instance::read_u16(&buf[8..=9]) as usize;
+			            Ok(len) => {
+			                let offset = Instance::read_u16(&buf[8..=9]) as usize;
 
-			    // We don't keep track of which of the
-			    // multiple packets we've already
-			    // received. Instead, we require the
-			    // packets are sent in order. This warning
-			    // has never been emitted.
+			                // We don't keep track of which of the
+            			    // multiple packets we've already
+			                // received. Instead, we require the
+            			    // packets are sent in order. This warning
+			                // has never been emitted.
 
-			    if offset != next_offset {
-				warn!("dropped packet (incorrect offset)");
-				break;
-			    }
+            			    if offset != next_offset {
+			                	warn!("dropped packet (incorrect offset)");
+            	    			break;
+            			    }
 
-			    let total = Instance::read_u16(&buf[10..=11]) as usize;
-			    let expected_len = total + 12 + (4 - total % 4) % 4;
+            			    let total = Instance::read_u16(&buf[10..=11]) as usize;
+            			    let expected_len = total + 12 + (4 - total % 4) % 4;
 
-			    // Make sure the incoming buffer is as
-			    // large as the length field says it is
-			    // (so we can safely access the entire
-			    // payload.)
+            			    // Make sure the incoming buffer is as
+			                // large as the length field says it is
+            			    // (so we can safely access the entire
+			                // payload.)
 
-			    if expected_len != len {
-				warn!(
-				    "bad packet length -> expected {}, got {}",
-				    expected_len, len
-				);
-				break;
-			    }
+            			    if expected_len != len {
+			                	warn!(
+                				    "bad packet length -> expected {}, got {}",
+				                    expected_len, len
+                				);
+				                break;
+            			    }
 
-			    // Make sure the reply's offset and total
-			    // won't push us past the end of our
-			    // buffer.
+			                // Make sure the reply's offset and total
+            			    // won't push us past the end of our
+            			    // buffer.
 
-			    if offset + total > payload.len() {
-				warn!(
-				    "payload too big (offset {}, total {}, target buf: {})",
-				    offset,
-				    total,
-				    payload.len()
-				);
-				break;
-			    }
+            			    if offset + total > payload.len() {
+			                	warn!(
+                				    "payload too big (offset {}, total {}, target buf: {})",
+				                    offset,
+                				    total,
+				                    payload.len()
+                				);
+				                break;
+            			    }
 
-			    // Update the next, expected offset.
+			                // Update the next, expected offset.
 
-			    next_offset += total;
+            			    next_offset += total;
 
-			    // Copy the fragment into the final buffer.
+			                // Copy the fragment into the final buffer.
 
-			    let dst_range = offset..offset + total;
-			    let src_range = 12..12 + total;
+            			    let dst_range = offset..offset + total;
+            			    let src_range = 12..12 + total;
 
-			    trace!(
-				"copying {} bytes into {} through {}",
-				dst_range.len(),
-				dst_range.start,
-				dst_range.end - 1
-			    );
+			                trace!(
+                				"copying {} bytes into {} through {}",
+                				dst_range.len(),
+                				dst_range.start,
+				                dst_range.end - 1
+            			    );
 
-			    payload[dst_range].clone_from_slice(&buf[src_range]);
+			                payload[dst_range].clone_from_slice(&buf[src_range]);
 
-			    // If this is the last packet, we can
-			    // process it. Convert the byte buffer to
-			    // text and decode it.
+            			    // If this is the last packet, we can
+			                // process it. Convert the byte buffer to
+            			    // text and decode it.
 
-			    if (buf[1] & 0x20) == 0 {
-				let payload = &payload[..next_offset];
+			                if (buf[1] & 0x20) == 0 {
+                				let payload = &payload[..next_offset];
 
-				return str::from_utf8(payload)
-				    .ok()
-				    .and_then(server::decode_info)
-			    }
-			}
-			Err(e) => {
-			    error!("couldn't receive data -> {}", e);
-			    break;
-			}
-		    }
-		},
-		_ = tokio::time::sleep(Duration::from_millis(1_000)) => {
-		    warn!("timed-out waiting for reply to \"get host info\" request")
-		}
-	    }
+				                return str::from_utf8(payload)
+                				    .ok()
+				                    .and_then(server::decode_info)
+            			    }
+			            }
+            			Err(e) => {
+			                error!("couldn't receive data -> {}", e);
+            			    break;
+			            }
+        		    }
+		        },
+	            _ = tokio::time::sleep(Duration::from_millis(1_000)) => {
+		            warn!(
+                        "timed-out waiting for reply to \"get host info\" request"
+                    );
+        		}
+	        }
         }
         None
     }

@@ -66,19 +66,20 @@ currently supported features:
   - A back-end which writes device information to a Redis server
 - A client API which uses GraphQL
 - Drivers which implement devices
-  - 6 built-in drivers
+  - 7 built-in drivers
     - Counting device
-	  - Cycling device
+ 	  - Cycling device
+	  - Integrator device
     - Latch device
-	  - Map device (maps ranges of integers to values)
+    - Map device (maps ranges of integers to values)
     - Memory devices
-	  - Timer device
+    - Timer device
   - 5 external drivers
     - Philips Hue (v2 bridge)
     - Weather Underground data
-	  - NTP daemon status
-	  - TP-Link support (tested with an HS440 Kasa light dimmer)
-	  - (Author's) custom sump pump monitor
+    - NTP daemon status
+    - TP-Link support (tested with an HS440 Kasa light dimmer)
+    - (Author's) custom sump pump monitor
 - A "logic block" module that lets you define logic so that control loops
   can be set up internally, instead of requiring external client applications
   to do the controlling.

@@ -16,6 +16,6 @@ mod weather_type;
 // Make top-level types available to driver writers.
 
 pub use colorbulb_type::ColorBulb;
-pub use dimmer_type::Dimmer;
+pub use dimmer_type::{Dimmer, DimmerProperty};
 pub use switch_type::{Switch, SwitchProperty};
 pub use weather_type::{Weather, WeatherConfig, WeatherUnits};

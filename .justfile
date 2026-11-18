@@ -8,7 +8,8 @@ test-api:
 	@echo "✅ Running units tests for drmem-api"; \
 	nice cargo test -p drmem-api
 
-_test-drivers: test-drv-ntp test-drv-sump test-drv-wu test-drv-tplink
+_test-drivers: test-drv-ntp test-drv-sump test-drv-wu test-drv-tplink \
+    test-drv-hue
 
 test-drv-ntp: test-api
 	@echo "✅ Running units tests for drmem-driver-ntp"; \
@@ -17,6 +18,10 @@ test-drv-ntp: test-api
 test-drv-sump: test-api
 	@echo "✅ Running units tests for drmem-driver-sump"; \
 	nice cargo test -p drmem-drv-sump
+
+test-drv-hue: test-api
+	@echo "✅ Running units tests for drmem-driver-hue"; \
+	nice cargo test -p drmem-drv-hue
 
 test-drv-tplink: test-api
 	@echo "✅ Running units tests for drmem-driver-tplink"; \

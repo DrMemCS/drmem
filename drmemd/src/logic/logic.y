@@ -62,7 +62,7 @@ BoolExpr -> Result<Expr>:
     ;
 
 OrExpr -> Result<Expr>:
-      AndExpr "B_OR" OrExpr { Ok(Expr::Or(
+      OrExpr "B_OR" AndExpr { Ok(Expr::Or(
 			    Box::new($1?),
 			    Box::new($3?)
 			  )) }
@@ -70,7 +70,7 @@ OrExpr -> Result<Expr>:
     ;
 
 AndExpr -> Result<Expr>:
-      CmpExpr "B_AND" AndExpr { Ok(Expr::And(
+      AndExpr "B_AND" CmpExpr { Ok(Expr::And(
 			    Box::new($1?),
 			    Box::new($3?)
 			  )) }
@@ -120,15 +120,15 @@ NumExpr -> Result<Expr>:
     ;
 
 AddSubExpr -> Result<Expr>:
-      MulDivExpr "ADD" AddSubExpr { Ok(Expr::Add(Box::new($1?), Box::new($3?))) }
-    | MulDivExpr "SUB" AddSubExpr { Ok(Expr::Sub(Box::new($1?), Box::new($3?))) }
+      AddSubExpr "ADD" MulDivExpr { Ok(Expr::Add(Box::new($1?), Box::new($3?))) }
+    | AddSubExpr "SUB" MulDivExpr { Ok(Expr::Sub(Box::new($1?), Box::new($3?))) }
     | MulDivExpr { $1 }
     ;
 
 MulDivExpr -> Result<Expr>:
-      Expr "MUL" MulDivExpr { Ok(Expr::Mul(Box::new($1?), Box::new($3?))) }
-    | Expr "DIV" MulDivExpr { Ok(Expr::Div(Box::new($1?), Box::new($3?))) }
-    | Expr "REM" MulDivExpr { Ok(Expr::Rem(Box::new($1?), Box::new($3?))) }
+      MulDivExpr "MUL" Expr { Ok(Expr::Mul(Box::new($1?), Box::new($3?))) }
+    | MulDivExpr "DIV" Expr { Ok(Expr::Div(Box::new($1?), Box::new($3?))) }
+    | MulDivExpr "REM" Expr { Ok(Expr::Rem(Box::new($1?), Box::new($3?))) }
     | Expr { $1 }
     ;
 
@@ -138,6 +138,8 @@ Expr -> Result<Expr>:
 
 Factor -> Result<Expr>:
       "B_NOT" Factor { Ok(Expr::Not(Box::new($2?))) }
+    | "SUB" "MIN_INT" { Ok(Expr::Lit(device::Value::Int(i32::MIN))) }
+    | "SUB" Factor { negate($2?) }
     | "(" TopExpr ")" { $2 }
     | "KW_COALESCE" "(" ExprList ")" { Ok(Expr::Coalesce($3?)) }
     | "KW_BLEND" "(" ExprList ")" { Ok(Expr::Blend($3?)) }
@@ -145,7 +147,7 @@ Factor -> Result<Expr>:
       {
         Ok(Expr::WithAlpha(Box::new($3?), Box::new($5?)))
       }
-    | "KW_BRIGHTNESS" "(" Expr ")"
+    | "KW_BRIGHTNESS" "(" TopExpr ")"
       {
         Ok(Expr::Brightness(Box::new($3?)))
       }
@@ -193,7 +195,7 @@ Factor -> Result<Expr>:
 		    Ok(v) =>
 		        Ok(Expr::Lit(device::Value::Color(device::ColorType::Rgba { color: v.with_alpha(255u8) }))),
 		    Err(_) =>
-		        match named::from_str(s) {
+		        match named::from_str(&s.to_ascii_lowercase()) {
 		            Some(v) => Ok(Expr::Lit(device::Value::Color(
                         device::ColorType::Rgba { color:
 		                    Srgb::<f32>::from_format(v)
@@ -286,6 +288,27 @@ fn parse_int(s: &str) -> Result<Expr> {
 	.map_err(|_| Error::ParseError(
 	     format!("{s} cannot be represented as an i32")
 	))
+}
+
+// Negates an expression. Literals are folded so that negative numbers
+// remain literals.
+
+fn negate(e: Expr) -> Result<Expr> {
+    match e {
+        Expr::Lit(device::Value::Int(v)) => v
+            .checked_neg()
+            .map(|v| Expr::Lit(device::Value::Int(v)))
+            .ok_or_else(|| Error::ParseError(
+                format!("-({v}) cannot be represented as an i32")
+            )),
+        Expr::Lit(device::Value::Flt(v)) => {
+            Ok(Expr::Lit(device::Value::Flt(-v)))
+        }
+        e => Ok(Expr::Sub(
+            Box::new(Expr::Lit(device::Value::Int(0))),
+            Box::new(e),
+        )),
+    }
 }
 
 fn parse_flt(s: &str) -> Result<Expr> {

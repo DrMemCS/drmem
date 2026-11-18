@@ -425,47 +425,47 @@ impl Node {
             };
 
             #[rustfmt::skip]
-	    tokio::select! {
-		biased;
+	        tokio::select! {
+		        biased;
 
-		// If we need the solar channel, wait for the next
-		// update.
+        		// If we need the solar channel, wait for the next
+		        // update.
 
-		v = wait_for_solar => {
-		    match v {
-			Ok(v) => solar = Some(v),
-			Err(broadcast::error::RecvError::Lagged(_)) => {
-			    warn!("not handling solar info fast enough");
-			    continue
-			}
-			Err(broadcast::error::RecvError::Closed) => {
-			    error!("solar info channel is closed");
-			    return Err(drmem_api::Error::OperationError(
-				"solar channel closed".into()
-			    ));
-			}
-		    }
-		}
+		        v = wait_for_solar => {
+		            match v {
+			            Ok(v) => solar = Some(v),
+			            Err(broadcast::error::RecvError::Lagged(_)) => {
+			                warn!("not handling solar info fast enough");
+			                continue;
+			            }
+			            Err(broadcast::error::RecvError::Closed) => {
+			                error!("solar info channel is closed");
+			                return Err(drmem_api::Error::OperationError(
+				                "solar channel closed".into()
+			                ));
+			            }
+		            }
+		        }
 
-		// If we need the time channel, wait for the next
-		// second.
+        		// If we need the time channel, wait for the next
+		        // second.
 
-		Some(v) = wait_for_time => {
-		    time = v;
-		}
+		        Some(v) = wait_for_time => {
+		            time = v;
+		        }
 
-		// Wait for the next reading to arrive. All the
-		// incoming streams have been combined into one and
-		// the returned value is a pair consisting of an index
-		// and the actual reading.
+        		// Wait for the next reading to arrive. All the
+		        // incoming streams have been combined into one and
+        		// the returned value is a pair consisting of an index
+        		// and the actual reading.
 
-		Some((idx, reading)) = self.in_stream.next() => {
-		    // Save the reading in our array for future
-		    // recalculations.
+		        Some((idx, reading)) = self.in_stream.next() => {
+		            // Save the reading in our array for future
+		            // recalculations.
 
-		    self.inputs[idx] = Some(reading.value);
-		}
-	    }
+        		    self.inputs[idx] = Some(reading.value);
+		        }
+	        }
 
             // Calculate each expression of the `defs` array. Store
             // each expression's result in the associated `input`
@@ -691,20 +691,20 @@ mod test {
 
                 #[rustfmt::skip]
                 tokio::select! {
-		    // Look for the signal from the unit test to tell
-		    // us to exit.
+		            // Look for the signal from the unit test to tell
+		            // us to exit.
 
                     _ = rx_stop => (),
 
-		    // If the Node exits, it's due to an error. Report
-		    // the error.
+        		    // If the Node exits, it's due to an error. Report
+		            // the error.
 
                     v = node =>
-			return match v {
+			            return match v {
                             Ok(result) => result.map(|_| false),
                             Err(e) => Err(Error::OperationError(
-				format!("logic block panicked: {}", &e)
-			    ))
+				                format!("logic block panicked: {}", &e)
+			                ))
 			}
                 }
 

@@ -3,7 +3,7 @@
 /// config structure needs to be as general as possible. A
 /// `DriverConfig` type is a map with `String` keys and `toml::Value`
 /// values.
-use crate::{types::Error, Result};
+use crate::{types::error::Error, Result};
 use serde::de::DeserializeOwned;
 use std::ops::Deref;
 use toml::value::{Table, Value};
